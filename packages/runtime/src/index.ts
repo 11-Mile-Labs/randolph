@@ -1,5 +1,5 @@
 import { assertWorkspaceIdentity, workspaceIdentity } from './workspace-identity.js';
-import { cleanupReconciliationReason, readExecutionOrigin, type ExecutionOrigin } from './execution-origin.js';
+import { readExecutionOrigin, type ExecutionOrigin } from './execution-origin.js';
 import { parseSetupProposal, setupPrompt } from './project-setup.js';
 import { readProjectContext, writeProjectContext, parseProjectContext, type ProjectContextSnapshot } from './project-context.js';
 import { AppSettings, type AppSettingsSnapshot, type SaveAppSettingsInput, type SaveGlobalMemoryInput } from './app-settings.js';
@@ -18,9 +18,11 @@ import type { PushOptions } from './push.js';
 import { Reviews } from './reviews.js';
 import { Checkpoints, type CheckpointInput, type CheckpointRestore } from './checkpoints.js';
 import { DelegationCommands } from './delegation-commands.js';
+import { DelegationControls } from './delegation-control.js';
 import { assertDelegationBasis } from './delegation-basis.js';
 import type { DelegationAvailability } from './delegation-plan.js';
 import type { DelegationSnapshot, DelegationRevisionInput, ReviseDelegationInput, SaveDelegationPresetInput } from './delegation-contracts.js';
+import { AdapterRunFailure } from './contracts.js';
 import type { ApproveProjectSetupInput, InspectProjectInput, ProjectSetupSnapshot, AdapterEvent, ApproveReviewInput, ChatEventsInput, ChatEventsResult, Conversation, ConversationModeInput, ConversationSelectionInput, HarnessAdapter, HarnessId, HarnessInfo, HarnessInstallation, HarnessSelection, LinkedRunResult, Project, ProjectHarnessSettings, RerunCheckpointInput, RestartCheckpointInput, ReviewRecord, Run, SaveProjectDefaultsInput, SendInput, WorkspaceSnapshot } from './contracts.js';
 export type * from './contracts.js';
 export { Store } from './store.js';
@@ -117,6 +119,7 @@ export class Runtime {
   private readonly integrations: Integrations;
   private readonly memory: ProjectMemory;
   private readonly delegation: DelegationCommands;
+  private readonly delegationControls: DelegationControls;
   private readonly executionOrigin: ExecutionOrigin | undefined;
   private readonly active = new Map<string, { controller: AbortController; done: Promise<void>; run: Run }>();
   private readonly listeners = new Set<() => void>();
@@ -156,8 +159,10 @@ export class Runtime {
       },
     }, () => this.changed());
     this.delegation.records.reconcileUnfinishedSessions();
+    this.delegationControls = new DelegationControls(this.store);
+    this.delegationControls.reconcileOnReopen();
     for (const run of this.store.runs()) {
-      if (activeStatuses.has(run.status) || (!run.cleanupUnconfirmed && this.delegation.records.sessions(run.id).some(session => session.state === 'cleanup-unconfirmed'))) {
+      if (activeStatuses.has(run.status) || (!run.cleanupUnconfirmed && (this.delegation.records.sessions(run.id).some(session => session.state === 'cleanup-unconfirmed') || this.delegationControls.read(run.id)?.activities.some(activity => activity.state === 'cleanup-unconfirmed')))) {
         this.store.transaction(() => {
           run.status = 'interrupted'; run.cleanupUnconfirmed = true; run.updatedAt = now();
           run.error = 'The application ended during this run. It has not been restarted; previous process cleanup could not be verified.';
@@ -282,7 +287,7 @@ export class Runtime {
     const runs = this.store.runs().filter(run => conversations.has(run.conversationId));
     const busy = this.setupAdmission.has(projectId) || runs.some(run => activeStatuses.has(run.status) || run.cleanupUnconfirmed);
     const uncertain = runs.filter(run => run.cleanupUnconfirmed || run.status === 'stop-unconfirmed');
-    const cleanupReason = uncertain.map(run => cleanupReconciliationReason(run.executionOrigin, this.executionOrigin)).find(reason => reason !== null);
+    const cleanupReason = uncertain.map(run => this.delegation.records.setupSessionCleanupReason(run.id, this.executionOrigin)).find(reason => reason !== null);
     const cleanup = uncertain.length ? { canReconcile: !this.setupAdmission.has(projectId) && !runs.some(run => this.active.has(run.id)) && !cleanupReason, reason: cleanupReason ?? 'A later boot on the original Mac confirms that the previous inspection processes have exited. Verify cleanup before starting another inspection.' } : undefined;
     return { context, cleanup, inspections: runs.map(run => {
       let proposal; let error;
@@ -312,8 +317,9 @@ export class Runtime {
       this.store.transaction(() => {
         for (const { run } of snapshot.inspections) {
           if (!run.cleanupUnconfirmed && run.status !== 'stop-unconfirmed') continue;
-          const reason = cleanupReconciliationReason(run.executionOrigin, this.executionOrigin);
+          const reason = this.delegation.records.setupSessionCleanupReason(run.id, this.executionOrigin);
           if (reason) throw new Error(reason);
+          this.delegation.records.reconcileProjectSetupSessions(run.id, this.executionOrigin);
           run.status = 'interrupted'; run.cleanupUnconfirmed = false; run.updatedAt = now();
           run.error = 'Previous inspection execution ended with an earlier boot on this Mac. No work has been restarted.';
           this.store.putRun(run);
@@ -604,21 +610,70 @@ export class Runtime {
     } finally { this.admission.delete(conversation.id); }
   }
   private async execute(run: Run, controller: AbortController): Promise<void> {
+    let sessionId: string | undefined;
+    let bound = false;
+    let sessionSettled = false;
+    let sessionCleanupConfirmed = false;
+    let adapterInvoked = false;
+    const settleSession = (status: 'completed' | 'failed' | 'interrupted', cleanupConfirmed: boolean, cleanupEvidence?: Record<string, unknown>, error?: string): void => {
+      if (!sessionId || sessionSettled) return;
+      this.delegation.records.finishSession({ runId: run.id, sessionId, status, cleanupConfirmed, ...(cleanupConfirmed && cleanupEvidence ? { cleanupEvidence } : {}), ...(error ? { error } : {}) });
+      sessionSettled = true;
+      sessionCleanupConfirmed = cleanupConfirmed;
+    };
+    const onEvent = (event: AdapterEvent): void => {
+      if (event.type === 'session.turn-started') {
+        const threadId = typeof event.data?.threadId === 'string' ? event.data.threadId : undefined;
+        const turnId = typeof event.data?.turnId === 'string' ? event.data.turnId : undefined;
+        if (sessionId && threadId && turnId) { this.delegation.records.bindSession({ runId: run.id, sessionId, threadId, turnId }); bound = true; }
+      }
+      this.event(run, event);
+    };
     try {
+      if (!run.executable || !run.executableVersion) throw new Error('Run lacks a frozen native executable identity.');
+      sessionId = randomUUID();
+      this.delegation.records.recordSession({
+        id: sessionId, runId: run.id, role: 'main', harness: run.harness ?? 'codex', executable: run.executable, executableVersion: run.executableVersion, model: run.model, effort: run.effort, allowedTools: [], state: 'dispatch-intent',
+        ...(run.executionOrigin ? { origin: structuredClone(run.executionOrigin) } : {}),
+      });
       const harness = run.harness ?? 'codex';
       this.event(run, { type: 'run.started', summary: `Connecting to ${harness}`, data: { harness, executable: run.executable, executableVersion: run.executableVersion } });
       const messages = run.recoveryMessages?.map(message => ({ ...message })) ?? this.store.messages(run.conversationId).map(({ role, text }) => ({ role, text }));
       if (run.memory?.text) messages.unshift({ role: 'user', text: run.memory.text });
       if (run.projectContext?.value.purpose) messages.unshift({ role: 'user', text: 'Approved project context for this run (JSON; does not override execution or approval policy):\n' + JSON.stringify(run.projectContext) });
       if (run.workspaceIdentity) assertWorkspaceIdentity(run.workspace, run.workspaceIdentity);
-      const result = await this.adapterForRun(run).run({ workspaceIdentity: run.workspaceIdentity, executable: run.executable, executableVersion: run.executableVersion, workspace: run.workspace, model: run.model, effort: run.effort, executionMode: run.executionMode, messages, signal: controller.signal, onEvent: event => this.event(run, event) });
-      this.finish(run, result.status, result.status === 'stop-unconfirmed' ? 'The harness stopped responding; cleanup could not be confirmed.' : undefined);
-      if (result.status === 'completed' && run.checkpoints?.length) {
+      const adapter = this.adapterForRun(run);
+      adapterInvoked = true;
+      const result = await adapter.run({ workspaceIdentity: run.workspaceIdentity, executable: run.executable, executableVersion: run.executableVersion, workspace: run.workspace, model: run.model, effort: run.effort, executionMode: run.executionMode, messages, signal: controller.signal, onEvent });
+      if (result.status === 'completed' && bound) settleSession('completed', true, { adapterStatus: result.status });
+      else if (result.status === 'interrupted') settleSession('interrupted', true, { adapterStatus: result.status });
+      else if (result.status === 'completed') settleSession('failed', true, { adapterStatus: result.status }, 'Native adapter completed without a registered thread and turn identity.');
+      else settleSession('failed', false, undefined, 'Native cleanup could not be confirmed.');
+      const cleanupUnconfirmed = result.status === 'stop-unconfirmed';
+      if (cleanupUnconfirmed) {
+        run.cleanupUnconfirmed = true;
+        this.finish(run, 'stop-unconfirmed', 'The harness stopped responding; cleanup could not be confirmed.');
+      } else if (result.status === 'completed' && !bound) this.finish(run, 'failed', 'Native adapter completed without a registered thread and turn identity.');
+      else this.finish(run, result.status);
+      if (result.status === 'completed' && bound && run.checkpoints?.length) {
         try { this.checkpoints.capture(run, 'completed-turn'); }
         catch (cause) { this.checkpoints.failed(run, cause); }
       }
     } catch (error) {
-      this.finish(run, 'failed', error instanceof Error ? error.message : 'Harness failed.');
+      const message = error instanceof Error ? error.message : 'Harness failed.';
+      const trustedFailure = error instanceof AdapterRunFailure;
+      const confirmedBeforeDispatch = !adapterInvoked;
+      const confirmedSessionCleanup = sessionSettled && sessionCleanupConfirmed;
+      try {
+        if (trustedFailure) settleSession('failed', true, error.cleanupEvidence, message);
+        else if (confirmedBeforeDispatch) settleSession('failed', true, { dispatch: 'not-invoked' }, message);
+        else settleSession('failed', false, undefined, message);
+      } catch { /* The run failure below remains authoritative. */ }
+      if (trustedFailure || confirmedBeforeDispatch || confirmedSessionCleanup) this.finish(run, 'failed', message);
+      else {
+        run.cleanupUnconfirmed = true;
+        this.finish(run, 'stop-unconfirmed', `${message} Process cleanup could not be confirmed.`);
+      }
     } finally { this.active.delete(run.id); this.changed(); }
   }
   private event(run: Run, event: AdapterEvent): void {

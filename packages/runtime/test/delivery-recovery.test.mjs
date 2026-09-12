@@ -31,8 +31,8 @@ async function fixture(t, { cleanupVerified = true } = {}) {
   const seed = git(root, ['rev-parse', 'HEAD']);
   const calls = { runs: 0, checks: 0 };
   const adapter = {
-    async discover() { return { available: true, authenticated: true, executionModes: ['read-only', 'code'], models: [{ id: 'fixture', name: 'Fixture', efforts: ['low'], defaultEffort: 'low' }] }; },
-    async run(input) { calls.runs++; writeFileSync(join(input.workspace, 'value.txt'), 'after\n'); return { status: 'completed' }; },
+    async discover() { return { available: true, authenticated: true, executable: '/fixture-codex', version: 'fixture-1', executionModes: ['read-only', 'code'], models: [{ id: 'fixture', name: 'Fixture', efforts: ['low'], defaultEffort: 'low' }] }; },
+    async run(input) { calls.runs++; input.onEvent({ type: 'session.turn-started', summary: 'fixture turn established', data: { threadId: 'delivery-recovery-thread', turnId: `delivery-recovery-turn-${calls.runs}` } }); writeFileSync(join(input.workspace, 'value.txt'), 'after\n'); return { status: 'completed' }; },
     async runCommand() { calls.checks++; return { exitCode: 0, output: 'fixture passed', truncated: false, cleanupVerified }; },
   };
   const dataRoot = join(temporary, 'data');
@@ -148,7 +148,8 @@ test('schema v3 adds delegation records while preserving existing v1 history and
     assert.deepEqual(snapshot.messages, [message]);
     assert.deepEqual(snapshot.events, [{ ...event, sequence: 7 }]);
     assert.deepEqual(snapshot.reviews, []);
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 3);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 4);
+    assert.ok(store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='delegation_controls'").get());
     store.append(run, 'fixture.after-migration', 'New event');
     assert.equal(store.events(run.id).at(-1).sequence, 8);
   } finally { store.close(); }

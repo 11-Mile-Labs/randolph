@@ -7,7 +7,7 @@ import test from 'node:test';
 import { Runtime } from '../dist/index.js';
 import { prepareWorkspace } from '../dist/workspace.js';
 
-const info = { available: true, authenticated: true, version: 'fixture', executionModes: ['read-only', 'code'], models: [{ id: 'fixture', name: 'Fixture', efforts: ['low'], defaultEffort: 'low' }] };
+const info = { executable: '/fixture-codex', available: true, authenticated: true, version: 'fixture', executionModes: ['read-only', 'code'], models: [{ id: 'fixture', name: 'Fixture', efforts: ['low'], defaultEffort: 'low' }] };
 function git(root, ...args) { return execFileSync('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-C', root, ...args], { encoding: 'utf8' }).trim(); }
 function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'randolph-checkpoints-'))), projectRoot = join(root, 'project'), data = join(root, 'data');
@@ -18,7 +18,7 @@ async function settle(runtime) { for (let i = 0; i < 500 && runtime.hasActiveWor
 
 test('automatic checkpoints retain both boundaries, survive source deletion, and restore without executing or changing history', async t => {
   const paths = fixture(t); let calls = 0;
-  const adapter = { discover: async () => info, run: async input => { calls++; writeFileSync(join(input.workspace, 'file.txt'), 'completed\n'); writeFileSync(join(input.workspace, 'binary.dat'), Buffer.from([0, 255, 10])); input.onEvent({ type: 'message.delta', summary: 'reply', data: { messageId: 'reply', text: 'Completed the fixture.' } }); return { status: 'completed' }; } };
+  const adapter = { discover: async () => info, run: async input => { calls++; input.onEvent({ type: 'session.turn-started', summary: 'fixture turn established', data: { threadId: 'checkpoint-thread', turnId: `checkpoint-turn-${calls}` } }); writeFileSync(join(input.workspace, 'file.txt'), 'completed\n'); writeFileSync(join(input.workspace, 'binary.dat'), Buffer.from([0, 255, 10])); input.onEvent({ type: 'message.delta', summary: 'reply', data: { messageId: 'reply', text: 'Completed the fixture.' } }); return { status: 'completed' }; } };
   const runtime = new Runtime(adapter, paths.data), project = runtime.addProject(paths.projectRoot), conversation = runtime.createConversation(project.id);
   await runtime.setExecutionMode({ conversationId: conversation.id, executionMode: 'code' });
   const started = await runtime.send({ conversationId: conversation.id, text: 'Complete the fixture.' }); await settle(runtime);
@@ -38,7 +38,7 @@ test('automatic checkpoints retain both boundaries, survive source deletion, and
 
 test('an unsupported starting snapshot blocks native dispatch and retains a visible failure', async t => {
   const paths = fixture(t); let calls = 0;
-  const runtime = new Runtime({ discover: async () => info, run: async () => { calls++; return { status: 'completed' }; } }, paths.data); t.after(() => runtime.close());
+  const runtime = new Runtime({ discover: async () => info, run: async input => { calls++; input.onEvent({ type: 'session.turn-started', summary: 'fixture turn established', data: { threadId: 'empty-folder-thread', turnId: `empty-folder-turn-${calls}` } }); return { status: 'completed' }; } }, paths.data); t.after(() => runtime.close());
   const project = runtime.addProject(paths.projectRoot), conversation = runtime.createConversation(project.id);
   await runtime.setExecutionMode({ conversationId: conversation.id, executionMode: 'code' });
   const workspace = prepareWorkspace(project.root, conversation.id);
@@ -51,7 +51,7 @@ test('an unsupported starting snapshot blocks native dispatch and retains a visi
 
 test('root folders show unsupported file recovery while Code mode refuses dispatch', async t => {
   const paths = fixture(t), empty = join(paths.root, 'empty'); mkdirSync(empty); git(empty, 'init', '-b', 'main'); let calls = 0;
-  const runtime = new Runtime({ discover: async () => info, run: async () => { calls++; return { status: 'completed' }; } }, paths.data); t.after(() => runtime.close());
+  const runtime = new Runtime({ discover: async () => info, run: async input => { calls++; input.onEvent({ type: 'session.turn-started', summary: 'fixture turn established', data: { threadId: 'empty-folder-thread', turnId: `empty-folder-turn-${calls}` } }); return { status: 'completed' }; } }, paths.data); t.after(() => runtime.close());
   const project = runtime.addProject(empty), conversation = runtime.createConversation(project.id);
   await runtime.setExecutionMode({ conversationId: conversation.id, executionMode: 'code' });
   await assert.rejects(runtime.send({ conversationId: conversation.id, text: 'No initial commit yet.' })); assert.equal(calls, 0);

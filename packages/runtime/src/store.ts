@@ -12,8 +12,8 @@ export class Store {
     this.db = new DatabaseSync(join(root, 'app.sqlite'));
     chmodSync(join(root, 'app.sqlite'), 0o600);
     const version = Number((this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version);
-    if (version > 3) { this.db.close(); throw new Error('This data directory was created by a newer Randolph version.'); }
-    if (version === 3 && !this.tableExists('projects')) { this.db.close(); throw new Error('This Randolph database is corrupt.'); }
+    if (version > 4) { this.db.close(); throw new Error('This data directory was created by a newer Randolph version.'); }
+    if (version >= 3 && !this.tableExists('projects')) { this.db.close(); throw new Error('This Randolph database is corrupt.'); }
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, root TEXT UNIQUE NOT NULL, document TEXT NOT NULL);
@@ -33,6 +33,10 @@ export class Store {
       CREATE INDEX IF NOT EXISTS delegation_plans_run ON delegation_plans(run_id, revision);
       CREATE INDEX IF NOT EXISTS delegation_sessions_run ON delegation_sessions(run_id);
       PRAGMA user_version=3;
+      COMMIT;`);
+    if (version < 4) this.db.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS delegation_controls (run_id TEXT PRIMARY KEY REFERENCES runs(id), authorization_id TEXT NOT NULL REFERENCES delegation_authorizations(id), document TEXT NOT NULL);
+      PRAGMA user_version=4;
       COMMIT;`);
   }
   private tableExists(name: string): boolean { return Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)); }

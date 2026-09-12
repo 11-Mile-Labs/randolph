@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import { homedir } from 'node:os';
 import { CodexAdapter } from '../dist/index.js';
+import { Runtime } from '@randolph/runtime';
+import { AdapterRunFailure } from '@randolph/runtime/contracts';
+import { DelegationRecords } from '../../runtime/dist/delegation-records.js';
+
+function git(root, args) {
+  execFileSync('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-C', root, ...args], { stdio: 'ignore' });
+}
 
 function fakeChild({ accountType = 'chatgpt', modelId = 'gpt-test', delayInitialize = 0, turnStatus = 'completed', invalid = false, threadResponse, notifications = [], beforeThreadResponse = () => {}, beforeTurnResponse = () => {}, commandResult = { exitCode: 0, stdout: '', stderr: '' }, commandOutput = 'checks passed\n', commandDelay = 0, beforeResponse = () => {} } = {}) {
   const child = new EventEmitter();
@@ -181,7 +189,11 @@ test('run closes native event admission as soon as the caller cancels', async ()
 });
 
 test('failed turns and malformed transport fail the run', async () => {
-  await assert.rejects(adapterFor([fakeChild({ turnStatus: 'failed' })]).run(runInput(new AbortController().signal)), /turn failed/);
+  await assert.rejects(adapterFor([fakeChild({ turnStatus: 'failed' })]).run(runInput(new AbortController().signal)), error => {
+    assert.ok(error instanceof AdapterRunFailure);
+    assert.deepEqual(error.cleanupEvidence, { processTermination: 'confirmed' });
+    return /turn failed/.test(error.message);
+  });
   await assert.rejects(adapterFor([fakeChild({ invalid: true })]).run(runInput(new AbortController().signal)), /invalid JSON|Expected property/);
 });
 
@@ -424,8 +436,36 @@ test('explicit CLI discovery and execution use the selected copy instead of the 
 test('an executable changed after admission cannot dispatch a run', async () => {
   let launched = false;
   const adapter = new CodexAdapter({ executable: '/selected/codex', execFile: () => 'codex-cli changed', spawn: () => { launched = true; return fakeChild(); } });
-  await assert.rejects(adapter.run({ ...runInput(new AbortController().signal), executable: '/selected/codex', executableVersion: 'codex-cli admitted' }), /changed|version/i);
+  await assert.rejects(adapter.run({ ...runInput(new AbortController().signal), executable: '/selected/codex', executableVersion: 'codex-cli admitted' }), error => {
+    assert.ok(error instanceof AdapterRunFailure);
+    assert.deepEqual(error.cleanupEvidence, { dispatch: 'not-invoked' });
+    return /changed|version/i.test(error.message);
+  });
   assert.equal(launched, false);
+});
+
+test('a Codex version drift fails the Runtime run with confirmed pre-dispatch cleanup', async t => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'randolph-codex-runtime-drift-')));
+  const projectRoot = join(root, 'project'); mkdirSync(projectRoot);
+  git(projectRoot, ['init', '-b', 'main']); writeFileSync(join(projectRoot, 'README.md'), 'fixture\n'); git(projectRoot, ['add', 'README.md']); git(projectRoot, ['commit', '-m', 'fixture']);
+  let probes = 0, launches = 0;
+  const adapter = new CodexAdapter({
+    executable: '/fixture/codex',
+    execFile: () => ++probes === 1 ? 'codex-cli 0.149.0' : 'codex-cli drifted',
+    spawn: () => { launches += 1; return fakeChild(); },
+  });
+  const runtime = new Runtime(adapter, join(root, 'data'));
+  t.after(async () => { await runtime.close(); rmSync(root, { recursive: true, force: true }); });
+  const project = runtime.addProject(projectRoot), conversation = runtime.createConversation(project.id);
+  const run = await runtime.send({ conversationId: conversation.id, text: 'Validate drift handling.' });
+  for (let i = 0; i < 100 && runtime.hasActiveWork(); i += 1) await new Promise(resolve => setTimeout(resolve, 5));
+  const persisted = runtime.snapshot().runs.find(item => item.id === run.id);
+  const [session] = new DelegationRecords(runtime.store).sessions(run.id);
+  assert.equal(launches, 1);
+  assert.equal(persisted.status, 'failed');
+  assert.equal(persisted.cleanupUnconfirmed, undefined);
+  assert.equal(session.state, 'failed');
+  assert.deepEqual(session.cleanupEvidence, { dispatch: 'not-invoked' });
 });
 
 
@@ -469,9 +509,11 @@ test('application tools reject wrong identities, names, namespaces and malformed
 
 test('application tools stay absent by default, require their verified version, and preserve native approval denial', async () => {
   const ordinary = fakeChild({ notifications: [appCall()] });
-  await adapterFor([ordinary]).run(runInput(new AbortController().signal));
+  const events = [];
+  await adapterFor([ordinary]).run(runInput(new AbortController().signal, events));
   assert.equal(ordinary.requests.find(request => request.method === 'thread/start').params.dynamicTools, undefined);
   assert.equal(ordinary.replies[0].error.code, -32601);
+  assert.deepEqual(events.find(event => event.type === 'session.turn-started')?.data, { threadId: 'thread-1', turnId: 'turn-1' });
   const child = fakeChild();
   await assert.rejects(adapterFor([child]).run({ ...runInput(new AbortController().signal), applicationTools: { definitions: [appToolDefinition], onRequest() { throw new Error('must not run'); } } }), /0.154.0|application.tool/i);
   assert.equal(child.requests.length, 0);

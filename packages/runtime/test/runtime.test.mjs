@@ -6,8 +6,10 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { Runtime, Store } from '../dist/index.js';
+import { AdapterRunFailure } from '../dist/contracts.js';
 
 const harnessInfo = {
+  executable: '/fixture-codex',
   available: true,
   authenticated: true,
   version: 'test-version',
@@ -42,7 +44,9 @@ class FakeHarnessAdapter {
 
   async run(input) {
     this.runCalls.push(input);
-    return this.runImpl(input, this.runCalls.length - 1);
+    const result = await this.runImpl(input, this.runCalls.length - 1);
+    if (result.status !== 'stop-unconfirmed') input.onEvent({ type: 'session.turn-started', summary: 'fixture turn established', data: { threadId: `fixture-thread-${this.runCalls.length}`, turnId: `fixture-turn-${this.runCalls.length}` } });
+    return result;
   }
 }
 
@@ -224,7 +228,8 @@ test('a native event append failure rolls back that event and fails the run in S
   const paths = await fixture(t);
   const adapter = new FakeHarnessAdapter({
     run: async input => {
-      input.onEvent({ type: 'native.test', summary: 'must be durable' });
+      try { input.onEvent({ type: 'native.test', summary: 'must be durable' }); }
+      catch (error) { throw new AdapterRunFailure(error.message, { fixtureProcesses: 'none-launched' }); }
       return { status: 'completed' };
     },
   });
@@ -339,7 +344,7 @@ test('project executable choice binds new runs and later setting changes cannot 
   const adapter = {
     async installations() { return [{ executable: '/cli/one' }, { executable: '/cli/two' }]; },
     async discover(executable) { return { ...harnessInfo, executable: executable ?? '/cli/default', executionModes: ['read-only', 'code'] }; },
-    async run(input) { inputs.push(input); await writeFile(join(input.workspace, 'README.md'), 'changed'); return { status: 'completed' }; },
+    async run(input) { inputs.push(input); input.onEvent({ type: 'session.turn-started', summary: 'fixture turn established', data: { threadId: 'executable-choice-thread', turnId: `executable-choice-turn-${inputs.length}` } }); await writeFile(join(input.workspace, 'README.md'), 'changed'); return { status: 'completed' }; },
     async runCommand(input) { commands.push(input); return { exitCode: 0, output: 'passed', truncated: false, cleanupVerified: true }; },
   };
   const runtime = new Runtime(adapter, dataRoot); t.after(() => runtime.close());

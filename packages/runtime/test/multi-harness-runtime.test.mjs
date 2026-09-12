@@ -50,6 +50,7 @@ function adapter(harness, { code = false, write = false, status = 'completed' } 
     },
     async run(input) {
       calls.push(input);
+      input.onEvent({ type: 'session.turn-started', summary: 'fixture turn established', data: { threadId: `${harness}-thread-${calls.length}`, turnId: `${harness}-turn-${calls.length}` } });
       if (write) await writeFile(join(input.workspace, 'README.md'), `${harness} changed\n`);
       return { status };
     },

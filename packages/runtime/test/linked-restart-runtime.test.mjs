@@ -5,11 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { Runtime } from '../dist/index.js';
+import { AdapterRunFailure } from '../dist/contracts.js';
 
 const info = {
+  executable: '/fixture-codex',
   available: true,
   authenticated: true,
-  version: 'fixture',
+  version: 'fixture-1',
   executionModes: ['read-only', 'code'],
   models: [
     { id: 'model-a', name: 'Model A', efforts: ['low'], defaultEffort: 'low' },
@@ -33,9 +35,11 @@ function fixture(t, statuses) {
   git(projectRoot, ['commit', '-m', 'base']);
   const calls = [];
   const adapter = {
+    installations: async () => [{ executable: '/fixture-codex', version: 'fixture-1' }],
     discover: async () => info,
     run: async input => {
       calls.push({ ...input, messages: structuredClone(input.messages) });
+      input.onEvent({ type: 'session.turn-started', summary: 'fixture turn established', data: { threadId: 'linked-thread', turnId: `linked-turn-${calls.length}` } });
       writeFileSync(join(input.workspace, 'value.txt'), `run-${calls.length}\n`);
       if (calls.length === 1) input.onEvent({ type: 'message.delta', summary: 'partial', data: { messageId: 'partial', text: 'partial output' } });
       const result = statuses[calls.length - 1] ?? 'completed';
@@ -149,7 +153,7 @@ test('explicit rerun of an earlier result creates a linked conversation with sav
 });
 
 test('explicit rerun accepts a failed run before-turn checkpoint', async t => {
-  const f = fixture(t, [new Error('fixture failure'), 'completed']);
+  const f = fixture(t, [new AdapterRunFailure('fixture failure', { processTermination: 'confirmed' }), 'completed']);
   const runtime = new Runtime(f.adapter, f.dataRoot);
   t.after(() => runtime.close());
   const project = runtime.addProject(f.projectRoot);

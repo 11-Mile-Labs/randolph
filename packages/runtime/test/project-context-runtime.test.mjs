@@ -14,7 +14,7 @@ function fixture(t, result = 'completed') {
  execFileSync('/usr/bin/git',['init','-b','main',project],{stdio:'ignore'});
  writeFileSync(join(project,'README.md'),'Fixture\n');
  for(const args of [['add','README.md'],['commit','-m','base']])execFileSync('/usr/bin/git',['-c','core.hooksPath=/dev/null','-c','commit.gpgsign=false','-c','user.name=Fixture','-c','user.email=fixture@example.invalid','-C',project,...args],{stdio:'ignore'});
- const calls=[];const adapter={async installations(){return[{executable:'/fixture'}];},async discover(){return{available:true,authenticated:true,executable:'/fixture',version:'1',models:[{id:'fixture',name:'Fixture',efforts:['low'],defaultEffort:'low'}],executionModes:['read-only']};},async run(input){calls.push(input);return{status:result};}};
+ const calls=[];const adapter={async installations(){return[{executable:'/fixture'}];},async discover(){return{available:true,authenticated:true,executable:'/fixture',version:'1',models:[{id:'fixture',name:'Fixture',efforts:['low'],defaultEffort:'low'}],executionModes:['read-only']};},async run(input){calls.push(input);input.onEvent({type:'session.turn-started',summary:'fixture turn established',data:{threadId:'context-thread',turnId:`context-turn-${calls.length}`}});return{status:result};}};
  const data=join(root,'data');const runtime=new Runtime(adapter,data);const registered=runtime.addProject(project);let closed=false;
  t.after(async()=>{if(!closed)await runtime.close();rmSync(root,{recursive:true,force:true});});
  return {project,runtime,calls,registered,data,close:async()=>{if(!closed){closed=true;await runtime.close();}}};

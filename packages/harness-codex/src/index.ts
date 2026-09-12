@@ -8,6 +8,7 @@ import { homedir } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parse } from 'smol-toml';
+import { AdapterRunFailure } from '@randolph/runtime/contracts';
 import type { AdapterCommand, AdapterRun, HarnessAdapter, HarnessInfo, HarnessInstallation, HarnessModel } from '@randolph/runtime/contracts';
 
 type Json = Record<string, unknown>;
@@ -326,22 +327,23 @@ export class CodexAdapter implements HarnessAdapter {
     if (input.executable) return new CodexAdapter({ ...this.options, executable: input.executable }).run({ ...input, executable: undefined });
     if (input.executableVersion) {
       const version = this.exec(this.executablePath(), ['--version'], { encoding: 'utf8', timeout: 5_000, env: environment() }).trim();
-      if (version !== input.executableVersion) throw new Error('The selected CLI version changed before dispatch. Refresh harness discovery and try again.');
+      if (version !== input.executableVersion) throw new AdapterRunFailure('The selected CLI version changed before dispatch. Refresh harness discovery and try again.', { dispatch: 'not-invoked' });
     }
     const code = input.executionMode === 'code';
-    if (input.executionMode !== undefined && input.executionMode !== 'read-only' && !code) throw new Error('Unsupported execution mode.');
+    if (input.executionMode !== undefined && input.executionMode !== 'read-only' && !code) throw new AdapterRunFailure('Unsupported execution mode.', { dispatch: 'not-invoked' });
     if (code) {
       const version = this.exec(this.executablePath(), ['--version'], { encoding: 'utf8', timeout: 5_000, env: environment() }).trim();
-      if (!VERIFIED_CODE_VERSION.test(version)) throw new Error('Code execution requires the verified Codex CLI 0.149.0 or 0.154.0 version.');
+      if (!VERIFIED_CODE_VERSION.test(version)) throw new AdapterRunFailure('Code execution requires the verified Codex CLI 0.149.0 or 0.154.0 version.', { dispatch: 'not-invoked' });
     }
     const dynamicTools = input.applicationTools ? prepareApplicationTools(input.applicationTools) : undefined;
     const onApplicationRequest = input.applicationTools?.onRequest;
     if (dynamicTools) {
       const version = this.exec(this.executablePath(), ['--version'], { encoding: 'utf8', timeout: 5_000, env: environment() }).trim();
-      if (version !== 'codex-cli 0.154.0') throw new Error('Application tools require the verified Codex CLI 0.154.0 interface.');
+      if (version !== 'codex-cli 0.154.0') throw new AdapterRunFailure('Application tools require the verified Codex CLI 0.154.0 interface.', { dispatch: 'not-invoked' });
     }
     const identity = input.workspaceIdentity ?? workspaceIdentity(input.workspace);
-    assertWorkspaceIdentity(input.workspace, identity);
+    try { assertWorkspaceIdentity(input.workspace, identity); }
+    catch (error) { throw new AdapterRunFailure(error instanceof Error ? error.message : 'Workspace validation failed before dispatch.', { dispatch: 'not-invoked' }); }
     const child = this.launch(input.workspace, code);
     let threadId = ''; let turnId = ''; let outcome: string | undefined;
     let stop: Promise<void> | undefined;
@@ -432,7 +434,7 @@ export class CodexAdapter implements HarnessAdapter {
       turnId = String(object(turn.turn).id ?? '');
       if (!turnId) throw new Error('Codex returned no turn identity.');
       checkDispatch();
-      if (dynamicTools) input.onEvent({ type: 'session.turn-started', summary: 'Main-agent application tools bound to the native turn', data: { threadId, turnId } });
+      input.onEvent({ type: 'session.turn-started', summary: 'Codex native turn started', data: { threadId, turnId } });
       flushBufferedNotifications();
       checkDispatch();
       const deadline = Date.now() + 600_000;
@@ -449,7 +451,10 @@ export class CodexAdapter implements HarnessAdapter {
       const confirmed = await terminate(child);
       if (!confirmed) status = 'stop-unconfirmed';
     }
-    if (failure && status !== 'stop-unconfirmed') throw failure;
+    if (failure && status !== 'stop-unconfirmed') {
+      const message = failure instanceof Error ? failure.message : 'Codex native run failed.';
+      throw new AdapterRunFailure(message, { processTermination: 'confirmed' });
+    }
     return { status };
   }
 }

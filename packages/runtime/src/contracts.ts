@@ -56,6 +56,21 @@ export type ApplicationTools = {
   onRequest: (request: ApplicationToolRequest) => ApplicationToolResult;
 };
 export type AdapterRun = { applicationTools?: ApplicationTools; workspaceIdentity?: WorkspaceIdentity; executable?: string; executableVersion?: string; workspace: string; model: string; effort: string; executionMode?: ExecutionMode; messages: Pick<Message, 'role' | 'text'>[]; signal: AbortSignal; onEvent: (event: AdapterEvent) => void };
+/** A harness may report a failed turn after it has confirmed its own native process cleanup. */
+export class AdapterRunFailure extends Error {
+  readonly cleanupEvidence: Record<string, unknown>;
+  constructor(message: string, cleanupEvidence: Record<string, unknown>) {
+    super(message);
+    this.name = 'AdapterRunFailure';
+    let cloned: unknown;
+    try { cloned = structuredClone(cleanupEvidence); } catch { throw new Error('Adapter failure cleanup evidence must be cloneable.'); }
+    if (!cloned || typeof cloned !== 'object' || Array.isArray(cloned) || !Object.keys(cloned).length) throw new Error('Adapter failure cleanup evidence must be a nonempty record.');
+    let encoded: string;
+    try { encoded = JSON.stringify(cloned); } catch { throw new Error('Adapter failure cleanup evidence must be serializable.'); }
+    if (typeof encoded !== 'string' || new TextEncoder().encode(encoded).byteLength > 16_384) throw new Error('Adapter failure cleanup evidence exceeds 16 KiB.');
+    this.cleanupEvidence = cloned as Record<string, unknown>;
+  }
+}
 export type AdapterCommand = { executable?: string; executableVersion?: string; workspace: string; command: string[]; signal: AbortSignal; onOutput: (text: string) => void };
 export type AdapterCommandResult = { exitCode: number | null; output: string; truncated: boolean; cleanupVerified: boolean; error?: string };
 export interface HarnessAdapter {

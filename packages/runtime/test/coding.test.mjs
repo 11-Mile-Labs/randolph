@@ -27,9 +27,10 @@ function fixture(t, options = {}) {
   const initialHead = git(projectRoot, ['rev-parse', 'HEAD']);
   const calls = [];
   const adapter = {
-    async discover() { return { available: true, authenticated: true, models: [{ id: 'fixture-model', name: 'Fixture model', efforts: ['low'], defaultEffort: 'low' }], executionModes: options.readOnly ? ['read-only'] : ['read-only', 'code'] }; },
+    async discover() { return { executable: '/fixture-codex', version: 'fixture-1', available: true, authenticated: true, models: [{ id: 'fixture-model', name: 'Fixture model', efforts: ['low'], defaultEffort: 'low' }], executionModes: options.readOnly ? ['read-only'] : ['read-only', 'code'] }; },
     async run(input) {
       calls.push(input);
+      input.onEvent({ type: 'session.turn-started', summary: 'fixture turn established', data: { threadId: 'coding-thread', turnId: `coding-turn-${calls.length}` } });
       if (input.executionMode === 'code') writeFileSync(join(input.workspace, 'value.txt'), 'after\n');
       return { status: 'completed' };
     },

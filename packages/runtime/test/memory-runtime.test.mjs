@@ -9,8 +9,8 @@ function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'randolph-memory-'));
   const calls = [];
   const runtime = new Runtime({
-    async discover() { return { available: true, authenticated: true, models: [{ id: 'fixture', name: 'Fixture', efforts: ['low'], defaultEffort: 'low' }] }; },
-    async run(input) { calls.push(input); return { status: 'completed' }; },
+    async discover() { return { available: true, authenticated: true, executable: '/fixture-codex', version: 'fixture-1', models: [{ id: 'fixture', name: 'Fixture', efforts: ['low'], defaultEffort: 'low' }] }; },
+    async run(input) { calls.push(input); input.onEvent({ type: 'session.turn-started', summary: 'fixture turn established', data: { threadId: 'memory-thread', turnId: `memory-turn-${calls.length}` } }); return { status: 'completed' }; },
   }, join(root, 'data'));
   for (const name of ['a', 'b']) mkdirSync(join(root, name));
   const first = runtime.addProject(join(root, 'a')); const second = runtime.addProject(join(root, 'b'));

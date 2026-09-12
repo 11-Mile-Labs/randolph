@@ -34,7 +34,7 @@ test('migration upgrades v2 data additively and keeps the existing records', asy
   const database = new DatabaseSync(join(root, 'app.sqlite'));
   database.exec('CREATE TABLE projects (id TEXT PRIMARY KEY, root TEXT UNIQUE NOT NULL, document TEXT NOT NULL); CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, document TEXT NOT NULL); CREATE TABLE runs (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, document TEXT NOT NULL); CREATE TABLE messages (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, document TEXT NOT NULL); CREATE TABLE events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, document TEXT NOT NULL); CREATE TABLE reviews (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, document TEXT NOT NULL); PRAGMA user_version=2;');
   database.prepare('INSERT INTO projects VALUES (?, ?, ?)').run('old-project', '/tmp/old', '{"id":"old-project"}'); database.close();
-  const store = new Store(root); assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 3); assert.equal(store.projects()[0].id, 'old-project'); assert.ok(store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='delegation_tool_receipts'").get()); store.close();
+  const store = new Store(root); assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 4); assert.equal(store.projects()[0].id, 'old-project'); assert.ok(store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='delegation_tool_receipts'").get()); store.close();
 });
 
 test('only the latest exact ready plan basis can authorize and older revisions remain historical', async t => {
@@ -113,4 +113,11 @@ test('nested plan mutation and its tool receipt share one rollback boundary', as
   assert.equal(records.plans('run-one').length, 0); assert.equal(store.events('run-one').length, before);
   const first = records.recordToolReceipt(input, () => ({ planId: records.recordPlan({ runId: 'run-one', revision: 1, requestId: 'request-1', source: 'proposal', basis: { runBasis: 'basis-1' }, plan: plan(1) }).id }));
   const replay = records.recordToolReceipt(input, () => { throw new Error('must not run'); }); assert.equal(first.replayed, false); assert.equal(replay.replayed, true); assert.equal(records.plans('run-one').length, 1);
+});
+
+ test('pre-bind cleanup uncertainty remains quarantined without inventing a native turn', async t => {
+  const { records } = await fixture(t);
+  records.recordSession({ id: 'uncertain-start', runId: 'run-one', role: 'main', harness: 'codex', executable: '/opt/codex', executableVersion: '1', model: 'model', effort: 'low', allowedTools: [], state: 'dispatch-intent' });
+  const session = records.finishSession({ runId: 'run-one', sessionId: 'uncertain-start', status: 'interrupted', cleanupConfirmed: false, error: 'process cleanup unconfirmed before native binding' });
+  assert.equal(session.state, 'cleanup-unconfirmed'); assert.equal(session.native, undefined); assert.equal(session.cleanupEvidence, undefined);
 });

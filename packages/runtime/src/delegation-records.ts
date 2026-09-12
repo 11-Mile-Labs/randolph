@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { DelegationPlan } from './delegation-plan.js';
 import { delegationPlanDigest, parseDelegationDraft, parseDelegationPlan } from './delegation-plan.js';
 import { Store } from './store.js';
-import type { Run } from './contracts.js';
+import type { Conversation, Run } from './contracts.js';
+import { cleanupReconciliationReason } from './execution-origin.js';
 
 type Row = Record<string, string | number | null>;
 export type PlanDisposition = 'draft' | 'ready' | 'superseded' | 'authorized' | 'rejected';
@@ -29,6 +30,17 @@ function boundedRecord(value: unknown, label: string): Record<string, unknown> {
 }
 const activeSession = (state: DelegationSession['state']): boolean => ['prepared', 'dispatch-intent', 'running'].includes(state);
 const allowedTools = new Set(['randolph_propose_delegation', 'randolph_read_tasks']);
+
+export function setupSessionCleanupReason(input: { run: Run; conversation?: Conversation; sessions: DelegationSession[]; taskCount: number; hasToolReceipts: boolean; hasControls: boolean; observedOrigin: unknown }): string | null {
+  if (!input.conversation || input.conversation.kind !== 'project-setup' || input.run.executionMode !== 'read-only') return 'Only read-only project setup sessions can use setup cleanup reconciliation.';
+  if (input.hasControls) return 'Setup cleanup reconciliation cannot settle delegation control activity.';
+  if (input.taskCount || input.hasToolReceipts) return 'Setup cleanup reconciliation cannot settle task or application-tool authority.';
+  if (input.sessions.some(session => session.role !== 'main' || session.taskId || session.allowedTools.length)) return 'Setup cleanup reconciliation cannot settle worker, verification, task, or tool sessions.';
+  if (input.sessions.some(session => activeSession(session.state))) return 'Setup cleanup reconciliation cannot settle an active native session.';
+  const runReason = cleanupReconciliationReason(input.run.executionOrigin, input.observedOrigin);
+  if (runReason) return runReason;
+  return input.sessions.filter(session => session.state === 'cleanup-unconfirmed').map(session => cleanupReconciliationReason(session.origin, input.observedOrigin)).find(reason => reason !== null) ?? null;
+}
 
 export class DelegationRecords {
   constructor(private readonly store: Store) {}
@@ -117,7 +129,7 @@ export class DelegationRecords {
   }
   finishSession(input: { runId: string; sessionId: string; status: 'completed' | 'failed' | 'interrupted'; cleanupConfirmed: boolean; cleanupEvidence?: Record<string, unknown>; error?: string }): DelegationSession {
     const run = this.run(input.runId); if (!['completed', 'failed', 'interrupted'].includes(input.status) || typeof input.cleanupConfirmed !== 'boolean' || (input.cleanupConfirmed && (!input.cleanupEvidence || !Object.keys(input.cleanupEvidence).length))) throw new Error('Invalid delegation session completion or cleanup evidence.'); let result: DelegationSession | undefined;
-    this.store.transaction(() => { const session = this.sessions(input.runId).find(candidate => candidate.id === input.sessionId), bound = Boolean(session?.native?.threadId && session.native.turnId); if (!session || !activeSession(session.state) || (!bound && (input.status === 'completed' || !input.cleanupConfirmed))) throw new Error('Delegation session cannot finish without a bound active native turn and confirmed cleanup evidence.'); session.state = input.cleanupConfirmed ? input.status : 'cleanup-unconfirmed'; session.cleanupConfirmed = input.cleanupConfirmed; session.cleanupEvidence = input.cleanupConfirmed ? boundedRecord(input.cleanupEvidence, 'Cleanup evidence') : undefined; session.error = input.error; session.updatedAt = now(); this.store.db.prepare('UPDATE delegation_sessions SET document=? WHERE id=?').run(JSON.stringify(session), session.id); this.store.append(run, 'delegation.session-finished', 'Delegation native session completion recorded.', { sessionId: session.id, state: session.state, cleanupConfirmed: session.cleanupConfirmed, ...(session.cleanupEvidence ? { cleanupEvidence: session.cleanupEvidence } : {}) }); result = session; }); return result!;
+    this.store.transaction(() => { const session = this.sessions(input.runId).find(candidate => candidate.id === input.sessionId), bound = Boolean(session?.native?.threadId && session.native.turnId); if (!session || !activeSession(session.state) || (!bound && input.status === 'completed')) throw new Error('Delegation session cannot finish without a bound active native turn and confirmed cleanup evidence.'); session.state = input.cleanupConfirmed ? input.status : 'cleanup-unconfirmed'; session.cleanupConfirmed = input.cleanupConfirmed; session.cleanupEvidence = input.cleanupConfirmed ? boundedRecord(input.cleanupEvidence, 'Cleanup evidence') : undefined; session.error = input.error; session.updatedAt = now(); this.store.db.prepare('UPDATE delegation_sessions SET document=? WHERE id=?').run(JSON.stringify(session), session.id); this.store.append(run, 'delegation.session-finished', 'Delegation native session completion recorded.', { sessionId: session.id, state: session.state, cleanupConfirmed: session.cleanupConfirmed, ...(session.cleanupEvidence ? { cleanupEvidence: session.cleanupEvidence } : {}) }); result = session; }); return result!;
   }
   recordAttempt(input: { runId: string; taskId: string; attempt: Omit<DelegationAttempt, 'createdAt' | 'updatedAt'> }): DelegationTask {
     const run = this.run(input.runId); let updated: DelegationTask | undefined;
@@ -144,5 +156,27 @@ export class DelegationRecords {
     const changed: DelegationSession[] = [];
     for (const run of this.store.runs()) this.store.transaction(() => { for (const session of this.sessions(run.id)) if (['prepared', 'dispatch-intent', 'running'].includes(session.state)) { session.state = 'cleanup-unconfirmed'; session.cleanupConfirmed = false; session.error = 'Application reopened before this session had confirmed cleanup.'; session.updatedAt = now(); this.store.db.prepare('UPDATE delegation_sessions SET document=? WHERE id=?').run(JSON.stringify(session), session.id); this.store.append(run, 'delegation.session-interrupted', session.error, { sessionId: session.id }); changed.push(session); } });
     return changed;
+  }
+  setupSessionCleanupReason(runId: string, observedOrigin: unknown): string | null {
+    const run = this.run(runId);
+    const conversation = this.store.conversations().find(candidate => candidate.id === run.conversationId);
+    return setupSessionCleanupReason({ run, conversation, sessions: this.sessions(runId), taskCount: this.tasks(runId).length, hasToolReceipts: Boolean(this.store.db.prepare('SELECT 1 FROM delegation_tool_receipts WHERE run_id=? LIMIT 1').get(runId)), hasControls: Boolean(this.store.db.prepare('SELECT 1 FROM delegation_controls WHERE run_id=? LIMIT 1').get(runId)), observedOrigin });
+  }
+  reconcileProjectSetupSessions(runId: string, observedOrigin: unknown): DelegationSession[] {
+    const run = this.run(runId);
+    let result: DelegationSession[] = [];
+    this.store.transaction(() => {
+      const reason = this.setupSessionCleanupReason(runId, observedOrigin);
+      if (reason) throw new Error(reason);
+      const sessions = this.sessions(runId);
+      const unsettled = sessions.filter(session => session.state === 'cleanup-unconfirmed');
+      for (const session of unsettled) {
+        session.state = 'interrupted'; session.cleanupConfirmed = true; session.cleanupEvidence = { reconciliation: 'later-boot' }; session.error = 'Previous setup inspection session ended with an earlier boot on this Mac. No work has been restarted.'; session.updatedAt = now();
+        this.store.db.prepare('UPDATE delegation_sessions SET document=? WHERE id=?').run(JSON.stringify(session), session.id);
+        this.store.append(run, 'delegation.session-cleanup-reconciled', 'Setup native session cleanup reconciled after a later boot.', { sessionId: session.id, recordedOrigin: session.origin, observedOrigin });
+      }
+      result = unsettled;
+    });
+    return result;
   }
 }
