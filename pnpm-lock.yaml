@@ -29,6 +29,9 @@ importers:
       '@randolph/harness-codex':
         specifier: workspace:*
         version: link:../../packages/harness-codex
+      '@randolph/harness-grok':
+        specifier: workspace:*
+        version: link:../../packages/harness-grok
       '@randolph/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -65,6 +68,15 @@ importers:
         version: 8.3.0(@types/node@24.13.4)(esbuild@0.28.2)(yaml@2.9.0)
 
   packages/harness-codex:
+    dependencies:
+      '@randolph/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      smol-toml:
+        specifier: 1.8.0
+        version: 1.8.0
+
+  packages/harness-grok:
     dependencies:
       '@randolph/runtime':
         specifier: workspace:*

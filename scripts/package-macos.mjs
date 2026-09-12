@@ -66,7 +66,7 @@ async function createDeployStage(temporary, stage) {
     await mkdir(workspace, { recursive: true });
     await copyFile(join(repositoryRoot, name), join(workspace, name));
   }
-  for (const packagePath of ['apps/desktop', 'packages/runtime', 'packages/harness-codex']) {
+  for (const packagePath of ['apps/desktop', 'packages/runtime', 'packages/harness-codex', 'packages/harness-grok']) {
     const source = join(repositoryRoot, packagePath);
     const destination = join(workspace, packagePath);
     await mkdir(destination, { recursive: true });
@@ -117,7 +117,7 @@ try {
   // Workspace packages are copied out of pnpm's virtual store by deploy.
   // Their external imports therefore need ordinary top-level resolution.
   const dependencies = new Set();
-  for (const packagePath of ['packages/runtime', 'packages/harness-codex']) {
+  for (const packagePath of ['packages/runtime', 'packages/harness-codex', 'packages/harness-grok']) {
     const manifest = JSON.parse(await readFile(join(repositoryRoot, packagePath, 'package.json'), 'utf8'));
     for (const [name, version] of Object.entries(manifest.dependencies ?? {})) {
       if (!String(version).startsWith('workspace:')) dependencies.add(name);

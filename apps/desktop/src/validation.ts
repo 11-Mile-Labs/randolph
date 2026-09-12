@@ -1,13 +1,18 @@
 import { isAbsolute } from 'node:path';
-import type { ChatEventsInput, RestartCheckpointInput, SaveAppSettingsInput, SaveGlobalMemoryInput, CheckpointInput, ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
+import type { ChatEventsInput, RestartCheckpointInput, SaveAppSettingsInput, SaveGlobalMemoryInput, CheckpointInput, ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessId, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid settings request.');
   return value as Record<string, unknown>;
 }
 function parseSelection(value: unknown): HarnessSelection {
   const input = record(value);
-  if (input.harness !== 'codex' || typeof input.model !== 'string' || !input.model.trim() || input.model.length > 200 || typeof input.effort !== 'string' || !input.effort.trim() || input.effort.length > 32) throw new Error('Invalid harness, model, or effort.');
-  return { harness: 'codex', model: input.model, effort: input.effort };
+  const harness = parseHarnessId(input.harness);
+  if (typeof input.model !== 'string' || !input.model.trim() || input.model.length > 200 || typeof input.effort !== 'string' || !input.effort.trim() || input.effort.length > 32) throw new Error('Invalid harness, model, or effort.');
+  return { harness, model: input.model, effort: input.effort };
+}
+export function parseHarnessId(value: unknown): HarnessId {
+  if (value !== 'codex' && value !== 'grok') throw new Error('Unsupported harness.');
+  return value;
 }
 export function parseMode(value: unknown): ConversationModeInput {
   const input = record(value);
@@ -37,9 +42,9 @@ export function parseSend(value: unknown): SendInput {
   const input = value as Record<string, unknown>;
   if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 64_000) throw new Error('Invalid message.');
   const message = { conversationId: parseId(input.conversationId), text: input.text };
-  if (input.model === undefined && input.effort === undefined) return message;
-  const selection = parseSelection({ harness: 'codex', model: input.model, effort: input.effort });
-  return { ...message, model: selection.model, effort: selection.effort };
+  if (input.harness === undefined && input.model === undefined && input.effort === undefined) return message;
+  const selection = parseSelection({ harness: input.harness ?? 'codex', model: input.model, effort: input.effort });
+  return { ...message, ...(input.harness === undefined ? {} : { harness: selection.harness }), model: selection.model, effort: selection.effort };
 }
 export function parseChatEvents(value: unknown): ChatEventsInput {
   const input = record(value);
@@ -86,8 +91,8 @@ function parseExecutable(value: unknown): string | null {
   if (typeof value !== 'string' || !isAbsolute(value) || value.length > 4096 || value.trim() !== value || Array.from(value).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) throw new Error('CLI executable must be a bounded absolute path.');
   return value;
 }
-export function parseHarnessRequest(value: unknown): { projectId?: string; executable?: string } {
+export function parseHarnessRequest(value: unknown): { projectId?: string; executable?: string; harness?: HarnessId } {
   if (value === undefined) return {};
   const input = record(value);
-  return { ...(input.projectId === undefined ? {} : { projectId: parseId(input.projectId) }), ...(input.executable === undefined ? {} : { executable: parseExecutable(input.executable) ?? undefined }) };
+  return { ...(input.projectId === undefined ? {} : { projectId: parseId(input.projectId) }), ...(input.executable === undefined ? {} : { executable: parseExecutable(input.executable) ?? undefined }), ...(input.harness === undefined ? {} : { harness: parseHarnessId(input.harness) }) };
 }

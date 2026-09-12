@@ -18,7 +18,8 @@
     "@randolph/runtime": "workspace:*",
     "ai": "7.0.97",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "@randolph/harness-grok": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

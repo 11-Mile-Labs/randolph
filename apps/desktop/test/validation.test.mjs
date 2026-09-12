@@ -48,3 +48,11 @@ test('project CLI IPC preserves explicit choices and rejects relative paths', ()
   assert.throws(() => validation.parseProjectDefaults({ ...input, defaults: { ...input.defaults, executable: 'relative/codex' } }));
   assert.deepEqual(validation.parseProjectDefaults({ ...input, defaults: { ...input.defaults, executable: null } }).defaults.executable, null);
 });
+
+test('harness IPC accepts only the bounded Codex and Grok catalog', () => {
+  assert.equal(validation.parseHarnessId('codex'), 'codex');
+  assert.equal(validation.parseHarnessId('grok'), 'grok');
+  assert.deepEqual(validation.parseHarnessRequest({ harness: 'grok' }), { harness: 'grok' });
+  for (const value of ['claude', '', null, 42]) assert.throws(() => validation.parseHarnessId(value));
+  assert.throws(() => validation.parseHarnessRequest({ harness: 'claude' }));
+});

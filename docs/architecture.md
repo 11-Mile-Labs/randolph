@@ -54,7 +54,7 @@ flowchart TB
 
 **Main agent:** is the user's selected harness/model session. It proposes approaches and agent assignments, performs work itself, and requests delegation when useful. It cannot grant itself approval, raise limits, change its authorized assignments, or assert completion on behalf of verification code. The runtime validates its proposals before executing them.
 
-**Adapters:** translate between the runtime's contract and each harness or external integration. They report supported, unsupported, and unverified capabilities explicitly. The UI must not imply equal capabilities merely because all adapters implement the same interface.
+**Adapters:** translate between the runtime's contract and each harness or external integration. They report supported, unsupported, and unverified capabilities explicitly. The UI must not imply equal capabilities merely because all adapters implement the same interface. V1 reuses existing native profiles and logins; optional separate profiles require a post-v1 product and architecture review across harnesses. See [native harness profiles](decisions/native-harness-profiles.md).
 
 ## 2. Execution model
 

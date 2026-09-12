@@ -129,3 +129,10 @@ test('project CLI selection survives persistence and rejects non-absolute execut
   assert.throws(() => writeHarnessSettings(root, { ...defaults, executable: 'relative/codex' }, saved.revision), /executable|absolute/i);
   assert.deepEqual(readHarnessSettings(root).defaults, configured);
 });
+
+test('Grok defaults round-trip as a complete harness selection', async t => {
+  const { root } = await fixture(t);
+  const grok = { harness: 'grok', model: 'grok-1.0.25', effort: 'low', executable: '/opt/grok/bin/grok' };
+  const saved = writeHarnessSettings(root, grok, null);
+  assert.deepEqual(readHarnessSettings(root), { revision: saved.revision, defaults: grok });
+});

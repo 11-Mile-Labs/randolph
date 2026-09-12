@@ -80,7 +80,7 @@ export class Store {
     const dir = this.runDirectory(run);
     mkdirSync(join(dir, 'logs'), { recursive: true, mode: 0o700 });
     const events = this.events(run.id);
-    this.replace(join(dir, 'manifest.json'), JSON.stringify({ schemaVersion: 1, ...run, executionMode: run.executionMode ?? 'read-only', configuration: { harness: 'codex', model: run.model, effort: run.effort } }, null, 2) + '\n');
+    this.replace(join(dir, 'manifest.json'), JSON.stringify({ schemaVersion: 1, ...run, harness: run.harness ?? 'codex', executionMode: run.executionMode ?? 'read-only', configuration: { harness: run.harness ?? 'codex', model: run.model, effort: run.effort } }, null, 2) + '\n');
     this.replace(join(dir, 'logs', 'events.jsonl'), events.map(event => JSON.stringify(event) + '\n').join(''));
     this.replace(join(dir, 'logs', 'activity.log'), events.map(event => `${event.at} #${event.sequence} ${event.type} ${event.summary}\n`).join(''));
   }

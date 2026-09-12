@@ -15,7 +15,7 @@ export class Reviews {
   private readonly busy = new Set<string>();
   private accepting = true;
 
-  constructor(private readonly store: Store, private readonly adapter: HarnessAdapter, private readonly canWork: (conversationId: string) => boolean, private readonly changed: () => void) {
+  constructor(private readonly store: Store, private readonly adapterFor: (run: Run) => HarnessAdapter, private readonly canWork: (conversationId: string) => boolean, private readonly changed: () => void) {
     for (const review of store.reviews()) {
       if (review.status === 'checking' || review.status === 'delivering') {
         review.status = review.status === 'checking' ? 'stop-unconfirmed' : 'interrupted';
@@ -95,7 +95,7 @@ export class Reviews {
     const review = this.get(id); this.assertIdle(review.conversationId);
     if (review.status !== 'pending' && review.status !== 'interrupted') throw new Error('Request a fresh review before running checks.');
     if (review.deliveryPlan) throw new Error('Delivery is pending; continue that delivery before running new checks.');
-    if (!this.adapter.runCommand) throw new Error('This harness has no verified command execution capability.');
+    if (!this.adapterFor(this.run(review)).runCommand) throw new Error('This run\'s harness has no verified command execution capability.');
     this.assertCurrent(review);
     this.busy.add(review.conversationId);
     const controller = new AbortController();
@@ -110,10 +110,12 @@ export class Reviews {
       this.save(review, 'verification.started', 'Running project checks through the native permission boundary.');
       const run = this.store.runs().find(candidate => candidate.id === review.runId);
       if (!run) throw new Error('The reviewed run no longer exists.');
+      const adapter = this.adapterFor(run);
+      if (!adapter.runCommand) throw new Error('This run\'s harness has no verified command execution capability.');
       const commands = await detectVerificationCommands(review.basis.workspace);
       review.verification = await runVerification(review.basis.workspace, commands, {
         signal: controller.signal,
-        executor: async (workspace, command, options) => this.adapter.runCommand!({ executable: run.executable, executableVersion: run.executableVersion, workspace, command: [command.command, ...command.args], signal: options.signal, onOutput: options.onOutput }),
+        executor: async (workspace, command, options) => adapter.runCommand!({ executable: run.executable, executableVersion: run.executableVersion, workspace, command: [command.command, ...command.args], signal: options.signal, onOutput: options.onOutput }),
         onEvent: event => {
           if (event.type === 'check-started') review.progress = { checkId: event.checkId, startedAt: now(), output: '' };
           if (event.type === 'check-output') {

@@ -36,7 +36,7 @@ export default function HistoryPanel({ runs, messages, events, reviews, onRecove
     <header><div><span className="eyebrow">Retained evidence</span><h2 id="history-title">Run history</h2></div><button className="secondary-button" disabled={busy} onClick={onClose}>Close history</button></header>
     <div className="history-body"><nav aria-label="Historical runs">{runs.map(item => <button key={item.id} disabled={busy} className={item.id === selected ? 'selected' : ''} onClick={() => { setSelected(item.id); setError(undefined); setRestored(undefined); setPending(undefined); }}><strong>{new Date(item.createdAt).toLocaleString()}</strong><span>{item.status} · {item.checkpoints?.length ?? 0} checkpoints</span></button>)}</nav>
       <div className="history-detail">{!run ? <p>No runs retained yet.</p> : <>
-        <h3>{run.status}</h3><p>{run.model} · {run.effort} · {run.executionMode ?? 'read-only'}</p>
+        <h3>{run.status}</h3><p>{run.harness === 'grok' ? 'Grok' : 'Codex'} · {run.model} · {run.effort} · {run.executionMode ?? 'read-only'}</p>
         {run.sourceRunId ? <p>{run.recoveryKind === 'restart' ? 'Restarted from' : 'Rerun of'} <code>{run.sourceRunId}</code> · checkpoint <code>{run.sourceCheckpointDigest?.slice(0, 16)}</code> {runs.some(candidate => candidate.id === run.sourceRunId) ? <button className="secondary-button" disabled={busy} onClick={() => { if (run.sourceRunId) setSelected(run.sourceRunId); setPending(undefined); setError(undefined); setRestored(undefined); }}>View source run</button> : null}</p> : null}
         {run.error ? <p role="status">{run.error}</p> : null}
         <h3>Recoverable checkpoints</h3>
@@ -51,7 +51,7 @@ export default function HistoryPanel({ runs, messages, events, reviews, onRecove
           <h3>{pending.kind === 'restart' ? 'Restart this work?' : 'Rerun this checkpoint?'}</h3>
           <p>This starts the installed harness in a fresh project worktree using the saved {run.model} / {run.effort} configuration and context. {pending.kind === 'restart' ? 'The new run stays in the same conversation.' : 'The new run opens in a new linked conversation.'}</p>
           <p>Original history and files are preserved. Saved delivery actions are not repeated; new results require fresh checks and approval. AI output may differ.</p>
-          <code>Checkpoint {pending.checkpoint.digest.slice(0, 16)} · {run.executionMode ?? 'read-only'}</code>
+          <code>{run.harness === 'grok' ? 'Grok' : 'Codex'} · Checkpoint {pending.checkpoint.digest.slice(0, 16)} · {run.executionMode ?? 'read-only'}</code>
           <div className="checkpoint-actions"><button className="secondary-button" disabled={busy} onClick={() => setPending(undefined)}>Cancel recovery</button><button className="primary-button" disabled={busy || recoveryBlocked} onClick={() => void executeCheckpoint()}>{busy ? 'Starting…' : 'Start linked run'}</button></div>
         </section> : null}
         {error ? <p role="alert">{error}</p> : null}

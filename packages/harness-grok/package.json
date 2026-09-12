@@ -1,0 +1,25 @@
+{
+  "name": "@randolph/harness-grok",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm build && node --test test/*.test.mjs",
+    "lint": "oxlint --deny-warnings src test"
+  },
+  "dependencies": {
+    "@randolph/runtime": "workspace:*",
+    "smol-toml": "1.8.0"
+  }
+}

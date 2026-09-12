@@ -12,6 +12,7 @@ import type {
   Conversation,
   ExecutionMode,
   HarnessInfo,
+  HarnessId,
   HarnessModel,
   HarnessSelection,
   Project,
@@ -362,6 +363,7 @@ function Welcome({ hasProjects, busy, harness, onAddProject }: WelcomeProps) {
 }
 
 type ComposerProps = {
+  harnessId: HarnessId;
   harness?: HarnessInfo;
   model: string;
   effort: string;
@@ -371,12 +373,14 @@ type ComposerProps = {
   sendBlocked: boolean;
   sending: boolean;
   onModelChange: (model: HarnessModel) => void;
+  onHarnessChange: (harness: HarnessId) => void;
   onEffortChange: (effort: string) => void;
   onValueChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
 function Composer({
+  harnessId,
   harness,
   model,
   effort,
@@ -386,6 +390,7 @@ function Composer({
   sendBlocked,
   sending,
   onModelChange,
+  onHarnessChange,
   onEffortChange,
   onValueChange,
   onSubmit,
@@ -409,6 +414,7 @@ function Composer({
       />
       <div className="composer-toolbar">
         <div className="selector-group">
+          <label><span className="sr-only">Harness</span><select aria-label="Conversation harness" value={harnessId} disabled={settingsDisabled} onChange={event => onHarnessChange(event.target.value as HarnessId)}><option value="codex">Codex</option><option value="grok">Grok (compatibility pending)</option></select></label>
           <label>
             <span className="sr-only">Model</span>
             <select
@@ -531,7 +537,7 @@ export default function App() {
     let disposed = false;
     const loadHarness = async (): Promise<void> => {
       try {
-        const info = await window.randolph.harness();
+        const info = await window.randolph.harness(undefined, undefined, 'codex');
         if (!disposed) setDefaultHarness(info);
       } catch (harnessError) {
         if (!disposed) setError(`Could not inspect the native harness: ${displayError(harnessError)}`);
@@ -570,16 +576,17 @@ export default function App() {
     ? snapshot.projects.find((item) => item.id === selectedConversation.projectId)
     : undefined;
 
+  const selectedHarnessId: HarnessId = selectedConversation?.harness ?? (selectedConversation?.model || selectedConversation?.effort ? 'codex' : selectedProject?.harnessSettings?.defaults?.harness ?? 'codex');
   const harness = selectedProject ? projectHarness : defaultHarness;
   useEffect(() => {
     let disposed = false;
     setProjectHarness(undefined);
     if (selectedProject) void (async () => {
-      try { const info = await window.randolph.harness(selectedProject.id); if (!disposed) setProjectHarness(info); }
+      try { const info = await window.randolph.harness(selectedProject.id, undefined, selectedHarnessId); if (!disposed) setProjectHarness(info); }
       catch (cause) { if (!disposed) setError(`Could not inspect this project's CLI: ${displayError(cause)}`); }
     })();
     return () => { disposed = true; };
-  }, [selectedProject?.id, selectedProject?.harnessSettings?.revision]);
+  }, [selectedProject?.id, selectedProject?.harnessSettings?.revision, selectedHarnessId]);
 
   const conversationEvents = useMemo(
     () =>
@@ -608,12 +615,13 @@ export default function App() {
     ? snapshot.messages.filter(message => historyRuns.some(run => run.id === message.runId)).toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
     : messages;
   const selectedDraft = selectedConversationId ? (drafts[selectedConversationId] ?? '') : '';
-  const hasOverride = Boolean(selectedConversation?.model || selectedConversation?.effort);
+  const hasOverride = Boolean(selectedConversation?.harness || selectedConversation?.model || selectedConversation?.effort);
   const selectedModelChoice = hasOverride
-    ? { model: selectedConversation!.model, effort: selectedConversation!.effort }
-    : selectedProject?.harnessSettings?.defaults ?? { model: harness?.models[0]?.id ?? '', effort: harness?.models[0]?.defaultEffort ?? '' };
+    ? { harness: selectedConversation!.harness ?? 'codex' as HarnessId, model: selectedConversation!.model, effort: selectedConversation!.effort }
+    : selectedProject?.harnessSettings?.defaults ?? { harness: selectedHarnessId, model: harness?.models[0]?.id ?? '', effort: harness?.models[0]?.defaultEffort ?? '' };
   const settingsError = selectedProject?.harnessSettings?.error;
   const selectionAvailable = Boolean(harness?.models.some(item => item.id === selectedModelChoice.model && item.efforts.includes(selectedModelChoice.effort)));
+  const modeAvailable = Boolean(harness && (harness.executionModes === undefined ? (selectedConversation?.executionMode ?? 'read-only') === 'read-only' : harness.executionModes.includes(selectedConversation?.executionMode ?? 'read-only')));
   const settingsProject = snapshot.projects.find(item => item.id === settingsProjectId);
   const currentReview = snapshot.reviews.findLast(item => item.conversationId === selectedConversationId);
   const selectedReview = snapshot.reviews.find(item => item.id === selectedReviewId);
@@ -693,7 +701,7 @@ export default function App() {
     const conversationId = selectedConversation?.id;
     const text = selectedDraft.trim();
     const { model, effort } = selectedModelChoice;
-    if (!conversationId || !text || !model || !effort || action || !selectionAvailable || settingsError) return;
+    if (!conversationId || !text || !model || !effort || action || !selectionAvailable || !modeAvailable || settingsError) return;
     setAction('send');
     setError(undefined);
     try {
@@ -824,7 +832,7 @@ export default function App() {
                 <p>{selectedProject?.name}{latestRun && latestRun.workspace !== selectedProject?.root ? (latestRun.executionMode === "code" ? " · Isolated worktree" : " · Committed snapshot") : ""}</p>
               </div>
               <div className="header-actions">
-                {harness?.version ? <span className="version-chip">Codex {harness.version}</span> : null}
+                {harness?.version ? <span className="version-chip">{selectedHarnessId === 'grok' ? 'Grok' : 'Codex'} {harness.version}</span> : null}
                 <button className="secondary-button" type="button" onClick={() => setHistoryProjectId(selectedConversation.projectId)}>Run history</button>
                 <button className="secondary-button" type="button" onClick={() => setMemoryProjectId(selectedConversation.projectId)}>Memory</button>
                 <select aria-label="Conversation mode" value={selectedConversation.executionMode ?? 'read-only'} disabled={Boolean(action) || Boolean(activeRun) || checking || cleanupBlocked} onChange={event => void changeMode(event.target.value as ExecutionMode)}>
@@ -880,6 +888,7 @@ export default function App() {
               {chatError ? <div className="composer-error" role="alert"><span>Chat stream: {chatError.message}</span><button type="button" onClick={() => { chatSession.chat.clearError(); void chatSession.connect(); }}>Reconnect chat</button></div> : null}
               {harnessReason ? <p className="harness-warning">Native harness unavailable: {harnessReason}</p> : null}
               {settingsError ? <p className="harness-warning" role="alert">{settingsError} Open Project settings to reload after correcting the file.</p> : null}
+              {harness?.authenticated && !modeAvailable ? <p className="harness-warning" role="alert">{harness.reason ?? 'This execution mode is not verified for the selected harness.'}</p> : null}
               {!settingsError && harness?.available && !selectionAvailable ? <p className="harness-warning" role="alert">The saved model or effort is unavailable. Choose a replacement or update the project default before sending.</p> : null}
               <div className="selection-source">
                 <span>{action === 'settings' ? 'Saving choice…' : hasOverride ? 'Conversation override' : selectedProject?.harnessSettings?.defaults ? 'Project default' : 'No project default saved'}</span>
@@ -892,13 +901,27 @@ export default function App() {
                 value={selectedDraft}
                 disabled={composerDisabled}
                 settingsDisabled={Boolean(action)}
-                sendBlocked={Boolean(action) || !selectionAvailable || Boolean(settingsError)}
+                sendBlocked={Boolean(action) || !selectionAvailable || !modeAvailable || Boolean(settingsError)}
                 sending={action === 'send'}
+                harnessId={selectedModelChoice.harness}
+                onHarnessChange={(nextHarness) => {
+                  void (async () => {
+                    setAction('settings'); setError(undefined);
+                    try {
+                      const info = await window.randolph.harness(selectedProject?.id, undefined, nextHarness);
+                      const nextModel = info.models[0];
+                      if (!nextModel) throw new Error(info.reason ?? `${nextHarness} has no available models.`);
+                      await window.randolph.setConversationSelection({ conversationId: selectedConversationId!, selection: { harness: nextHarness, model: nextModel.id, effort: nextModel.defaultEffort } });
+                      await reloadSnapshot();
+                    } catch (cause) { setError(`Could not select ${nextHarness}: ${displayError(cause)}`); }
+                    finally { setAction(undefined); }
+                  })();
+                }}
                 onModelChange={(nextModel) => {
-                  void changeSelection({ harness: 'codex', model: nextModel.id, effort: nextModel.defaultEffort });
+                  void changeSelection({ harness: selectedModelChoice.harness, model: nextModel.id, effort: nextModel.defaultEffort });
                 }}
                 onEffortChange={(nextEffort) => {
-                  void changeSelection({ harness: 'codex', model: selectedModelChoice.model, effort: nextEffort });
+                  void changeSelection({ harness: selectedModelChoice.harness, model: selectedModelChoice.model, effort: nextEffort });
                 }}
                 onValueChange={(nextDraft) => {
                   if (!selectedConversationId) return;

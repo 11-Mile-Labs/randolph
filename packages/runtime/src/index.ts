@@ -13,14 +13,14 @@ import { Pushes, type ApprovePushInput } from './pushes.js';
 import type { PushOptions } from './push.js';
 import { Reviews } from './reviews.js';
 import { Checkpoints, type CheckpointInput, type CheckpointRestore } from './checkpoints.js';
-import type { AdapterEvent, ApproveReviewInput, ChatEventsInput, ChatEventsResult, Conversation, ConversationModeInput, ConversationSelectionInput, HarnessAdapter, HarnessInfo, HarnessSelection, LinkedRunResult, Project, ProjectHarnessSettings, RerunCheckpointInput, RestartCheckpointInput, ReviewRecord, Run, SaveProjectDefaultsInput, SendInput, WorkspaceSnapshot } from './contracts.js';
+import type { AdapterEvent, ApproveReviewInput, ChatEventsInput, ChatEventsResult, Conversation, ConversationModeInput, ConversationSelectionInput, HarnessAdapter, HarnessId, HarnessInfo, HarnessInstallation, HarnessSelection, LinkedRunResult, Project, ProjectHarnessSettings, RerunCheckpointInput, RestartCheckpointInput, ReviewRecord, Run, SaveProjectDefaultsInput, SendInput, WorkspaceSnapshot } from './contracts.js';
 export type * from './contracts.js';
 export { Store } from './store.js';
 const activeStatuses = new Set(['starting', 'running', 'stopping', 'stop-unconfirmed']);
 const preDispatchRecoveryFailure = 'Linked checkpoint recovery failed before native dispatch. No harness was launched.';
 const now = (): string => new Date().toISOString();
 type RecoveryContext = {
-  executable?: string; executableVersion?: string;
+  harness: HarnessId; executable?: string; executableVersion?: string;
   model: string; effort: string; executionMode: NonNullable<Run['executionMode']>; settingsSource?: Run['settingsSource']; projectSettingsRevision?: string | null;
   memory?: PreparedMemory; messages: Array<{ role: 'user' | 'assistant'; text: string }>; title: string;
 };
@@ -56,11 +56,14 @@ function recoveryContext(metadata: Record<string, unknown>, kind: 'restart' | 'r
     });
   }
   if (!messages.length || typeof savedConversation.title !== 'string') throw new Error('The retained checkpoint does not contain restart context. Restore files to inspect it without execution.');
+  const harness = savedRun.harness === undefined ? 'codex' : savedRun.harness;
+  if (harness !== 'codex' && harness !== 'grok') throw new Error('The retained checkpoint contains an unknown harness route. Restore files to inspect it without execution.');
   const settingsSource = savedRun.settingsSource;
   if (settingsSource !== undefined && settingsSource !== 'project' && settingsSource !== 'conversation' && settingsSource !== 'native') throw new Error('The retained checkpoint contains invalid harness provenance.');
   const projectSettingsRevision = savedRun.projectSettingsRevision;
   if (projectSettingsRevision !== undefined && projectSettingsRevision !== null && typeof projectSettingsRevision !== 'string') throw new Error('The retained checkpoint contains invalid project settings provenance.');
   return {
+    harness,
     executable: typeof savedRun.executable === 'string' ? savedRun.executable : undefined,
     executableVersion: typeof savedRun.executableVersion === 'string' ? savedRun.executableVersion : undefined,
     model: savedRun.model,
@@ -85,6 +88,8 @@ function assertReconciledExternalActions(metadata: Record<string, unknown>): voi
 }
 export class Runtime {
   readonly store: Store;
+  readonly adapter?: HarnessAdapter;
+  private readonly adapters: Partial<Record<HarnessId, HarnessAdapter>>;
   private readonly preferences: AppSettings;
   private readonly reviews: Reviews;
   private readonly checkpoints: Checkpoints;
@@ -95,7 +100,9 @@ export class Runtime {
   private readonly listeners = new Set<() => void>();
   private accepting = true;
   private admission = new Set<string>();
-  constructor(readonly adapter: HarnessAdapter, dataRoot: string, options: { push?: PushOptions } = {}) {
+  constructor(adapter: HarnessAdapter | Partial<Record<HarnessId, HarnessAdapter>>, dataRoot: string, options: { push?: PushOptions } = {}) {
+    this.adapters = 'discover' in adapter ? { codex: adapter } : adapter;
+    this.adapter = this.adapters.codex;
     this.store = new Store(resolve(dataRoot));
     this.preferences = new AppSettings(this.store.root);
     this.checkpoints = new Checkpoints(this.store);
@@ -113,7 +120,7 @@ export class Runtime {
     }
     this.integrations = new Integrations(this.store, id => this.accepting && !this.admission.has(id) && !this.reviews.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed());
     this.pushes = new Pushes(this.store, id => this.accepting && !this.admission.has(id) && !this.reviews.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed(), options.push);
-    this.reviews = new Reviews(this.store, adapter, id => !this.admission.has(id) && !this.pushes.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed());
+    this.reviews = new Reviews(this.store, run => this.adapterForRun(run), id => !this.admission.has(id) && !this.pushes.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed());
   }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   private changed(): void { for (const listener of this.listeners) listener(); }
@@ -146,17 +153,38 @@ export class Runtime {
     if (!this.accepting) throw new Error('Application is closing.');
     return this.memory.command(input);
   }
-  async harnessInstallations() { return this.adapter.installations ? await this.adapter.installations() : []; }
-  private async inspectExecutable(executable?: string | null): Promise<HarnessInfo> {
-    if (executable && !(await this.harnessInstallations()).some(item => item.executable === executable)) throw new Error('The selected CLI is no longer discovered. Choose an installed CLI in Project settings.');
-    return this.adapter.discover(executable ?? undefined);
+  private validateExecutionMode(mode: NonNullable<Run['executionMode']>, info: HarnessInfo): void {
+    if (mode === 'code' && !info.executionModes?.includes('code')) throw new Error('Code mode is not verified for this installed harness.');
+    if (info.executionModes && !info.executionModes.includes(mode)) throw new Error(info.reason ?? 'Execution is not verified for this installed harness.');
   }
-  async harness(projectId?: string, executable?: string): Promise<HarnessInfo> {
-    if (executable) return this.inspectExecutable(executable);
-    if (!projectId) return this.adapter.discover();
+  private adapterFor(harness: HarnessId): HarnessAdapter {
+    const adapter = this.adapters[harness];
+    if (!adapter) throw new Error(`No installed ${harness} harness route is available.`);
+    return adapter;
+  }
+  private adapterForRun(run: Run): HarnessAdapter { return this.adapterFor(run.harness ?? 'codex'); }
+  private selectionFor(conversation: Conversation): HarnessSelection | undefined {
+    if (!conversation.harness && !conversation.model && !conversation.effort) return undefined;
+    return { harness: conversation.harness ?? 'codex', model: conversation.model, effort: conversation.effort };
+  }
+  async harnessInstallations(harnessId: HarnessId = 'codex'): Promise<HarnessInstallation[]> {
+    const adapter = this.adapterFor(harnessId);
+    return (adapter.installations ? await adapter.installations() : []).map(item => ({ ...item, harness: harnessId }));
+  }
+  private async inspectExecutable(harness: HarnessId, executable?: string | null): Promise<HarnessInfo> {
+    if (executable && !(await this.harnessInstallations(harness)).some(item => item.executable === executable)) throw new Error('The selected CLI is no longer discovered for this harness. Choose an installed CLI in Project settings.');
+    const info = await this.adapterFor(harness).discover(executable ?? undefined);
+    if (info.harness && info.harness !== harness) throw new Error('Harness discovery returned a mismatched route.');
+    return { ...info, harness };
+  }
+  async harness(projectId?: string, executable?: string, harnessId?: HarnessId): Promise<HarnessInfo> {
+    if (executable) return this.inspectExecutable(harnessId ?? 'codex', executable);
+    if (!projectId) return this.inspectExecutable(harnessId ?? 'codex');
     const settings = readHarnessSettings(this.project(projectId).root);
     if (settings.error) return { available: false, authenticated: false, models: [], reason: settings.error };
-    try { return await this.inspectExecutable(settings.defaults?.executable); }
+    const selectedHarness = harnessId ?? settings.defaults?.harness ?? 'codex';
+    const selectedExecutable = settings.defaults?.harness === selectedHarness ? settings.defaults.executable : undefined;
+    try { return await this.inspectExecutable(selectedHarness, selectedExecutable); }
     catch (cause) { return { available: false, authenticated: false, models: [], reason: cause instanceof Error ? cause.message : 'CLI discovery failed.' }; }
   }
   async setExecutionMode(input: ConversationModeInput): Promise<Conversation> {
@@ -164,7 +192,13 @@ export class Runtime {
     if (input.executionMode !== 'read-only' && input.executionMode !== 'code') throw new Error('Invalid execution mode.');
     this.conversation(input.conversationId);
     if (input.executionMode === 'code') {
-      const info = await this.harness(this.conversation(input.conversationId).projectId);
+      const conversation = this.conversation(input.conversationId);
+      const project = this.project(conversation.projectId);
+      const settings = readHarnessSettings(project.root);
+      if (settings.error) throw new Error(settings.error);
+      const selection = this.selectionFor(conversation) ?? settings.defaults;
+      const harness = selection?.harness ?? 'codex';
+      const info = await this.inspectExecutable(harness, settings.defaults?.harness === harness ? settings.defaults.executable : undefined);
       if (!this.accepting) throw new Error('Application is closing.');
       if (!info.authenticated || !info.executionModes?.includes('code')) throw new Error('Code mode is not verified for this installed harness.');
     }
@@ -192,14 +226,14 @@ export class Runtime {
     return project;
   }
   private validateSelection(selection: HarnessSelection, info: HarnessInfo): void {
-    if (!info.available || !info.authenticated) throw new Error(info.reason ?? 'Sign into the installed Codex CLI with ChatGPT first.');
+    if (!info.available || !info.authenticated) throw new Error(info.reason ?? `Sign into the installed ${selection.harness} CLI first.`);
     const model = info.models.find(candidate => candidate.id === selection.model);
-    if (selection.harness !== 'codex' || !model || !model.efforts.includes(selection.effort)) throw new Error('Choose an available model and effort.');
+    if (info.harness !== selection.harness || !model || !model.efforts.includes(selection.effort)) throw new Error('Choose an available model and effort.');
   }
   async saveProjectDefaults(input: SaveProjectDefaultsInput): Promise<ProjectHarnessSettings> {
     if (!this.accepting) throw new Error('Application is closing.');
     const project = this.project(input.projectId);
-    const info = await this.inspectExecutable(input.defaults.executable);
+    const info = await this.inspectExecutable(input.defaults.harness, input.defaults.executable);
     if (!this.accepting) throw new Error('Application is closing.');
     this.validateSelection(input.defaults, info);
     const settings = writeHarnessSettings(project.root, input.defaults, input.expectedRevision);
@@ -210,11 +244,15 @@ export class Runtime {
     if (!this.accepting) throw new Error('Application is closing.');
     this.conversation(input.conversationId);
     if (input.selection) {
-      const info = await this.harness(this.conversation(input.conversationId).projectId);
+      const conversation = this.conversation(input.conversationId);
+      const project = this.project(conversation.projectId);
+      const settings = readHarnessSettings(project.root);
+      if (settings.error) throw new Error(settings.error);
+      const info = await this.inspectExecutable(input.selection.harness, settings.defaults?.harness === input.selection.harness ? settings.defaults.executable : undefined);
       if (!this.accepting) throw new Error('Application is closing.');
       this.validateSelection(input.selection, info);
     }
-    const conversation = { ...this.conversation(input.conversationId), model: input.selection?.model ?? '', effort: input.selection?.effort ?? '', updatedAt: now() };
+    const conversation = { ...this.conversation(input.conversationId), harness: input.selection?.harness, model: input.selection?.model ?? '', effort: input.selection?.effort ?? '', updatedAt: now() };
     this.store.putConversation(conversation); this.changed();
     return conversation;
   }
@@ -269,21 +307,22 @@ export class Runtime {
     let targetConversationId: string | undefined;
     let run: Run | undefined;
     try {
-      const info = context.executable ? await this.adapter.discover(context.executable) : await this.harness(sourceRun.projectId);
+      const info = await this.inspectExecutable(context.harness, context.executable);
       if (context.executableVersion && info.version !== context.executableVersion) throw new Error('The checkpoint CLI version changed. Restore files to inspect it; this checkpoint cannot silently switch executables.');
       if (!this.accepting) throw new Error('Application is closing.');
-      this.validateSelection({ harness: 'codex', model: context.model, effort: context.effort }, info);
-      if (context.executionMode === 'code' && !info.executionModes?.includes('code')) throw new Error('Code mode is not verified for this installed harness.');
+      this.validateSelection({ harness: context.harness, model: context.model, effort: context.effort }, info);
+      this.validateExecutionMode(context.executionMode, info);
       const project = this.project(sourceRun.projectId);
       const createdAt = now();
       const runId = randomUUID();
       const targetConversation: Conversation = kind === 'restart'
-        ? { ...this.conversation(sourceConversation.id), model: context.model, effort: context.effort, executionMode: context.executionMode, updatedAt: createdAt }
-        : { id: randomUUID(), projectId: project.id, sourceConversationId: sourceConversation.id, title: `Rerun: ${context.title}`, model: context.model, effort: context.effort, executionMode: context.executionMode, createdAt, updatedAt: createdAt, lastReadSequence: 0 };
+        ? { ...this.conversation(sourceConversation.id), harness: context.harness, model: context.model, effort: context.effort, executionMode: context.executionMode, updatedAt: createdAt }
+        : { id: randomUUID(), projectId: project.id, sourceConversationId: sourceConversation.id, title: `Rerun: ${context.title}`, harness: context.harness, model: context.model, effort: context.effort, executionMode: context.executionMode, createdAt, updatedAt: createdAt, lastReadSequence: 0 };
       targetConversationId = targetConversation.id;
       if (targetConversation.id !== sourceConversation.id) this.admission.add(targetConversation.id);
       const workspace = join(project.root, '.worktrees', `randolph-${runId}`);
       run = {
+        harness: context.harness,
         executable: info.executable,
         executableVersion: info.version,
         id: runId,
@@ -310,7 +349,7 @@ export class Runtime {
         this.store.putConversation(targetConversation);
         this.store.putRun(run!);
         if (kind === 'rerun') for (const [index, message] of context.messages.entries()) this.store.putMessage({ ...message, id: `${runId}:recovery:${index}`, runId, conversationId: targetConversation.id, createdAt });
-        this.store.append(run!, kind === 'restart' ? 'run.restart-requested' : 'run.rerun-requested', kind === 'restart' ? 'Explicit restart requested from the last safe checkpoint' : 'Explicit rerun requested in a linked conversation', { sourceRunId: sourceRun.id, sourceConversationId: sourceConversation.id, checkpointDigest: selected.checkpoint.digest, workspace });
+        this.store.append(run!, kind === 'restart' ? 'run.restart-requested' : 'run.rerun-requested', kind === 'restart' ? 'Explicit restart requested from the last safe checkpoint' : 'Explicit rerun requested in a linked conversation', { sourceRunId: sourceRun.id, sourceConversationId: sourceConversation.id, checkpointDigest: selected.checkpoint.digest, harness: context.harness, executable: info.executable, executableVersion: info.version, workspace });
       });
       try {
         if (context.memory) this.memory.retain(project.id, run.id, context.memory);
@@ -346,20 +385,27 @@ export class Runtime {
       const project = this.project(conversation.projectId);
       const settings = readHarnessSettings(project.root);
       if (settings.error) throw new Error(settings.error);
-      const info = await this.inspectExecutable(settings.defaults?.executable);
+      const savedSelection = this.selectionFor(conversation);
+      const explicit = input.harness !== undefined || input.model !== undefined || input.effort !== undefined;
+      const defaultHarness = settings.defaults?.harness ?? 'codex';
+      const selectedHarness = input.harness ?? savedSelection?.harness ?? settings.defaults?.harness ?? 'codex';
+      const sameHarnessSelection = savedSelection?.harness === selectedHarness ? savedSelection : settings.defaults?.harness === selectedHarness ? settings.defaults : undefined;
+      const selection: HarnessSelection = explicit
+        ? { harness: selectedHarness, model: input.model ?? sameHarnessSelection?.model ?? '', effort: input.effort ?? sameHarnessSelection?.effort ?? '' }
+        : savedSelection ?? settings.defaults ?? { harness: defaultHarness, model: '', effort: '' };
+      const info = await this.inspectExecutable(selection.harness, settings.defaults?.harness === selection.harness ? settings.defaults.executable : undefined);
       if (!this.accepting) throw new Error('Application is closing.');
       conversation = this.conversation(input.conversationId);
       if (readHarnessSettings(project.root).revision !== settings.revision) throw new Error('Project harness settings changed during discovery. Try again.');
-      const explicit = input.model !== undefined || input.effort !== undefined;
-      const override = explicit || Boolean(conversation.model || conversation.effort);
-      const selection: HarnessSelection = override
-        ? { harness: 'codex', model: explicit ? input.model ?? '' : conversation.model, effort: explicit ? input.effort ?? '' : conversation.effort }
-        : settings.defaults ?? { harness: 'codex', model: info.models[0]?.id ?? '', effort: info.models[0]?.defaultEffort ?? '' };
+      if (!selection.model && !selection.effort && !savedSelection && !settings.defaults) {
+        selection.model = info.models[0]?.id ?? '';
+        selection.effort = info.models[0]?.defaultEffort ?? '';
+      }
       this.validateSelection(selection, info);
       const memory = this.memory.prepare(project.id, input.text);
-      const settingsSource = override ? 'conversation' : settings.defaults ? 'project' : 'native';
+      const settingsSource = explicit || savedSelection ? 'conversation' : settings.defaults ? 'project' : 'native';
       const executionMode = conversation.executionMode ?? 'read-only';
-      if (executionMode === 'code' && !info.executionModes?.includes('code')) throw new Error('Code mode is not verified for this installed harness.');
+      this.validateExecutionMode(executionMode, info);
       const previousRun = this.store.runs().findLast(run => run.conversationId === conversation.id);
       const recoveryMessages = previousRun?.recoveryMessages
         ? [
@@ -373,13 +419,13 @@ export class Runtime {
       const workspace = prepareWorkspace(project.root, conversation.id, previous);
       if (executionMode === 'code') inspectGitWorkspace(project.root, workspace);
       this.reviews.invalidate(conversation.id);
-      const run: Run = { executable: info.executable, executableVersion: info.version, id: randomUUID(), projectId: project.id, conversationId: conversation.id, ...(recoveryMessages ? { recoveryMessages } : {}), status: 'starting', model: selection.model, effort: selection.effort, executionMode, settingsSource, memory, projectSettingsRevision: settings.revision, workspace, createdAt: now(), updatedAt: now(), lastActivityAt: now() };
+      const run: Run = { harness: selection.harness, executable: info.executable, executableVersion: info.version, id: randomUUID(), projectId: project.id, conversationId: conversation.id, ...(recoveryMessages ? { recoveryMessages } : {}), status: 'starting', model: selection.model, effort: selection.effort, executionMode, settingsSource, memory, projectSettingsRevision: settings.revision, workspace, createdAt: now(), updatedAt: now(), lastActivityAt: now() };
       run.logsPath = join(this.store.runDirectory(run), 'logs');
       this.store.transaction(() => {
-        this.store.putConversation({ ...conversation, title: conversation.title === 'New conversation' ? input.text.trim().slice(0, 64) : conversation.title, ...(explicit ? { model: selection.model, effort: selection.effort } : {}), updatedAt: now() });
+        this.store.putConversation({ ...conversation, title: conversation.title === 'New conversation' ? input.text.trim().slice(0, 64) : conversation.title, ...(explicit ? { harness: selection.harness, model: selection.model, effort: selection.effort } : {}), updatedAt: now() });
         this.store.putRun(run);
         this.store.putMessage({ id: randomUUID(), runId: run.id, conversationId: conversation.id, role: 'user', text: input.text, createdAt: now() });
-        this.store.append(run, 'run.created', executionMode === 'code' ? 'Code conversation queued' : 'Read-only conversation queued', { model: run.model, effort: run.effort, settingsSource, projectSettingsRevision: settings.revision, nativeVersion: info.version ?? 'unknown', workspace, executionMode });
+        this.store.append(run, 'run.created', executionMode === 'code' ? 'Code conversation queued' : 'Read-only conversation queued', { harness: run.harness, model: run.model, effort: run.effort, settingsSource, projectSettingsRevision: settings.revision, nativeVersion: info.version ?? 'unknown', executable: run.executable, workspace, executionMode });
       });
       try { this.memory.retain(project.id, run.id, memory); this.store.exportRun(run); }
       catch { this.finish(run, 'failed', 'Could not export run logs. No harness was launched.'); throw new Error('Could not export run logs.'); }
@@ -400,10 +446,11 @@ export class Runtime {
   }
   private async execute(run: Run, controller: AbortController): Promise<void> {
     try {
-      this.event(run, { type: 'run.started', summary: 'Connecting to Codex' });
+      const harness = run.harness ?? 'codex';
+      this.event(run, { type: 'run.started', summary: `Connecting to ${harness}`, data: { harness, executable: run.executable, executableVersion: run.executableVersion } });
       const messages = run.recoveryMessages?.map(message => ({ ...message })) ?? this.store.messages(run.conversationId).map(({ role, text }) => ({ role, text }));
       if (run.memory?.text) messages.unshift({ role: 'user', text: run.memory.text });
-      const result = await this.adapter.run({ executable: run.executable, executableVersion: run.executableVersion, workspace: run.workspace, model: run.model, effort: run.effort, executionMode: run.executionMode, messages, signal: controller.signal, onEvent: event => this.event(run, event) });
+      const result = await this.adapterForRun(run).run({ executable: run.executable, executableVersion: run.executableVersion, workspace: run.workspace, model: run.model, effort: run.effort, executionMode: run.executionMode, messages, signal: controller.signal, onEvent: event => this.event(run, event) });
       this.finish(run, result.status, result.status === 'stop-unconfirmed' ? 'The harness stopped responding; cleanup could not be confirmed.' : undefined);
       if (result.status === 'completed' && run.checkpoints?.length) {
         try { this.checkpoints.capture(run, 'completed-turn'); }
@@ -438,7 +485,7 @@ export class Runtime {
     if (!state) return;
     const run = state.run;
     run.status = 'stopping'; run.updatedAt = now();
-    this.store.transaction(() => { this.store.putRun(run); this.store.append(run, 'run.stopping', 'Stopping Codex; awaiting confirmation'); });
+    this.store.transaction(() => { this.store.putRun(run); this.store.append(run, 'run.stopping', `Stopping ${run.harness ?? 'codex'}; awaiting confirmation`); });
     this.changed(); state.controller.abort(); await state.done;
   }
   hasActiveWork(): boolean { return this.active.size > 0 || this.admission.size > 0 || this.reviews.hasActiveWork() || this.pushes.hasActiveWork(); }

@@ -8,6 +8,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Runtime, type AppPreferences, type AppSettingsSnapshot } from '@randolph/runtime';
 import { CodexAdapter } from '@randolph/harness-codex';
+import { GrokAdapter } from '@randolph/harness-grok';
 import { parseChatEvents, parseSend, parseId, parseProjectDefaults, parseConversationSelection, parseMode, parseReviewApproval } from './validation.js';
 
 const dataRoot = process.env.RANDOLPH_DATA_DIR ? resolve(process.env.RANDOLPH_DATA_DIR) : join(homedir(), '.randolph');
@@ -127,7 +128,7 @@ else {
       });
       session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => { callback(false); });
       session.defaultSession.setPermissionCheckHandler(() => false);
-      runtime = new Runtime(new CodexAdapter(), dataRoot);
+      runtime = new Runtime({ codex: new CodexAdapter(), grok: new GrokAdapter() }, dataRoot);
       notificationCursor = runtime.store.events().at(-1)?.sequence ?? 0;
       applySettings(runtime.appSettings());
       app.dock?.setIcon(join(rendererRoot, 'randolph.png'));
@@ -157,8 +158,8 @@ else {
         if (!input || typeof input !== 'object' || !('projectId' in input) || !('reference' in input)) throw new Error('Invalid memory history request.');
         return runtime!.memoryHistory(parseId(input.projectId), parseLessonRef(input.reference));
       });
-      command('randolph:harness-installations', () => runtime!.harnessInstallations());
-      command('randolph:harness', input => { const request = parseHarnessRequest(input); return runtime!.harness(request.projectId, request.executable); });
+      command('randolph:harness-installations', input => runtime!.harnessInstallations(parseHarnessRequest(input).harness));
+      command('randolph:harness', input => { const request = parseHarnessRequest(input); return runtime!.harness(request.projectId, request.executable, request.harness); });
       command('randolph:add-project', async () => {
         const choice = await dialog.showOpenDialog(window!, { title: 'Choose a project folder', properties: ['openDirectory'] });
         if (choice.canceled || !choice.filePaths[0]) return null;
