@@ -39,6 +39,7 @@ The desktop application and execution runtime are intended for open-source relea
 - [Roadmap](docs/roadmap.md): proposed milestones and their completion evidence.
 - [First controlled-run experiment](docs/plans/first-controlled-run.md): bounded plan before building the full application.
 - [Experiment getting started](experiments/controlled-run/README.md): offline checks and explicit native execution prerequisites.
+- [Deterministic Git proof](docs/research/scripted-git-2026-09-12.md): passed real native execution, sandbox denial, declined approval and permitted positive control, without model inference.
 - [Permission follow-up](docs/research/permission-followup-2026-09-12.md): verified workspace semantics and a real declined approval; standalone Git remains unverified.
 - [Controlled-run results](docs/research/controlled-run-2026-09-12.md): observed subscription execution, denied diagnostic mutations, and incomplete protection proof.
 - [Initial harness findings](docs/research/harness-compatibility.md): observed subscription integration and remaining limitations.

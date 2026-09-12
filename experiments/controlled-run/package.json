@@ -13,7 +13,8 @@
     "build": "tsc",
     "test": "pnpm build && node --test dist/test/*.test.js",
     "test:native": "pnpm build && node dist/src/cli.js",
-    "test:followup": "pnpm build && node dist/src/followup.js"
+    "test:followup": "pnpm build && node dist/src/followup.js",
+    "test:scripted": "pnpm build && node dist/src/scripted-git.js"
   },
   "dependencies": {
     "smol-toml": "1.8.0"

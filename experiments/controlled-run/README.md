@@ -59,3 +59,17 @@ pnpm test:followup --run --model gpt-5.6-luna --effort low \
 ```
 
 Use `--readiness` instead of `--run` for a no-inference preflight. Both require an explicit model/effort and new directories. This runner never reopens an evidence directory or retries a native turn. New directories do not authorize exceeding an agreed experiment budget. The third turn checks work after a denied request; it is not a retry of the unexecuted Git case. Controlled prompts, including private fixture paths, are stored in the private journal for traceability. Review and sanitize retained material before sharing it.
+
+## Deterministic native Git proof
+
+The [approved Git enforcement test](../../docs/research/scripted-git-2026-09-12.md) passed on Codex 0.149.0. It uses the real installed App Server, native shell tool, Git and sandbox, with a loopback server supplying scripted model responses. It makes no paid model calls and requires no credentials.
+
+```sh
+pnpm test:scripted --run \
+  --data-dir "$HOME/.randolph/experiments/your-new-scripted-id" \
+  --fixture-root "$HOME/.randolph/fixtures/your-new-scripted-id"
+```
+
+Both directories must be new and satisfy the existing fixture constraints. The script uses a fresh Codex home outside the writable worktree. It runs four bounded cases: ordinary write, denied direct commit, declined commit approval, and the exact commit explicitly permitted once as the positive control. Only disposable fixture refs may change. It does not merge or push. Each scripted native turn remains bounded to 60 seconds; the provider never retries or falls back to a live service. Scripted turns are recorded separately from model inference reservations.
+
+Private evidence includes exact commands, cwd, call IDs, actual tool outputs and refs. Do not publish these files wholesale. Routine cleanup removes the fixture and isolated home and closes the native process group and loopback server. This is not a crash-recovery guarantee.

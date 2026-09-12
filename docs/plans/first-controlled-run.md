@@ -2,6 +2,9 @@
 
 Status: execution authorized by the operator. The first bounded experiment ended **unverified** after Task 2 protection checks; Tasks 3–5 execution were not reached. See the [results and limitations](../research/controlled-run-2026-09-12.md). The [permission follow-up](../research/permission-followup-2026-09-12.md) subsequently verified the root interpretation and a real declined approval, while standalone Git remains unverified. Milestone M1 remains incomplete in the [roadmap](../roadmap.md). The checklist below retains the full acceptance requirements; an unchecked requirement is not claimed complete.
 
+**Approved acceptance amendment:** after the live model did not execute the requested standalone Git diagnostic, the operator approved deterministic model-response fixtures through the real installed App Server. For the standalone Git enforcement case, real tool execution, denial, unchanged refs and a permitted positive control now satisfy the criterion without live model selection. This is not a fake harness adapter: only the upstream model response is scripted. See the [passing proof](../research/scripted-git-2026-09-12.md). Prior live observations remain unchanged. Lifecycle, recovery and delivery requirements are not waived.
+
+
 **Goal:** determine whether one subscription-backed native agent can make a useful change with visible activity while Randolph enforces delivery approval, stops owned execution, and restores a durable checkpoint only on explicit request.
 
 **Architecture:** a headless controller owns one synthetic project, one conversation, one active run, and one worktree. A native Codex App Server adapter reports observed events; deterministic controller code owns approval, process lifetime, snapshots, and local Git delivery. This is a disposable experiment, not the production runtime.
