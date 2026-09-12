@@ -1,0 +1,49 @@
+# Controlled-run experiment
+
+A bounded, headless Codex subscription experiment. This is research code, not the Randolph application or a production security boundary. The [observed result](../../docs/research/controlled-run-2026-09-12.md) is **unverified**. Native testing stopped before lifecycle, checkpoints and delivery.
+
+## Offline checks
+
+Requires macOS for native execution, Git, Node 24 or newer, and pnpm. From this directory:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm lint
+pnpm typecheck
+pnpm build
+pnpm test
+```
+
+Default tests use synthetic local repositories and processes. They make no model calls. Approval tests validate predicates only; no commit/merge delivery engine is implemented.
+
+## Explicit native execution
+
+Requires an installed `codex` CLI authenticated with its own ChatGPT subscription. The harness-owned authentication stays in place. Execution inherits an allowlisted environment, disables configured MCP servers and optional tools for this probe, and records version/schema metadata. API authentication and unavailable model/effort selections stop the run.
+
+Choose new absolute directories outside existing repositories and outside each other. The fixture must be outside OS temporary roots. The evidence directory must not already exist. For example:
+
+```sh
+pnpm test:native --readiness \
+  --data-dir "$HOME/.randolph/experiments/your-unique-readiness-id" \
+  --fixture-root "$HOME/.randolph/fixtures/your-unique-readiness-id"
+```
+
+`--readiness` makes no model turns. Native inference instead requires `--run`, an explicit available `--model`, and `--effort`:
+
+```sh
+pnpm test:native --run --model gpt-5.6-luna --effort low \
+  --data-dir "$HOME/.randolph/experiments/your-unique-run-id" \
+  --fixture-root "$HOME/.randolph/fixtures/your-unique-run-id"
+```
+
+These examples are manual opt-ins, not instructions to rerun the completed experiment. The hardened effective-policy guard rejects the empty writable-root representation observed in Codex 0.149.0; expect an unverified readiness result until that interpretation is separately proven. No automatic model substitution or inference retry exists.
+
+One `--corrected` invocation is permitted only for an inconclusive native protection attempt, reusing its sealed evidence directory and remaining budget with a newly created fixture at the original path. A readiness-only result is not eligible. An unsealed, altered or legacy evidence directory is refused. Eight model turns and 900,000 ms of conservative reservations are the cumulative ceilings; each turn is bounded to 60 seconds. Exhaustion requires a separate decision, not a fresh directory to evade the limit.
+
+## Evidence and cleanup
+
+`events.jsonl` stores ordered, flushed records; `results.json` is a readable projection. Native command metadata and digests are retained, while raw tool output and reasoning are omitted. The versioned schema and, when reached, the useful-change diff remain in the private evidence directory. Do not publish the entire directory without reviewing it.
+
+Routine completion terminates the App Server process group and removes only the process-owned fixture. No checkpoint or resume is implemented. Process-group cleanup does not prove owner-loss or detached-descendant containment. If the controller is killed, inspect owned process/fixture state manually; do not infer that reopening terminates or resumes anything.
+
+The journal supports single-controller use. Directory ownership checks catch accidental reuse, path substitution and changed evidence; they are not protection against a malicious process with the same OS identity racing filesystem operations. Never run concurrent controllers against one evidence directory.

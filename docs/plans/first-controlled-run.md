@@ -1,6 +1,6 @@
 # First controlled-run experiment plan
 
-Status: proposed experiment implementation plan. The current authorization covers preparing and reviewing this document; it does not start implementation or inference. This is milestone M1 in the [roadmap](../roadmap.md).
+Status: execution authorized by the operator. The first bounded experiment ended **unverified** after Task 2 protection checks; Tasks 3–5 execution were not reached. See the [results and limitations](../research/controlled-run-2026-09-12.md). Milestone M1 remains incomplete in the [roadmap](../roadmap.md). The checklist below retains the full acceptance requirements; an unchecked requirement is not claimed complete.
 
 **Goal:** determine whether one subscription-backed native agent can make a useful change with visible activity while Randolph enforces delivery approval, stops owned execution, and restores a durable checkpoint only on explicit request.
 
@@ -34,7 +34,7 @@ Reserve turns as follows: one useful bugfix turn; two protected-operation turns 
 
 ## Proposed file map
 
-All paths below are files to create during later implementation, not files claimed to exist now.
+This is the approved target file map. The experiment implemented only the initial fixture/adapter/evidence path and approval predicates; lifecycle, checkpoint and delivery modules remain deferred after the protection stop.
 
 | Path | Responsibility |
 | --- | --- |
