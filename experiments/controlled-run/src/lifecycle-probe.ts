@@ -43,6 +43,17 @@ async function until(predicate: () => boolean, milliseconds: number): Promise<vo
 }
 const live = (binary: string, identity: ProcessIdentity): boolean => identityAlive(snapshot(binary, [identity.pid]), identity);
 
+async function startingIdentity(binary: string, pid: number | undefined): Promise<ProcessIdentity> {
+  if (!pid) throw new Error('Missing spawned process PID');
+  let identity: ProcessIdentity | undefined;
+  await until(() => {
+    try { identity = snapshot(binary, [pid]).find(item => item.pid === pid && !item.zombie); }
+    catch { return false; }
+    return !!identity;
+  }, 2_000);
+  return identity!;
+}
+
 export async function runLifecycleProbe(dataDir: string, fixtureRoot: string): Promise<number> {
   validateFixturePaths(fixtureRoot, dataDir);
   const owner = EvidenceOwner.open(dataDir, false);
@@ -71,8 +82,7 @@ export async function runLifecycleProbe(dataDir: string, fixtureRoot: string): P
     const originalRefs = observeFixture(fixture);
     writeFileSync(join(fixture.worktree, 'lifecycle-tool.mjs'), fixtureTool);
     sentinel = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
-    const sentinelIdentity = snapshot(binary).find(item => item.pid === sentinel?.pid);
-    if (!sentinelIdentity) throw new Error('Unrelated sentinel identity unavailable');
+    const sentinelIdentity = await startingIdentity(binary, sentinel.pid);
     rescue.set(sentinelIdentity.pid, sentinelIdentity);
     for (const name of ['stop', 'controller-death', 'harness-death', 'detached']) {
       const directory = join(dataDir, name);
@@ -89,8 +99,8 @@ export async function runLifecycleProbe(dataDir: string, fixtureRoot: string): P
       controller = fork(fileURLToPath(new URL('./lifecycle-controller.js', import.meta.url)), [], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
       controller.stderr?.on('data', () => {});
       controller.on('message', message => messages.push(message as Json));
-      const controllerIdentity = snapshot(binary).find(item => item.pid === controller?.pid);
-      if (!controllerIdentity) throw new Error('Controller identity unavailable');
+      await until(() => !!messages.find(message => message.type === 'controller-ready'), 2_000);
+      const controllerIdentity = await startingIdentity(binary, controller.pid);
       rescue.set(controllerIdentity.pid, controllerIdentity);
       controller.send({ type: 'start', directory: supervisorDir, home: join(fixture.root, `home-${name}`),
         worktree: fixture.worktree, binary, endpoint: server.endpoint, call });
@@ -98,8 +108,7 @@ export async function runLifecycleProbe(dataDir: string, fixtureRoot: string): P
       const ready = messages.find(message => message.type === 'native-ready')!;
       const native = ready.native as ProcessIdentity;
       rescue.set(native.pid, native);
-      const supervisorIdentity = snapshot(binary).find(item => item.pid === ready.supervisorPid);
-      if (!supervisorIdentity) throw new Error('Supervisor identity unavailable');
+      const supervisorIdentity = await startingIdentity(binary, ready.supervisorPid);
       rescue.set(supervisorIdentity.pid, supervisorIdentity);
       const roles = name === 'detached' ? ['detached'] : ['root', 'child'];
       const actors: ProcessIdentity[] = [];
@@ -109,7 +118,7 @@ export async function runLifecycleProbe(dataDir: string, fixtureRoot: string): P
       for (const role of roles) {
         const receipt = JSON.parse(readFileSync(join(fixtureDirectory, `${role}.json`), 'utf8'));
         if (receipt.token !== token || receipt.role !== role) throw new Error('Fixture receipt mismatch');
-        const identity = snapshot(binary).find(item => item.pid === receipt.pid && !item.zombie);
+        const identity = snapshot(binary, [receipt.pid]).find(item => item.pid === receipt.pid && !item.zombie);
         if (!identity) throw new Error('Fixture actor not alive before fault');
         const argv = execFileSync('/bin/ps', ['-p', String(identity.pid), '-o', 'command='], { encoding: 'utf8' }).trim();
         if (!argv.endsWith(`lifecycle-tool.mjs ${name} ${token} ${role}`)) throw new Error('Fixture actor command identity mismatch');

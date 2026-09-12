@@ -14,3 +14,4 @@ process.on('message', (message: { type: string }) => {
   } else if (message.type === 'stop' && supervisor?.connected) supervisor.send(message);
 });
 process.on('disconnect', () => { if (supervisor?.connected) supervisor.disconnect(); });
+process.send?.({ type: 'controller-ready', pid: process.pid });

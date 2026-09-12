@@ -114,6 +114,8 @@ For this spike, use one append-only event journal as the state authority and der
 
 ## Task 3 — Prove stop and owner-loss cleanup
 
+**Completed research outcome:** all four native cases executed in the [completion report](../research/lifecycle-completion-2026-09-12.md). Stop, controller death and harness death passed. The detached child escaped; Task 3's product acceptance criterion failed. Independent checkpoint research may continue, but the supervisor cannot be promoted as a verified containment boundary.
+
 **Bounded execution amendment:** the operator approved proceeding with the lifecycle experiment after the deterministic Git proof. Reuse scripted local responses to launch real native tools without model inference. The candidate is a per-run supervisor with controller IPC-disconnect detection and retained process-tree observations, not a installed service. Test explicit Stop, controller death, harness death and rapid detached-child reparenting separately. Polling may miss reparenting between snapshots; such an escape fails this candidate even if the test observer later rescues it. Supervisor death, arbitrary unobserved descendants, OS failure and later Electron host behavior remain outside any passing claim. Journals have one writer per stream; replay/reopen is read-only. Process identity checks immediately before signals reduce PID-reuse risk but do not make separate lookup/signal syscalls atomic.
 
 **Files:** `lifecycle.ts`, `control.ts`, `cli.ts`, `test/lifecycle.test.ts`, and `test/native.test.ts`.

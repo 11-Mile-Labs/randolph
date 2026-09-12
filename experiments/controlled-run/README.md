@@ -76,6 +76,8 @@ Private evidence includes exact commands, cwd, call IDs, actual tool outputs and
 
 ## Lifecycle probe
 
+The [completed experiment](../../docs/research/lifecycle-completion-2026-09-12.md) failed detached-child containment. This supervisor's `stopped` projection describes only its observed set and cannot certify all work exited. It is research code, not a production lifecycle implementation.
+
 `pnpm test:lifecycle --run --data-dir "$HOME/.randolph/experiments/<unique-lifecycle-run>" --fixture-root "$HOME/.randolph/fixtures/<unique-lifecycle-run>"` opts into four bounded native cases: Stop, controller SIGKILL, harness SIGKILL and a rapidly detached child. Both directories must be absolute and new. The installed Codex 0.149.0 App Server uses only local scripted Responses fixtures with a new credential-free home; no inference calls or subscription credentials are needed.
 
 The candidate is a per-run supervisor connected to the controller by IPC. It closes dispatch on Stop or controller loss, requests native cancellation, allows two seconds for graceful shutdown, then terminates observed descendants using PID, UID and microsecond start identities. The target is five seconds from the observed fault to the termination result. macOS `libproc` supplies identities through a small C helper built with `clang` in active OS scratch space. Default offline tests compile and exercise this helper on macOS; other platforms skip its native test. No system service is installed.

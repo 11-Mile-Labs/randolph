@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, fork } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -57,4 +58,14 @@ test('omitted live retained identity is uncertain rather than exited', () => {
   const tracker = new ProcessTracker(binary, journal, { pid: process.pid, ppid: process.ppid, pgid: process.pid, uid: process.getuid?.() ?? 501, start: '1.000001', zombie: false });
   assert.throws(() => tracker.scan(), /enumeration failed/);
   assert.equal(tracker.uncertain, true);
+});
+
+test('controller announces readiness before any supervisor or native dispatch', async () => {
+  const controller = fork(fileURLToPath(new URL('../src/lifecycle-controller.js', import.meta.url)), [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  try {
+    const [message] = await once(controller, 'message', { signal: AbortSignal.timeout(2_000) });
+    assert.deepEqual(message, { type: 'controller-ready', pid: controller.pid });
+    controller.disconnect();
+    await once(controller, 'exit', { signal: AbortSignal.timeout(2_000) });
+  } finally { if (controller.exitCode === null) controller.kill('SIGKILL'); }
 });
