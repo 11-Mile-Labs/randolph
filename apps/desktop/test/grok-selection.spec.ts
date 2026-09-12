@@ -16,9 +16,9 @@ test('Grok discovery blocks unverified execution and a Codex override uses the m
 const {createInterface}=require('node:readline'); const {appendFileSync}=require('node:fs');
 const calls=${JSON.stringify(calls)}; const send=m=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',...m})+'\\n');
 const models={currentModelId:'grok-4.6',availableModels:[{modelId:'grok-4.6',name:'Grok 4.6',_meta:{reasoningEfforts:[{id:'low',default:true},{id:'high',default:false}]}}]};
-if(process.argv.includes('--version')){console.log('grok 1.0.25 (f7e67d6988e2) [stable]');process.exit(0);}
+if(process.argv.includes('--version')){console.log('grok 1.0.30 (04b7ffed98c6) [stable]');process.exit(0);}
 createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);appendFileSync(calls,JSON.stringify({method:m.method,params:m.params})+'\\n');
- if(m.method==='initialize')send({id:m.id,result:{protocolVersion:1,authMethods:[{id:'cached_token'}],_meta:{agentVersion:'1.0.25',defaultAuthMethodId:'cached_token',modelState:models}}});
+ if(m.method==='initialize')send({id:m.id,result:{protocolVersion:1,authMethods:[{id:'cached_token'}],_meta:{agentVersion:'1.0.30',defaultAuthMethodId:'cached_token',modelState:models}}});
  else if(m.method==='authenticate')send({id:m.id,result:{_meta:{auth_mode:'Oidc',backend_billed:false,subscription_tier:'SuperGrok Heavy'}}});
  else if(m.method==='session/new')send({id:m.id,result:{sessionId:'native-session',models,configOptions:[{id:'reasoning_effort',currentValue:m.params._meta.reasoningEffort}]}});
  else if(m.method==='session/prompt'){send({method:'session/update',params:{sessionId:'native-session',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Grok read-only response'}}}});send({id:m.id,result:{stopReason:'end_turn'}});}
