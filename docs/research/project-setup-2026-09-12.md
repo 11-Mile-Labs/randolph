@@ -22,6 +22,10 @@ Independent review approved the setup implementation after these corrections. Al
 
 The chat replay acceptance test intermittently stalled in Playwright's mouse click after Electron relaunch, despite a visible, focused window and responsive animation frames. No transport failure was observed before that click. The replay assertion now uses focused keyboard activation, with existing mouse-navigation checks retained earlier in the same test. Three sequential repetitions passed, and independent review accepted the unchanged replay/no-new-execution requirements. This does not establish that the intermittent automation mouse-click stall is fixed.
 
+## Local package
+
+The macOS packaging command completed with the normal ad hoc signature. Its first attempt produced a signed app but failed to remove a temporary staging directory with `ENOTEMPTY`. A separately reviewed, bounded filesystem cleanup retry corrected that transient failure; persistent cleanup failures still propagate. This is a local testing package, not a notarized public release.
+
 ## Cleanup limits
 
 New executions record a hashed Mac identity and boot-session identifier. Synthetic tests verify that explicit reconciliation requires a later boot on the original Mac and cannot clear active, same-boot, copied-machine, legacy, malformed, or unavailable evidence. Failed persistence preserves quarantine. Reconciliation leaves the original run interrupted and starts no work.

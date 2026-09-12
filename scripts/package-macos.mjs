@@ -159,5 +159,5 @@ try {
   await rename(packagedApp, finalApp);
   process.stdout.write(`Packaged ${finalApp}\n`);
 } finally {
-  await rm(temporary, { recursive: true, force: true });
+  await rm(temporary, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 }
