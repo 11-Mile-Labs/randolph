@@ -336,13 +336,17 @@ function loadCheckpoint(directory: string, expectedDigest: string): CheckpointMa
   return { ...stored, digest: expectedDigest, directory: checkpoint };
 }
 
+export function readCheckpoint(directory: string, expectedDigest: string): CheckpointManifest {
+  return loadCheckpoint(directory, expectedDigest);
+}
+
 function assertOwnedDirectory(path: string, identity: Stats): void {
   const current = lstatSync(path);
   if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== identity.dev || current.ino !== identity.ino) throw new Error('Restore destination was replaced while files were being written.');
 }
 
 export function restoreCheckpoint(directory: string, expectedDigest: string, destination: string): { workspace: string; manifest: CheckpointManifest } {
-  const manifest = loadCheckpoint(directory, expectedDigest);
+  const manifest = readCheckpoint(directory, expectedDigest);
   if (!isAbsolute(destination) || resolve(destination) !== destination) throw new Error('Restore destination must be an absolute canonical path.');
   const parent = canonicalDirectory(dirname(destination), 'Restore destination parent');
   if (exists(destination)) throw new Error('Restore destination must be a new directory. Existing files are never overwritten.');

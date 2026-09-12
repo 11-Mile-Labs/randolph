@@ -1,4 +1,4 @@
-import type { SaveAppSettingsInput, SaveGlobalMemoryInput, CheckpointInput, ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
+import type { RestartCheckpointInput, SaveAppSettingsInput, SaveGlobalMemoryInput, CheckpointInput, ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid settings request.');
   return value as Record<string, unknown>;
@@ -66,4 +66,10 @@ export function parseGlobalMemory(value: unknown): SaveGlobalMemoryInput {
   const input = record(value);
   if (typeof input.autoApprove !== 'boolean') throw new Error('Invalid global lesson setting.');
   return { autoApprove: input.autoApprove, expectedRevision: parseRevision(input.expectedRevision) };
+}
+
+export function parseLinkedCheckpoint(value: unknown): RestartCheckpointInput {
+  const input = record(value);
+  const checkpoint = parseCheckpoint({ runId: input.runId, digest: input.checkpointDigest });
+  return { runId: checkpoint.runId, checkpointDigest: checkpoint.digest };
 }

@@ -17,6 +17,8 @@ const bridge: DesktopBridge = {
     return () => { active = false; ipcRenderer.removeListener('randolph:navigate', navigate); };
   },
   restoreCheckpoint: async input => ipcRenderer.invoke('randolph:restore-checkpoint', input),
+  restartRun: async input => ipcRenderer.invoke('randolph:restart-run', input),
+  rerunFromCheckpoint: async input => ipcRenderer.invoke('randolph:rerun-checkpoint', input),
   memorySnapshot: async id => ipcRenderer.invoke('randolph:memory', id),
   memoryCommand: async input => ipcRenderer.invoke('randolph:memory-command', input),
   memoryHistory: async (id, reference) => ipcRenderer.invoke('randolph:memory-history', { projectId: id, reference }),

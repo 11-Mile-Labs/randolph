@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { closeSync, constants, fsyncSync, mkdirSync, openSync, realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import type { Run } from './contracts.js';
-import { createCheckpoint, restoreCheckpoint } from './checkpoint-storage.js';
+import { createCheckpoint, readCheckpoint, restoreCheckpoint, type CheckpointManifest } from './checkpoint-storage.js';
+import { restoreCheckpointWorktree } from './checkpoint-workspace.js';
 import { Store } from './store.js';
 
 export type CheckpointRecord = {
@@ -29,12 +30,16 @@ export class Checkpoints {
       if (path === dirname(dataRoot)) break;
     }
     const snapshot = this.store.snapshot();
+    const recoveryMessages = run.recoveryMessages?.map((message, index) => ({ ...message, id: `${run.id}:recovery:${index}`, runId: run.id, conversationId: run.conversationId, createdAt: run.createdAt }));
+    const newRecoveryMessages = boundary === 'completed-turn'
+      ? snapshot.messages.filter(message => message.runId === run.id && message.role === 'assistant' && !message.id.startsWith(`${run.id}:recovery:`))
+      : [];
     const manifest = createCheckpoint(run.workspace, directory, {
       schemaVersion: 1, boundary,
       run: { ...run, checkpoints: undefined },
       project: snapshot.projects.find(project => project.id === run.projectId),
       conversation: snapshot.conversations.find(conversation => conversation.id === run.conversationId),
-      messages: snapshot.messages.filter(message => message.conversationId === run.conversationId),
+      messages: recoveryMessages ? [...recoveryMessages, ...newRecoveryMessages] : snapshot.messages.filter(message => message.conversationId === run.conversationId),
       events: this.store.events(run.id),
       externalActions: snapshot.reviews.filter(review => review.conversationId === run.conversationId),
     });
@@ -55,11 +60,21 @@ export class Checkpoints {
   }
 
   restore(input: CheckpointInput, destination: string): CheckpointRestore {
-    const run = this.store.runs().find(candidate => candidate.id === input.runId);
-    const checkpoint = run?.checkpoints?.find(candidate => candidate.digest === input.digest);
-    if (!run || !checkpoint) throw new Error('This run does not contain the selected recoverable checkpoint.');
+    const { checkpoint } = this.selected(input.runId, input.digest);
     const restored = restoreCheckpoint(checkpoint.directory, checkpoint.digest, destination);
     // A historical restore is an export, not a model dispatch or a delivery retry.
     return { workspace: restored.workspace, checkpoint };
+  }
+
+  selected(runId: string, digest: string): { run: Run; checkpoint: CheckpointRecord; manifest: CheckpointManifest } {
+    const run = this.store.runs().find(candidate => candidate.id === runId);
+    const checkpoint = run?.checkpoints?.find(candidate => candidate.digest === digest);
+    if (!run || !checkpoint) throw new Error('This run does not contain the selected recoverable checkpoint.');
+    return { run, checkpoint, manifest: readCheckpoint(checkpoint.directory, checkpoint.digest) };
+  }
+
+  restoreWorktree(runId: string, digest: string, projectRoot: string, workspaceId: string): { workspace: string; manifest: CheckpointManifest } {
+    const { checkpoint } = this.selected(runId, digest);
+    return restoreCheckpointWorktree(checkpoint.directory, checkpoint.digest, projectRoot, workspaceId);
   }
 }

@@ -1,6 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { parseAppSettings, parseGlobalMemory, parseCheckpoint, parsePushApproval } from './validation.js';
+import { parseLinkedCheckpoint, parseAppSettings, parseGlobalMemory, parseCheckpoint, parsePushApproval } from './validation.js';
 import { parseMemoryCommand, parseLessonRef } from './memory-validation.js';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, net, protocol, session, Tray, type IpcMainInvokeEvent } from 'electron';
 import { homedir } from 'node:os';
@@ -142,6 +142,8 @@ else {
       command('randolph:app-settings', () => { const settings = runtime!.appSettings(); applySettings(settings); return settings; });
       command('randolph:save-app-settings', input => { const settings = runtime!.saveAppSettings(parseAppSettings(input)); applySettings(settings); return settings; });
       command('randolph:save-global-memory', input => runtime!.saveGlobalMemory(parseGlobalMemory(input)));
+      command('randolph:restart-run', input => runtime!.restartRun(parseLinkedCheckpoint(input)));
+      command('randolph:rerun-checkpoint', input => runtime!.rerunFromCheckpoint(parseLinkedCheckpoint(input)));
       command('randolph:restore-checkpoint', async input => {
         const checkpoint = parseCheckpoint(input);
         const choice = await dialog.showOpenDialog(window!, { title: 'Choose a folder for the restored checkpoint', message: 'Creates a new folder with retained files and Git history. No agent or delivery action starts.', properties: ['openDirectory', 'createDirectory'] });

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 function git(root: string, args: string[]): string {
   const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' };
@@ -21,8 +21,9 @@ export function canonicalProject(path: string): string {
 export function prepareWorkspace(root: string, conversationId: string, previous?: string): string {
   if (realpathSync(root) !== root) throw new Error('Project root changed. Re-add the project before continuing.');
   const base = join(root, '.worktrees');
-  const path = join(base, `randolph-${conversationId}`);
-  const verify = (): string => {
+  const defaultPath = join(base, `randolph-${conversationId}`);
+  const verify = (path: string): string => {
+    if (dirname(path) !== base || !/^randolph-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(basename(path))) throw new Error('Conversation workspace is outside its app-managed project directory.');
     if (realpathSync(base) !== base || realpathSync(path) !== path) throw new Error('Conversation workspace was redirected outside its original location.');
     const actual = realpathSync(git(path, ['rev-parse', '--show-toplevel']));
     const common = realpathSync(git(path, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
@@ -32,8 +33,8 @@ export function prepareWorkspace(root: string, conversationId: string, previous?
   };
   if (previous) {
     if (previous === root) return root;
-    if (previous !== path || !existsSync(path)) throw new Error('Conversation workspace is missing or changed. Create a new conversation; history is not restarted automatically.');
-    return verify();
+    if (!existsSync(previous)) throw new Error('Conversation workspace is missing or changed. Create a new conversation; history is not restarted automatically.');
+    return verify(previous);
   }
   let head: string;
   try { head = git(root, ['rev-parse', '--verify', 'HEAD']); }
@@ -42,9 +43,9 @@ export function prepareWorkspace(root: string, conversationId: string, previous?
   if (realpathSync(base) !== base) throw new Error('Project worktree directory must be inside the repository, without a symlink.');
   // A process may have exited after Git created this exact conversation workspace.
   // Reuse only the registered location and repository identity, without recreating it.
-  if (existsSync(path)) return verify();
-  git(root, ['worktree', 'add', '--detach', '--no-checkout', path, head]);
+  if (existsSync(defaultPath)) return verify(defaultPath);
+  git(root, ['worktree', 'add', '--detach', '--no-checkout', defaultPath, head]);
   // Resolve conditional Git configuration in the new worktree before reading files.
-  git(path, ['reset', '--hard', head]);
-  return verify();
+  git(defaultPath, ['reset', '--hard', head]);
+  return verify(defaultPath);
 }

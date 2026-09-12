@@ -30,6 +30,7 @@ export class Store {
   projects(): Project[] { return this.documents('projects'); }
   conversations(): Conversation[] { return this.documents('conversations'); }
   runs(): Run[] { return this.documents('runs'); }
+  messages(conversationId?: string): Message[] { return this.documents<Message>('messages').filter(message => !conversationId || message.conversationId === conversationId); }
   reviews(): ReviewRecord[] { return this.documents('reviews'); }
   putReview(review: ReviewRecord): void {
     this.db.prepare('INSERT INTO reviews VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET document=excluded.document').run(review.id, review.conversationId, JSON.stringify(review));
@@ -80,7 +81,7 @@ export class Store {
     renameSync(temporary, path);
   }
   snapshot(): WorkspaceSnapshot {
-    return { projects: this.projects(), conversations: this.conversations(), runs: this.runs(), messages: this.documents('messages'), events: this.events(), reviews: this.reviews(), dataRoot: this.root };
+    return { projects: this.projects(), conversations: this.conversations(), runs: this.runs(), messages: this.messages(), events: this.events(), reviews: this.reviews(), dataRoot: this.root };
   }
   close(): void { this.db.close(); }
 }

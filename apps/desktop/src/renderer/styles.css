@@ -93,18 +93,11 @@ summary:focus-visible {
 }
 
 .logo-mark {
-  display: inline-grid;
+  display: block;
   width: 32px;
   height: 32px;
   flex: 0 0 auto;
-  place-items: center;
-  border-radius: 9px;
-  color: #fffaf3;
-  background: #a95732;
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 18%);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 18px;
-  font-weight: 700;
+  object-fit: contain;
 }
 
 .add-project-button,
@@ -1156,3 +1149,7 @@ html[data-theme='system'] .event-detail { color: var(--ui-text); }
 .history-timeline summary { color: var(--muted); font-size: 12px; cursor: pointer; }
 .history-delivery article { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0; padding: 12px; }
 .history-delivery code { overflow-wrap: anywhere; }
+.checkpoint-actions { display: flex; flex-wrap: wrap; gap: 8px; grid-column: 1 / -1; }
+.recovery-confirmation { border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 16px 0; }
+.recovery-confirmation .checkpoint-actions { margin-top: 14px; }
+.recovery-confirmation .primary-button { padding: 8px 14px; }

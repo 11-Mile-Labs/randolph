@@ -99,7 +99,7 @@ html[data-theme='system'] .brand-row strong { color: var(--nav-ink); }
 .settings-screen h2 { margin: 0; font-family: Georgia, 'Times New Roman', serif; }
 .workspace-home p,
 .settings-screen p { color: var(--nav-muted); line-height: 1.55; }
-.workspace-mark { width: 94px; height: 94px; flex: 0 0 auto; object-fit: contain; border-radius: 18px; }
+.workspace-mark { width: 94px; height: 94px; flex: 0 0 auto; object-fit: contain; }
 .workspace-projects { display: grid; gap: 14px; max-width: 1020px; margin: 0 auto; }
 .workspace-project-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, .9fr); gap: 28px; padding: 24px; border: 1px solid var(--nav-line); border-radius: 14px; background: color-mix(in srgb, var(--nav-surface) 85%, var(--nav-paper)); }
 .workspace-project-card code { display: block; max-width: 100%; overflow: hidden; color: var(--nav-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
