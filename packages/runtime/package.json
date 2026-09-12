@@ -11,6 +11,10 @@
     "./contracts": {
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"
+    },
+    "./project-context": {
+      "types": "./dist/project-context.d.ts",
+      "import": "./dist/project-context.js"
     }
   },
   "scripts": {

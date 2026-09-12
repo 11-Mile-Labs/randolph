@@ -1,5 +1,6 @@
+import { parseProjectContext } from '@randolph/runtime/project-context';
 import { isAbsolute } from 'node:path';
-import type { ChatEventsInput, RestartCheckpointInput, SaveAppSettingsInput, SaveGlobalMemoryInput, CheckpointInput, ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessId, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
+import type { ApproveProjectSetupInput, InspectProjectInput, ChatEventsInput, RestartCheckpointInput, SaveAppSettingsInput, SaveGlobalMemoryInput, CheckpointInput, ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessId, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid settings request.');
   return value as Record<string, unknown>;
@@ -95,4 +96,15 @@ export function parseHarnessRequest(value: unknown): { projectId?: string; execu
   if (value === undefined) return {};
   const input = record(value);
   return { ...(input.projectId === undefined ? {} : { projectId: parseId(input.projectId) }), ...(input.executable === undefined ? {} : { executable: parseExecutable(input.executable) ?? undefined }), ...(input.harness === undefined ? {} : { harness: parseHarnessId(input.harness) }) };
+}
+
+export function parseInspectProject(value: unknown): InspectProjectInput {
+  const input = record(value);
+  if (typeof input.brief !== 'string' || input.brief.length > 8000 || input.brief.includes('\0')) throw new Error('Setup instructions must be at most 8,000 characters.');
+  return { projectId: parseId(input.projectId), selection: parseSelection(input.selection), brief: input.brief, ...(input.executable === undefined ? {} : { executable: parseExecutable(input.executable) ?? undefined }) };
+}
+export function parseSetupApproval(value: unknown): ApproveProjectSetupInput {
+  const input = record(value);
+  if (typeof input.proposalRevision !== 'string' || !/^[a-f0-9]{64}$/u.test(input.proposalRevision)) throw new Error('Invalid setup proposal revision.');
+  return { projectId: parseId(input.projectId), runId: parseId(input.runId), proposalRevision: input.proposalRevision, expectedContextRevision: parseRevision(input.expectedContextRevision), value: parseProjectContext(input.value) };
 }

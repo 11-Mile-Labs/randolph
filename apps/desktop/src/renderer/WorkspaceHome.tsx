@@ -9,11 +9,12 @@ type Props = {
   onOpenConversation: (conversationId: string) => void;
   onCreateConversation: (projectId: string) => void;
   onOpenProjectSettings: (projectId: string) => void;
+  onOpenProjectSetup: (projectId: string) => void;
   onOpenMemory: (projectId: string) => void;
   onOpenHistory: (projectId: string) => void;
 };
 
-export default function WorkspaceHome({ projects, conversations, runs, busy, onAddProject, onOpenConversation, onCreateConversation, onOpenProjectSettings, onOpenMemory, onOpenHistory }: Props) {
+export default function WorkspaceHome({ projects, conversations, runs, busy, onAddProject, onOpenConversation, onCreateConversation, onOpenProjectSettings, onOpenProjectSetup, onOpenMemory, onOpenHistory }: Props) {
   return <section className="workspace-home" aria-labelledby="workspace-title">
     <header className="workspace-home-header">
       <img src="/randolph.png" alt="Randolph" className="workspace-mark" />
@@ -30,6 +31,7 @@ export default function WorkspaceHome({ projects, conversations, runs, busy, onA
             {projectConversations[0] ? <button className="primary-button" type="button" onClick={() => onOpenConversation(projectConversations[0]!.id)}>Open latest conversation</button> : null}
             <button className="secondary-button" type="button" onClick={() => onCreateConversation(project.id)} disabled={busy}>New conversation</button>
             <button className="secondary-button" type="button" onClick={() => onOpenProjectSettings(project.id)}>Project settings</button>
+            <button className="secondary-button" type="button" onClick={() => onOpenProjectSetup(project.id)}>Project setup</button>
             <button className="secondary-button" type="button" onClick={() => onOpenMemory(project.id)}>Memory</button>
             <button className="secondary-button" type="button" onClick={() => onOpenHistory(project.id)}>Run history</button>
           </div>

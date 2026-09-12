@@ -1,6 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { parseHarnessRequest, parseLinkedCheckpoint, parseAppSettings, parseGlobalMemory, parseCheckpoint, parsePushApproval } from './validation.js';
+import { parseInspectProject, parseSetupApproval, parseHarnessRequest, parseLinkedCheckpoint, parseAppSettings, parseGlobalMemory, parseCheckpoint, parsePushApproval } from './validation.js';
 import { parseMemoryCommand, parseLessonRef } from './memory-validation.js';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, net, protocol, session, Tray, type IpcMainInvokeEvent } from 'electron';
 import { homedir } from 'node:os';
@@ -158,6 +158,9 @@ else {
         if (!input || typeof input !== 'object' || !('projectId' in input) || !('reference' in input)) throw new Error('Invalid memory history request.');
         return runtime!.memoryHistory(parseId(input.projectId), parseLessonRef(input.reference));
       });
+      command('randolph:project-setup', id => runtime!.projectSetup(parseId(id)));
+      command('randolph:inspect-project', input => runtime!.inspectProject(parseInspectProject(input)));
+      command('randolph:approve-project-setup', input => runtime!.approveProjectSetup(parseSetupApproval(input)));
       command('randolph:harness-installations', input => runtime!.harnessInstallations(parseHarnessRequest(input).harness));
       command('randolph:harness', input => { const request = parseHarnessRequest(input); return runtime!.harness(request.projectId, request.executable, request.harness); });
       command('randolph:add-project', async () => {

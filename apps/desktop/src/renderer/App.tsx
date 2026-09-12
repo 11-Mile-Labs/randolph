@@ -23,6 +23,7 @@ import type {
 } from '@randolph/runtime/contracts';
 import ProjectSettings from './ProjectSettings';
 import ReviewPanel from './ReviewPanel';
+import ProjectSetup from './ProjectSetup';
 
 const EMPTY_SNAPSHOT: WorkspaceSnapshot = {
   projects: [],
@@ -106,6 +107,7 @@ type SidebarProps = {
   onOpenSettings: () => void;
   onOpenProjectMemory: (projectId: string) => void;
   onOpenProjectSettings: (projectId: string) => void;
+  onOpenProjectSetup: (projectId: string) => void;
   onOpenProjectHistory: (projectId: string) => void;
 };
 
@@ -123,6 +125,7 @@ function Sidebar({
   onOpenSettings,
   onOpenProjectMemory,
   onOpenProjectSettings,
+  onOpenProjectSetup,
   onOpenProjectHistory,
 }: SidebarProps) {
   return (
@@ -175,6 +178,7 @@ function Sidebar({
                   <div className="project-links" aria-label={`${project.name} tools`}>
                     <button type="button" onClick={() => onOpenProjectMemory(project.id)}>Memory</button>
                     <button type="button" onClick={() => onOpenProjectHistory(project.id)}>Run history</button>
+                    <button type="button" onClick={() => onOpenProjectSetup(project.id)}>Project setup</button>
                     <button type="button" onClick={() => onOpenProjectSettings(project.id)}>Project settings</button>
                   </div>
                   {projectConversations.length === 0 ? (
@@ -494,6 +498,7 @@ export default function App() {
   const [screen, setScreen] = useState<'workspace' | 'chat' | 'settings'>('workspace');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [settingsProjectId, setSettingsProjectId] = useState<string>();
+  const [setupProjectId, setSetupProjectId] = useState<string>();
   const [historyProjectId, setHistoryProjectId] = useState<string>();
   const [memoryProjectId, setMemoryProjectId] = useState<string>();
   const [selectedReviewId, setSelectedReviewId] = useState<string>();
@@ -796,6 +801,7 @@ export default function App() {
         onOpenSettings={() => setScreen('settings')}
         onOpenProjectMemory={setMemoryProjectId}
         onOpenProjectSettings={setSettingsProjectId}
+        onOpenProjectSetup={setSetupProjectId}
         onOpenProjectHistory={setHistoryProjectId}
       />
 
@@ -809,6 +815,7 @@ export default function App() {
           onOpenConversation={selectConversation}
           onCreateConversation={projectId => void createConversation(projectId)}
           onOpenProjectSettings={setSettingsProjectId}
+          onOpenProjectSetup={setSetupProjectId}
           onOpenMemory={setMemoryProjectId}
           onOpenHistory={setHistoryProjectId}
         /> : loading ? (
@@ -951,6 +958,7 @@ export default function App() {
       /> : null}
 
       {settingsProject ? <ProjectSettings key={settingsProject.id} project={settingsProject} onClose={() => setSettingsProjectId(undefined)} onChanged={reloadSnapshot} /> : null}
+      {setupProjectId ? (() => { const project = snapshot.projects.find(item => item.id === setupProjectId); return project ? <ProjectSetup key={project.id} project={project} onClose={() => setSetupProjectId(undefined)} onChanged={reloadSnapshot} /> : null; })() : null}
       {historyProjectId ? <HistoryPanel key={historyProjectId} runs={historyRuns} messages={historyMessages} events={snapshot.events} reviews={snapshot.reviews} onRecovered={async id => { await reloadSnapshot(); setHistoryProjectId(undefined); selectConversation(id); }} onClose={() => setHistoryProjectId(undefined)} /> : null}
       {memoryProjectId ? <MemoryPanel projectId={memoryProjectId} onClose={() => setMemoryProjectId(undefined)} /> : null}
       {selectedReview ? <ReviewPanel key={selectedReview.id} review={selectedReview} onClose={() => setSelectedReviewId(undefined)} onChanged={reloadSnapshot} onRefresh={() => openReview(true)} /> : null}

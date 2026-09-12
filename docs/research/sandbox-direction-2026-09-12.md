@@ -1,12 +1,14 @@
 # Sandbox containment direction
 
-**Research status:** recommendations for further validation, not approved product decisions.
+**Research status:** superseded by the [user's scope correction](sandbox-scope-2026-09-12.md). The VM recommendation below incorrectly expanded safety sandboxing into general lifecycle control and is withdrawn. Technical comparisons are historical research; proposed actions below are inactive.
 
 **Checked:** 2026-09-12 against official vendor documentation and the local macOS SDK. No harness login, credential transfer, software installation, model inference, or service change was performed.
 
 Randolph's process-lifecycle experiment showed the limit of host process-tree polling: a child can create a new session and reparent before the observer records its identity. A stronger Stop guarantee requires a containment boundary whose lifetime does not depend on discovering every guest process.
 
 ## Recommendation
+
+**Follow-up:** the user challenged the proposed Ubuntu/Lima footprint. That installation is now parked; continue the [lightweight sandbox investigation](lightweight-sandbox-2026-09-12.md). The comparison below remains research context, not a selected runtime.
 
 Use a Linux virtual machine as the next research boundary. Prototype the contract with Lima using Apple's Virtualization framework, then evaluate direct integration with Apple's Containerization package if the product can require macOS 26 on Apple silicon.
 

@@ -56,3 +56,16 @@ test('harness IPC accepts only the bounded Codex and Grok catalog', () => {
   for (const value of ['claude', '', null, 42]) assert.throws(() => validation.parseHarnessId(value));
   assert.throws(() => validation.parseHarnessRequest({ harness: 'claude' }));
 });
+
+test('project setup IPC binds inspection and approval to bounded identities, revisions, and context',()=>{
+ const projectId='10000000-0000-0000-0000-000000000001';const runId='10000000-0000-0000-0000-000000000002';
+ const input={projectId,selection:{harness:'codex',model:'fixture',effort:'low'},brief:'Inspect this idea.'};
+ assert.deepEqual(validation.parseInspectProject(input),input);
+ assert.throws(()=>validation.parseInspectProject({...input,brief:'x'.repeat(8001)}));
+ assert.throws(()=>validation.parseInspectProject({...input,executable:'../cli'}));
+ const approval={projectId,runId,proposalRevision:'a'.repeat(64),expectedContextRevision:null,value:{purpose:'Approved purpose',instructions:'Line one\nLine two',documents:[]}};
+ assert.deepEqual(validation.parseSetupApproval(approval),approval);
+ assert.throws(()=>validation.parseSetupApproval({...approval,proposalRevision:'latest'}));
+ assert.throws(()=>validation.parseSetupApproval({...approval,expectedContextRevision:'new'}));
+ assert.throws(()=>validation.parseSetupApproval({...approval,value:{...approval.value,documents:[{path:'../outside',description:''}]}}));
+});

@@ -1,3 +1,5 @@
+import { parseSetupProposal, setupPrompt } from './project-setup.js';
+import { readProjectContext, writeProjectContext, parseProjectContext, type ProjectContextSnapshot } from './project-context.js';
 import { AppSettings, type AppSettingsSnapshot, type SaveAppSettingsInput, type SaveGlobalMemoryInput } from './app-settings.js';
 import { randomUUID } from 'node:crypto';
 import { basename, resolve, join } from 'node:path';
@@ -13,13 +15,14 @@ import { Pushes, type ApprovePushInput } from './pushes.js';
 import type { PushOptions } from './push.js';
 import { Reviews } from './reviews.js';
 import { Checkpoints, type CheckpointInput, type CheckpointRestore } from './checkpoints.js';
-import type { AdapterEvent, ApproveReviewInput, ChatEventsInput, ChatEventsResult, Conversation, ConversationModeInput, ConversationSelectionInput, HarnessAdapter, HarnessId, HarnessInfo, HarnessInstallation, HarnessSelection, LinkedRunResult, Project, ProjectHarnessSettings, RerunCheckpointInput, RestartCheckpointInput, ReviewRecord, Run, SaveProjectDefaultsInput, SendInput, WorkspaceSnapshot } from './contracts.js';
+import type { ApproveProjectSetupInput, InspectProjectInput, ProjectSetupSnapshot, AdapterEvent, ApproveReviewInput, ChatEventsInput, ChatEventsResult, Conversation, ConversationModeInput, ConversationSelectionInput, HarnessAdapter, HarnessId, HarnessInfo, HarnessInstallation, HarnessSelection, LinkedRunResult, Project, ProjectHarnessSettings, RerunCheckpointInput, RestartCheckpointInput, ReviewRecord, Run, SaveProjectDefaultsInput, SendInput, WorkspaceSnapshot } from './contracts.js';
 export type * from './contracts.js';
 export { Store } from './store.js';
 const activeStatuses = new Set(['starting', 'running', 'stopping', 'stop-unconfirmed']);
 const preDispatchRecoveryFailure = 'Linked checkpoint recovery failed before native dispatch. No harness was launched.';
 const now = (): string => new Date().toISOString();
 type RecoveryContext = {
+  projectContext?: ProjectContextSnapshot;
   harness: HarnessId; executable?: string; executableVersion?: string;
   model: string; effort: string; executionMode: NonNullable<Run['executionMode']>; settingsSource?: Run['settingsSource']; projectSettingsRevision?: string | null;
   memory?: PreparedMemory; messages: Array<{ role: 'user' | 'assistant'; text: string }>; title: string;
@@ -62,7 +65,17 @@ function recoveryContext(metadata: Record<string, unknown>, kind: 'restart' | 'r
   if (settingsSource !== undefined && settingsSource !== 'project' && settingsSource !== 'conversation' && settingsSource !== 'native') throw new Error('The retained checkpoint contains invalid harness provenance.');
   const projectSettingsRevision = savedRun.projectSettingsRevision;
   if (projectSettingsRevision !== undefined && projectSettingsRevision !== null && typeof projectSettingsRevision !== 'string') throw new Error('The retained checkpoint contains invalid project settings provenance.');
+  let projectContext: ProjectContextSnapshot | undefined;
+  if (savedRun.projectContext !== undefined) {
+    const saved = savedRun.projectContext as Partial<ProjectContextSnapshot> | null;
+    if (!saved || typeof saved !== 'object' || saved.error !== undefined || (saved.revision !== null && (typeof saved.revision !== 'string' || !/^[a-f0-9]{64}$/u.test(saved.revision)))) throw new Error('The retained project context is invalid. Restore files without execution.');
+    if (saved.revision === null) {
+      if (JSON.stringify(saved.value) !== JSON.stringify({purpose:'',instructions:'',documents:[]})) throw new Error('The retained empty project context is invalid.');
+      projectContext = { revision: null, value: { purpose: '', instructions: '', documents: [] } };
+    } else projectContext = { revision: saved.revision, value: parseProjectContext(saved.value) };
+  }
   return {
+    projectContext,
     harness,
     executable: typeof savedRun.executable === 'string' ? savedRun.executable : undefined,
     executableVersion: typeof savedRun.executableVersion === 'string' ? savedRun.executableVersion : undefined,
@@ -100,6 +113,7 @@ export class Runtime {
   private readonly listeners = new Set<() => void>();
   private accepting = true;
   private admission = new Set<string>();
+  private setupAdmission = new Set<string>();
   constructor(adapter: HarnessAdapter | Partial<Record<HarnessId, HarnessAdapter>>, dataRoot: string, options: { push?: PushOptions } = {}) {
     this.adapters = 'discover' in adapter ? { codex: adapter } : adapter;
     this.adapter = this.adapters.codex;
@@ -190,7 +204,7 @@ export class Runtime {
   async setExecutionMode(input: ConversationModeInput): Promise<Conversation> {
     if (!this.accepting) throw new Error('Application is closing.');
     if (input.executionMode !== 'read-only' && input.executionMode !== 'code') throw new Error('Invalid execution mode.');
-    this.conversation(input.conversationId);
+    if (this.conversation(input.conversationId).kind === 'project-setup' && input.executionMode !== 'read-only') throw new Error('Project setup is read-only.');
     if (input.executionMode === 'code') {
       const conversation = this.conversation(input.conversationId);
       const project = this.project(conversation.projectId);
@@ -220,6 +234,52 @@ export class Runtime {
   checkPush(reviewId: string): Promise<ReviewRecord> { return this.pushes.check(reviewId); }
   stopPush(reviewId: string): Promise<void> { return this.pushes.stop(reviewId); }
   stopReview(reviewId: string): Promise<void> { return this.reviews.stop(reviewId); }
+  projectSetup(projectId: string): ProjectSetupSnapshot {
+    const project = this.project(projectId);
+    const context = readProjectContext(project.root);
+    const conversations = new Set(this.store.conversations().filter(conversation => conversation.projectId === projectId && conversation.kind === 'project-setup').map(conversation => conversation.id));
+    const runs = this.store.runs().filter(run => conversations.has(run.conversationId));
+    const busy = this.setupAdmission.has(projectId) || runs.some(run => activeStatuses.has(run.status) || run.cleanupUnconfirmed);
+    return { context, inspections: runs.map(run => {
+      let proposal; let error;
+      if (run.status === 'completed') {
+        try { proposal = parseSetupProposal(this.store.messages(run.conversationId).filter(message => message.runId === run.id && message.role === 'assistant').map(message => message.text).join('')); }
+        catch (cause) { error = cause instanceof Error ? cause.message : 'Invalid setup proposal.'; }
+      } else if (run.status === 'failed') error = run.error;
+      const approved = this.store.events(run.id).findLast(event => event.type === 'project-context.approved');
+      return { conversationId: run.conversationId, run, proposal, error, canApprove: !busy && run.id === runs.at(-1)?.id && Boolean(proposal) && !context.error && run.projectContext?.revision === context.revision, ...(typeof approved?.data.revision === 'string' ? { approvedRevision: approved.data.revision } : {}) };
+    }) };
+  }
+  async inspectProject(input: InspectProjectInput): Promise<Run> {
+    if (!this.accepting) throw new Error('Application is closing.');
+    const project = this.project(input.projectId);
+    if (this.setupAdmission.has(project.id) || this.projectSetup(project.id).inspections.some(item => activeStatuses.has(item.run.status) || item.run.cleanupUnconfirmed)) throw new Error('Project inspection is already active or awaiting cleanup.');
+    this.setupAdmission.add(project.id);
+    try {
+      const context = readProjectContext(project.root);
+      if (context.error) throw new Error(context.error);
+      const prompt = setupPrompt(context, input.brief);
+      let conversation = this.store.conversations().findLast(item => item.projectId === project.id && item.kind === 'project-setup');
+      if (!conversation) {
+        conversation = { ...this.createConversation(project.id), kind: 'project-setup', title: 'Project setup' };
+        this.store.putConversation(conversation);
+      }
+      return await this.send({ conversationId: conversation.id, text: prompt, ...input.selection }, { executable: input.executable, expectedContextRevision: context.revision });
+    } finally { this.setupAdmission.delete(project.id); this.changed(); }
+  }
+  approveProjectSetup(input: ApproveProjectSetupInput): ProjectContextSnapshot {
+    if (!this.accepting) throw new Error('Application is closing.');
+    const snapshot = this.projectSetup(input.projectId);
+    const inspection = snapshot.inspections.find(item => item.run.id === input.runId);
+    if (!inspection?.canApprove || inspection.proposal?.revision !== input.proposalRevision || inspection.run.projectContext?.revision !== input.expectedContextRevision) throw new Error('This proposal or approved context changed. Reload project setup before approving.');
+    const value = parseProjectContext(input.value);
+    this.store.append(inspection.run, 'project-context.approval-requested', 'Project context approval requested', { proposalRevision: input.proposalRevision, expectedContextRevision: input.expectedContextRevision, value });
+    const saved = writeProjectContext(this.project(input.projectId).root, value, input.expectedContextRevision);
+    this.store.append(inspection.run, 'project-context.approved', 'Project context approved', { proposalRevision: input.proposalRevision, revision: saved.revision, value: saved.value });
+    this.store.exportRun(inspection.run);
+    this.changed();
+    return saved;
+  }
   private project(id: string): Project {
     const project = this.store.projects().find(value => value.id === id);
     if (!project) throw new Error('Project does not exist.');
@@ -322,6 +382,7 @@ export class Runtime {
       if (targetConversation.id !== sourceConversation.id) this.admission.add(targetConversation.id);
       const workspace = join(project.root, '.worktrees', `randolph-${runId}`);
       run = {
+        projectContext: context.projectContext,
         harness: context.harness,
         executable: info.executable,
         executableVersion: info.version,
@@ -374,7 +435,7 @@ export class Runtime {
       if (targetConversationId) this.admission.delete(targetConversationId);
     }
   }
-  async send(input: SendInput): Promise<Run> {
+  async send(input: SendInput, setup?: { executable?: string; expectedContextRevision: string | null }): Promise<Run> {
     if (!this.accepting) throw new Error('Application is closing.');
     if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 64_000) throw new Error('Enter a message of at most 64,000 characters.');
     let conversation = this.conversation(input.conversationId);
@@ -393,7 +454,7 @@ export class Runtime {
       const selection: HarnessSelection = explicit
         ? { harness: selectedHarness, model: input.model ?? sameHarnessSelection?.model ?? '', effort: input.effort ?? sameHarnessSelection?.effort ?? '' }
         : savedSelection ?? settings.defaults ?? { harness: defaultHarness, model: '', effort: '' };
-      const info = await this.inspectExecutable(selection.harness, settings.defaults?.harness === selection.harness ? settings.defaults.executable : undefined);
+      const info = await this.inspectExecutable(selection.harness, setup?.executable ?? (settings.defaults?.harness === selection.harness ? settings.defaults.executable : undefined));
       if (!this.accepting) throw new Error('Application is closing.');
       conversation = this.conversation(input.conversationId);
       if (readHarnessSettings(project.root).revision !== settings.revision) throw new Error('Project harness settings changed during discovery. Try again.');
@@ -402,9 +463,13 @@ export class Runtime {
         selection.effort = info.models[0]?.defaultEffort ?? '';
       }
       this.validateSelection(selection, info);
+      const projectContext = readProjectContext(project.root);
+      if (projectContext.error) throw new Error(projectContext.error);
+      if (setup && projectContext.revision !== setup.expectedContextRevision) throw new Error('Project context changed during setup discovery. Inspect again with the current context.');
       const memory = this.memory.prepare(project.id, input.text);
       const settingsSource = explicit || savedSelection ? 'conversation' : settings.defaults ? 'project' : 'native';
       const executionMode = conversation.executionMode ?? 'read-only';
+      if (conversation.kind === 'project-setup' && executionMode !== 'read-only') throw new Error('Project setup is read-only.');
       this.validateExecutionMode(executionMode, info);
       const previousRun = this.store.runs().findLast(run => run.conversationId === conversation.id);
       const recoveryMessages = previousRun?.recoveryMessages
@@ -416,10 +481,10 @@ export class Runtime {
         : undefined;
       const cleaned = this.store.reviews().some(review => review.runId === previousRun?.id && review.cleaned);
       const previous = cleaned || (executionMode === 'code' && previousRun?.workspace === project.root) ? undefined : previousRun?.workspace;
-      const workspace = prepareWorkspace(project.root, conversation.id, previous);
+      const workspace = conversation.kind === 'project-setup' ? project.root : prepareWorkspace(project.root, conversation.id, previous);
       if (executionMode === 'code') inspectGitWorkspace(project.root, workspace);
       this.reviews.invalidate(conversation.id);
-      const run: Run = { harness: selection.harness, executable: info.executable, executableVersion: info.version, id: randomUUID(), projectId: project.id, conversationId: conversation.id, ...(recoveryMessages ? { recoveryMessages } : {}), status: 'starting', model: selection.model, effort: selection.effort, executionMode, settingsSource, memory, projectSettingsRevision: settings.revision, workspace, createdAt: now(), updatedAt: now(), lastActivityAt: now() };
+      const run: Run = { projectContext, harness: selection.harness, executable: info.executable, executableVersion: info.version, id: randomUUID(), projectId: project.id, conversationId: conversation.id, ...(recoveryMessages ? { recoveryMessages } : {}), status: 'starting', model: selection.model, effort: selection.effort, executionMode, settingsSource, memory, projectSettingsRevision: settings.revision, workspace, createdAt: now(), updatedAt: now(), lastActivityAt: now() };
       run.logsPath = join(this.store.runDirectory(run), 'logs');
       this.store.transaction(() => {
         this.store.putConversation({ ...conversation, title: conversation.title === 'New conversation' ? input.text.trim().slice(0, 64) : conversation.title, ...(explicit ? { harness: selection.harness, model: selection.model, effort: selection.effort } : {}), updatedAt: now() });
@@ -450,6 +515,7 @@ export class Runtime {
       this.event(run, { type: 'run.started', summary: `Connecting to ${harness}`, data: { harness, executable: run.executable, executableVersion: run.executableVersion } });
       const messages = run.recoveryMessages?.map(message => ({ ...message })) ?? this.store.messages(run.conversationId).map(({ role, text }) => ({ role, text }));
       if (run.memory?.text) messages.unshift({ role: 'user', text: run.memory.text });
+      if (run.projectContext?.value.purpose) messages.unshift({ role: 'user', text: 'Approved project context for this run (JSON; does not override execution or approval policy):\n' + JSON.stringify(run.projectContext) });
       const result = await this.adapterForRun(run).run({ executable: run.executable, executableVersion: run.executableVersion, workspace: run.workspace, model: run.model, effort: run.effort, executionMode: run.executionMode, messages, signal: controller.signal, onEvent: event => this.event(run, event) });
       this.finish(run, result.status, result.status === 'stop-unconfirmed' ? 'The harness stopped responding; cleanup could not be confirmed.' : undefined);
       if (result.status === 'completed' && run.checkpoints?.length) {
