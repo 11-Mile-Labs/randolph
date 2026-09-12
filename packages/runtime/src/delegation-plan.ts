@@ -73,13 +73,16 @@ function parseLimits(value: unknown): DelegationLimits {
   if (!maxWorkers || !maxParallel || !maxAttempts || !activeMinutes || maxParallel > maxWorkers) throw new Error('Delegation limits must be positive and maxParallel cannot exceed maxWorkers.');
   return { maxWorkers, maxParallel, maxAttempts, activeMinutes };
 }
-export function parseDelegationPlan(value: unknown): DelegationPlan {
+export function parseDelegationDraft(value: unknown): DelegationPlan {
   const input = record(value, 'Delegation plan');
   known(input, ['schemaVersion', 'id', 'revision', 'assignments', 'limits'], 'Delegation plan');
   if (input.schemaVersion !== 1) throw new Error('Delegation plan requires schemaVersion: 1.');
   const revision = count(input.revision, 'Plan revision', 1_000_000);
   if (!revision || !Array.isArray(input.assignments) || !input.assignments.length || input.assignments.length > 24) throw new Error('Delegation plan requires 1 to 24 assignments and a positive revision.');
-  const plan = { schemaVersion: 1 as const, id: id(input.id, 'Plan ID'), revision, assignments: input.assignments.map(parseAssignment), limits: parseLimits(input.limits) };
+  return { schemaVersion: 1 as const, id: id(input.id, 'Plan ID'), revision, assignments: input.assignments.map(parseAssignment), limits: parseLimits(input.limits) };
+}
+export function parseDelegationPlan(value: unknown): DelegationPlan {
+  const plan = parseDelegationDraft(value);
   const checked = validateDelegationPlan(plan);
   if (!checked.valid) throw new Error(checked.errors.join(' '));
   return plan;

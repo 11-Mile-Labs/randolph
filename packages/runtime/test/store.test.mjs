@@ -11,12 +11,12 @@ test('a future SQLite user_version is rejected without rewriting the database', 
   t.after(async () => { await rm(root, { recursive: true, force: true }); });
   const path = join(root, 'app.sqlite');
   const database = new DatabaseSync(path);
-  database.exec('PRAGMA user_version=3');
+  database.exec('PRAGMA user_version=4');
   database.close();
 
   assert.throws(() => new Store(root), /newer Randolph version/);
 
   const reopened = new DatabaseSync(path, { readOnly: true });
-  assert.equal(reopened.prepare('PRAGMA user_version').get().user_version, 3);
+  assert.equal(reopened.prepare('PRAGMA user_version').get().user_version, 4);
   reopened.close();
 });

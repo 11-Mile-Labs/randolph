@@ -3,6 +3,9 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+const firstQuestionButton = /^First question(?: \d+ unread events)?$/;
+const secondQuestionButton = /^Second question(?: \d+ unread events)?$/;
+
 test('chat transport keeps concurrent streams isolated, reconnects, stops, and replays recorded messages', async () => {
   const root = mkdtempSync(join(tmpdir(), 'randolph-chat-transport-'));
   const home = join(root, 'home');
@@ -91,10 +94,10 @@ createInterface({ input: process.stdin }).on('line', line => {
     await page.getByRole('button', { name: 'Send message' }).click();
     await expect(page.getByText('Second stream: independent.', { exact: true })).toBeVisible();
 
-    await projectNavigation.getByRole('button', { name: 'First question', exact: true }).click();
+    await projectNavigation.getByRole('button', { name: firstQuestionButton }).click();
     await expect(page.getByText('First stream:', { exact: true })).toBeVisible();
     await page.reload();
-    await projectNavigation.getByRole('button', { name: 'First question', exact: true }).click();
+    await projectNavigation.getByRole('button', { name: firstQuestionButton }).click();
     await expect(page.getByText('First stream:', { exact: true })).toBeVisible();
     expect(readFileSync(turns, 'utf8')).toBe('1\n2\n');
     writeFileSync(releaseFirst, 'release');
@@ -102,7 +105,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     await expect(page.locator('article.message.assistant')).toHaveCount(1);
     expect(readFileSync(turns, 'utf8')).toBe('1\n2\n');
 
-    await projectNavigation.getByRole('button', { name: 'Second question', exact: true }).click();
+    await projectNavigation.getByRole('button', { name: secondQuestionButton }).click();
     writeFileSync(stopSeen, '');
     await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Long question');
     await page.getByRole('button', { name: 'Send message' }).click();
@@ -117,7 +120,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     page = await app.firstWindow();
     page.on('pageerror', error => pageErrors.push(error.message));
     await expect(page.getByRole('heading', { name: 'Your projects, in one place.' })).toBeVisible();
-    const retainedConversation = page.getByRole('button', { name: 'First question', exact: true });
+    const retainedConversation = page.getByRole('button', { name: firstQuestionButton });
     await retainedConversation.focus();
     await expect(retainedConversation).toBeFocused();
     await retainedConversation.press('Enter');

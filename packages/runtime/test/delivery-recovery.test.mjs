@@ -116,7 +116,7 @@ test('export failure cannot clear a verification cleanup quarantine', { timeout:
   assert.deepEqual(f.calls, { runs: 1, checks: 1 });
 });
 
-test('schema v2 adds reviews while preserving existing v1 history and sequence', { timeout: 60_000 }, t => {
+test('schema v3 adds delegation records while preserving existing v1 history and sequence', { timeout: 60_000 }, t => {
   const root = mkdtempSync(join(tmpdir(), 'randolph-migration-v1-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const database = new DatabaseSync(join(root, 'app.sqlite'));
@@ -148,7 +148,7 @@ test('schema v2 adds reviews while preserving existing v1 history and sequence',
     assert.deepEqual(snapshot.messages, [message]);
     assert.deepEqual(snapshot.events, [{ ...event, sequence: 7 }]);
     assert.deepEqual(snapshot.reviews, []);
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 2);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 3);
     store.append(run, 'fixture.after-migration', 'New event');
     assert.equal(store.events(run.id).at(-1).sequence, 8);
   } finally { store.close(); }

@@ -6,26 +6,48 @@ import type { ChatEventsResult, Conversation, Message, Project, ReviewRecord, Ru
 type Row = Record<string, string | number | null>;
 export class Store {
   readonly db: DatabaseSync;
+  private transactionDepth = 0;
   constructor(readonly root: string) {
     mkdirSync(root, { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(join(root, 'app.sqlite'));
     chmodSync(join(root, 'app.sqlite'), 0o600);
     const version = Number((this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version);
-    if (version > 2) { this.db.close(); throw new Error('This data directory was created by a newer Randolph version.'); }
-    this.db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
+    if (version > 3) { this.db.close(); throw new Error('This data directory was created by a newer Randolph version.'); }
+    if (version === 3 && !this.tableExists('projects')) { this.db.close(); throw new Error('This Randolph database is corrupt.'); }
+    this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, root TEXT UNIQUE NOT NULL, document TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), document TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), document TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id), document TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES runs(id), document TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS reviews (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), document TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS events_run ON events(run_id, sequence);
-      PRAGMA user_version=2;`);
+      CREATE INDEX IF NOT EXISTS events_run ON events(run_id, sequence);`);
+    if (version < 3) this.db.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS delegation_plans (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id), revision INTEGER NOT NULL, digest TEXT NOT NULL, basis_digest TEXT NOT NULL, document TEXT NOT NULL, UNIQUE(run_id, revision));
+      CREATE TABLE IF NOT EXISTS delegation_authorizations (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id), plan_id TEXT NOT NULL REFERENCES delegation_plans(id), digest TEXT NOT NULL, basis_digest TEXT NOT NULL, document TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS delegation_preset_saves (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id), plan_id TEXT NOT NULL REFERENCES delegation_plans(id), digest TEXT NOT NULL, basis_digest TEXT NOT NULL, document TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS delegation_tasks (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id), authorization_id TEXT NOT NULL REFERENCES delegation_authorizations(id), document TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS delegation_sessions (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id), task_id TEXT REFERENCES delegation_tasks(id), document TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS delegation_tool_receipts (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id), session_id TEXT NOT NULL REFERENCES delegation_sessions(id), call_id TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, document TEXT NOT NULL, UNIQUE(session_id, call_id), UNIQUE(session_id, request_id));
+      CREATE INDEX IF NOT EXISTS delegation_plans_run ON delegation_plans(run_id, revision);
+      CREATE INDEX IF NOT EXISTS delegation_sessions_run ON delegation_sessions(run_id);
+      PRAGMA user_version=3;
+      COMMIT;`);
   }
+  private tableExists(name: string): boolean { return Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)); }
   transaction<T>(action: () => T): T {
-    this.db.exec('BEGIN IMMEDIATE');
-    try { const result = action(); this.db.exec('COMMIT'); return result; }
-    catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    const outer = this.transactionDepth === 0, savepoint = `randolph_transaction_${this.transactionDepth}`;
+    if (outer) this.db.exec('BEGIN IMMEDIATE'); else this.db.exec(`SAVEPOINT ${savepoint}`);
+    this.transactionDepth += 1;
+    try {
+      const result = action();
+      if (result && typeof (result as { then?: unknown }).then === 'function') throw new Error('Store transactions must be synchronous.');
+      if (outer) this.db.exec('COMMIT'); else this.db.exec(`RELEASE SAVEPOINT ${savepoint}`); return result;
+    } catch (error) {
+      try { if (outer) this.db.exec('ROLLBACK'); else { this.db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`); this.db.exec(`RELEASE SAVEPOINT ${savepoint}`); } } catch { /* Preserve the finalization failure. */ }
+      throw error;
+    } finally { this.transactionDepth -= 1; }
   }
   projects(): Project[] { return this.documents('projects'); }
   conversations(): Conversation[] { return this.documents('conversations'); }

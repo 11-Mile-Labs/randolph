@@ -5,7 +5,7 @@ import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { defaultDelegationLimits, delegationPlanDigest, parseDelegationPlan, parseDelegationSettings, readDelegationSettings, validateDelegationPlan, writeDelegationSettings } from '../dist/delegation-plan.js';
+import { defaultDelegationLimits, delegationPlanDigest, parseDelegationDraft, parseDelegationPlan, parseDelegationSettings, readDelegationSettings, validateDelegationPlan, writeDelegationSettings } from '../dist/delegation-plan.js';
 
 const route = { harness: 'grok', executable: '/opt/grok', version: '1.2.3', enabled: true, commandCapability: true, models: [{ id: 'grok-code', efforts: ['low', 'high'] }], modes: ['code', 'read-only'] };
 const availability = { routes: [route], mainSelection: { harness: 'grok', executable: '/opt/grok', executableVersion: '1.2.3', model: 'grok-code', effort: 'low' } };
@@ -40,6 +40,13 @@ test('a complete bounded plan parses, validates against explicit availability, a
 test('read-only research can include review and settle at synthesis without code integration or native checks', () => {
   const value = parseDelegationPlan(researchPlan());
   assert.deepEqual(validateDelegationPlan(value, availability).errors, []);
+});
+
+test('draft parsing preserves bounded graph-invalid proposals while strict parsing rejects them', () => {
+  const cyclic = plan(); cyclic.assignments.find(node => node.id === 'writer').dependencies = ['synthesize']; cyclic.assignments.find(node => node.id === 'synthesize').dependencies = ['verify', 'writer'];
+  assert.equal(parseDelegationDraft(cyclic).id, 'fix-widget'); assert.throws(() => parseDelegationPlan(cyclic), /acyclic/i);
+  assert.throws(() => parseDelegationDraft({ ...cyclic, assignments: Array.from({ length: 25 }, () => cyclic.assignments[0]) }), /1 to 24/i);
+  assert.throws(() => parseDelegationDraft({ ...cyclic, assignments: cyclic.assignments.map(node => node.id === 'writer' ? { ...node, executable: 'relative/grok' } : node) }), /absolute/i);
 });
 
 test('integration requires explicit writer inputs and the final checked lineage covers dependent and parallel code writers', () => {

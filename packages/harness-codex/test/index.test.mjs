@@ -439,3 +439,71 @@ test('verified 0.154 supports Code and checks with normalized effective writable
   assert.equal(check.exitCode, 0);
   assert.equal(check.cleanupVerified, true);
 });
+
+const appToolDefinition = { name: 'randolph_read_tasks', description: 'Read retained task state.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } };
+const appCall = (extra = {}) => ({ id: 0, method: 'item/tool/call', params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-1', namespace: null, tool: 'randolph_read_tasks', arguments: {}, ...extra } });
+
+test('application tools use full native function schema and respond only after acknowledged session binding', async () => {
+  const events = [], calls = [];
+  const child = fakeChild({ beforeTurnResponse({ send }) { send(appCall()); } });
+  const result = await adapterFor([child], { execFile: () => 'codex-cli 0.154.0' }).run({ ...runInput(new AbortController().signal, events), applicationTools: { definitions: [appToolDefinition], onRequest(request) {
+    assert.ok(events.some(event => event.type === 'session.turn-started' && event.data.turnId === request.turnId));
+    calls.push(request); return { success: true, text: 'retained-receipt' };
+  } } });
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(child.requests.find(request => request.method === 'thread/start').params.dynamicTools, [{ type: 'function', ...appToolDefinition }]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].requestId, 0);
+  assert.deepEqual(child.replies.find(reply => reply.id === 0), { id: 0, result: { success: true, contentItems: [{ type: 'inputText', text: 'retained-receipt' }] } });
+});
+
+test('application tools reject wrong identities, names, namespaces and malformed payloads without invoking the handler', async () => {
+  let calls = 0;
+  const badCalls = [appCall({ threadId: 'foreign' }), appCall({ turnId: 'foreign' }), appCall({ namespace: 'foreign' }), appCall({ tool: 'other_tool' }), appCall({ arguments: null }), appCall({ callId: '' }), appCall({ arguments: { text: 'x'.repeat(65_537) } })];
+  const child = fakeChild({ notifications: badCalls.map((request, i) => ({ ...request, id: i })) });
+  await adapterFor([child], { execFile: () => 'codex-cli 0.154.0' }).run({ ...runInput(new AbortController().signal), applicationTools: { definitions: [appToolDefinition], onRequest() { calls += 1; return { success: true, text: 'must not run' }; } } });
+  assert.equal(calls, 0);
+  assert.equal(child.replies.length, badCalls.length);
+  assert.ok(child.replies.every(reply => reply.result?.success === false || reply.error));
+});
+
+test('application tools stay absent by default, require their verified version, and preserve native approval denial', async () => {
+  const ordinary = fakeChild({ notifications: [appCall()] });
+  await adapterFor([ordinary]).run(runInput(new AbortController().signal));
+  assert.equal(ordinary.requests.find(request => request.method === 'thread/start').params.dynamicTools, undefined);
+  assert.equal(ordinary.replies[0].error.code, -32601);
+  const child = fakeChild();
+  await assert.rejects(adapterFor([child]).run({ ...runInput(new AbortController().signal), applicationTools: { definitions: [appToolDefinition], onRequest() { throw new Error('must not run'); } } }), /0.154.0|application.tool/i);
+  assert.equal(child.requests.length, 0);
+});
+
+test('application requests cannot mutate after cancellation or a completed turn', async () => {
+  let calls = 0;
+  const controller = new AbortController();
+  const tools = { definitions: [appToolDefinition], onRequest() { calls += 1; return { success: true, text: 'unexpected' }; } };
+  const cancelled = fakeChild({ beforeTurnResponse({ send }) { send(appCall()); } });
+  const stopped = await adapterFor([cancelled], { execFile: () => 'codex-cli 0.154.0' }).run({ ...runInput(controller.signal), applicationTools: tools, onEvent(event) { if (event.type === 'session.turn-started') controller.abort(); } });
+  assert.equal(stopped.status, 'interrupted');
+  const completed = fakeChild({ notifications: [{ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } } }, appCall()] });
+  await adapterFor([completed], { execFile: () => 'codex-cli 0.154.0' }).run({ ...runInput(new AbortController().signal), applicationTools: tools });
+  assert.equal(calls, 0);
+  assert.equal(completed.replies[0].result.success, false);
+  assert.equal(cancelled.exitCode, 0);
+});
+
+test('application handler failures or invalid receipts fail the run with confirmed cleanup', async () => {
+  for (const onRequest of [() => { throw new Error('database unavailable'); }, () => ({ success: true, text: 'x'.repeat(65_537) }), () => Promise.resolve({ success: true, text: 'async handlers are forbidden' })]) {
+    const child = fakeChild({ notifications: [appCall()] });
+    await assert.rejects(adapterFor([child], { execFile: () => 'codex-cli 0.154.0' }).run({ ...runInput(new AbortController().signal), applicationTools: { definitions: [appToolDefinition], onRequest } }), /handler|receipt|database/i);
+    assert.equal(child.replies.length, 0);
+    assert.equal(child.exitCode, 0);
+  }
+});
+
+test('enabling application tools does not authorize native filesystem or command approvals', async () => {
+  let calls = 0;
+  const child = fakeChild({ notifications: ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/permissions/requestApproval'].map((method, id) => ({ id, method, params: { threadId: 'thread-1', turnId: 'turn-1' } })) });
+  await adapterFor([child], { execFile: () => 'codex-cli 0.154.0' }).run({ ...runInput(new AbortController().signal), applicationTools: { definitions: [appToolDefinition], onRequest() { calls += 1; return { success: true, text: 'wrong' }; } } });
+  assert.equal(calls, 0);
+  assert.deepEqual(child.replies.map(reply => reply.result), [{ decision: 'decline' }, { decision: 'decline' }, { permissions: {}, scope: 'turn' }]);
+});
