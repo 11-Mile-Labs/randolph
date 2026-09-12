@@ -5,7 +5,13 @@ import { join } from 'node:path';
 function git(root: string, args: string[]): string {
   const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' };
   for (const key of Object.keys(env)) if (key.startsWith('GIT_') && !['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'GIT_TERMINAL_PROMPT'].includes(key)) delete env[key as keyof typeof env];
-  return execFileSync('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-C', root, ...args], { env, encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const settings = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'commit.gpgsign=false', '-c', 'core.attributesFile=/dev/null'];
+  let filterKeys = '';
+  try {
+    filterKeys = execFileSync('/usr/bin/git', [...settings, '-C', root, 'config', '--null', '--name-only', '--get-regexp', '^filter\\..*\\.(clean|smudge|process|required)$'], { env, encoding: 'utf8', timeout: 5_000, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (error) { if ((error as { status?: number }).status !== 1) throw error; }
+  for (const key of filterKeys.split('\0').filter(Boolean)) settings.push('-c', `${key}=${key.endsWith('.required') ? 'false' : ''}`);
+  return execFileSync('/usr/bin/git', [...settings, '-C', root, ...args], { env, encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 export function canonicalProject(path: string): string {
   const root = realpathSync(path);
@@ -37,6 +43,8 @@ export function prepareWorkspace(root: string, conversationId: string, previous?
   // A process may have exited after Git created this exact conversation workspace.
   // Reuse only the registered location and repository identity, without recreating it.
   if (existsSync(path)) return verify();
-  git(root, ['worktree', 'add', '--detach', path, head]);
+  git(root, ['worktree', 'add', '--detach', '--no-checkout', path, head]);
+  // Resolve conditional Git configuration in the new worktree before reading files.
+  git(path, ['reset', '--hard', head]);
   return verify();
 }

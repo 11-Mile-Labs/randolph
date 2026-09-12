@@ -1,21 +1,31 @@
+import type { GitDeliveryPlan, GitReview } from './git-review.js';
+import type { VerificationResult } from './verification.js';
+
 export type RunStatus = 'starting' | 'running' | 'stopping' | 'completed' | 'failed' | 'interrupted' | 'stop-unconfirmed';
+export type ExecutionMode = 'read-only' | 'code';
 export type HarnessSelection = { harness: 'codex'; model: string; effort: string };
 export type ProjectHarnessSettings = { revision: string | null; defaults: HarnessSelection | null; error?: string };
 export type SaveProjectDefaultsInput = { projectId: string; defaults: HarnessSelection; expectedRevision: string | null };
 export type ConversationSelectionInput = { conversationId: string; selection: HarnessSelection | null };
+export type ConversationModeInput = { conversationId: string; executionMode: ExecutionMode };
+export type ApproveReviewInput = { reviewId: string; message: string };
+export type ReviewRecord = { id: string; projectId: string; conversationId: string; runId: string; createdAt: string; updatedAt: string; status: 'pending' | 'checking' | 'stale' | 'delivering' | 'interrupted' | 'delivered' | 'failed' | 'stop-unconfirmed'; basis: GitReview; progress?: { checkId: string; startedAt: string; output: string }; verification?: VerificationResult; deliveryPlan?: GitDeliveryPlan; commitOid?: string; merged?: boolean; cleaned?: boolean; error?: string };
 export type Project = { id: string; name: string; root: string; createdAt: string; harnessSettings?: ProjectHarnessSettings };
-export type Conversation = { id: string; projectId: string; title: string; model: string; effort: string; createdAt: string; updatedAt: string; lastReadSequence: number };
-export type Run = { id: string; projectId: string; conversationId: string; status: RunStatus; model: string; effort: string; settingsSource?: 'project' | 'conversation' | 'native'; projectSettingsRevision?: string | null; workspace: string; logsPath?: string; createdAt: string; updatedAt: string; lastActivityAt: string; error?: string };
+export type Conversation = { id: string; projectId: string; title: string; model: string; effort: string; executionMode?: ExecutionMode; createdAt: string; updatedAt: string; lastReadSequence: number };
+export type Run = { id: string; projectId: string; conversationId: string; status: RunStatus; cleanupUnconfirmed?: boolean; model: string; effort: string; executionMode?: ExecutionMode; settingsSource?: 'project' | 'conversation' | 'native'; projectSettingsRevision?: string | null; workspace: string; logsPath?: string; createdAt: string; updatedAt: string; lastActivityAt: string; error?: string };
 export type Message = { id: string; conversationId: string; runId: string; role: 'user' | 'assistant'; text: string; createdAt: string };
 export type RunEvent = { sequence: number; runId: string; projectId: string; conversationId: string; at: string; type: string; summary: string; data: Record<string, unknown> };
-export type WorkspaceSnapshot = { projects: Project[]; conversations: Conversation[]; runs: Run[]; messages: Message[]; events: RunEvent[]; dataRoot: string };
+export type WorkspaceSnapshot = { projects: Project[]; conversations: Conversation[]; runs: Run[]; messages: Message[]; events: RunEvent[]; reviews: ReviewRecord[]; dataRoot: string };
 export type HarnessModel = { id: string; name: string; efforts: string[]; defaultEffort: string };
-export type HarnessInfo = { available: boolean; authenticated: boolean; version?: string; models: HarnessModel[]; reason?: string };
+export type HarnessInfo = { available: boolean; authenticated: boolean; version?: string; models: HarnessModel[]; executionModes?: ExecutionMode[]; reason?: string };
 export type AdapterEvent = { type: string; summary: string; data?: Record<string, unknown> };
-export type AdapterRun = { workspace: string; model: string; effort: string; messages: Pick<Message, 'role' | 'text'>[]; signal: AbortSignal; onEvent: (event: AdapterEvent) => void };
+export type AdapterRun = { workspace: string; model: string; effort: string; executionMode?: ExecutionMode; messages: Pick<Message, 'role' | 'text'>[]; signal: AbortSignal; onEvent: (event: AdapterEvent) => void };
+export type AdapterCommand = { workspace: string; command: string[]; signal: AbortSignal; onOutput: (text: string) => void };
+export type AdapterCommandResult = { exitCode: number | null; output: string; truncated: boolean; cleanupVerified: boolean; error?: string };
 export interface HarnessAdapter {
   discover(): Promise<HarnessInfo>;
   run(input: AdapterRun): Promise<{ status: 'completed' | 'interrupted' | 'stop-unconfirmed' }>;
+  runCommand?(input: AdapterCommand): Promise<AdapterCommandResult>;
 }
 export type SendInput = { conversationId: string; text: string; model?: string; effort?: string };
 export interface DesktopBridge {
@@ -25,6 +35,11 @@ export interface DesktopBridge {
   createConversation(projectId: string): Promise<Conversation>;
   saveProjectDefaults(input: SaveProjectDefaultsInput): Promise<ProjectHarnessSettings>;
   setConversationSelection(input: ConversationSelectionInput): Promise<Conversation>;
+  setExecutionMode(input: ConversationModeInput): Promise<Conversation>;
+  prepareReview(conversationId: string): Promise<ReviewRecord>;
+  verifyReview(reviewId: string): Promise<ReviewRecord>;
+  approveReview(input: ApproveReviewInput): Promise<ReviewRecord>;
+  stopReview(reviewId: string): Promise<void>;
   send(input: SendInput): Promise<Run>;
   stop(runId: string): Promise<void>;
   markRead(conversationId: string): Promise<void>;

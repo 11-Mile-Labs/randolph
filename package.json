@@ -9,7 +9,7 @@
   },
   "scripts": {
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm -r --filter './packages/*' build && pnpm -r typecheck",
     "build": "pnpm -r build",
     "test": "pnpm build && pnpm -r test",
     "desktop": "pnpm build && pnpm --filter @randolph/desktop start",

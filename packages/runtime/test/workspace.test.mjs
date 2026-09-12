@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
-import { realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -59,4 +59,29 @@ test('an existing registered workspace at the exact conversation path is reused 
     .filter(line => line.startsWith('worktree '))
     .map(line => line.slice('worktree '.length));
   assert.equal(registered.filter(path => path === created).length, 1);
+});
+
+test('worktree preparation never executes repository checkout filters', async t => {
+  const { temporary, root } = await repository(t);
+  await writeFile(join(root, '.gitattributes'), '*.md filter=probe\n');
+  git(root, ['add', '.gitattributes']); git(root, ['commit', '-m', 'attributes']);
+  const marker = join(temporary, 'filter-executed');
+  git(root, ['config', 'filter.probe.smudge', `touch '${marker}'; cat`]);
+  git(root, ['config', 'filter.probe.required', 'true']);
+  const workspace = prepareWorkspace(root, randomUUID());
+  assert.equal(existsSync(marker), false);
+  assert.equal(readFileSync(join(workspace, 'README.md'), 'utf8'), '# Synthetic project\n');
+});
+
+test('worktree-conditional filters cannot execute during initial checkout', async t => {
+  const { temporary, root } = await repository(t);
+  await writeFile(join(root, '.gitattributes'), '*.md filter=late\n');
+  git(root, ['add', '.gitattributes']); git(root, ['commit', '-m', 'conditional attributes']);
+  const marker = join(temporary, 'conditional-filter-executed');
+  const config = join(temporary, 'conditional.gitconfig');
+  await writeFile(config, `[filter "late"]\n  smudge = "touch '${marker}'; cat"\n  required = true\n`);
+  git(root, ['config', 'includeIf.gitdir:*/worktrees/*.path', config]);
+  const workspace = prepareWorkspace(root, randomUUID());
+  assert.equal(existsSync(marker), false);
+  assert.equal(readFileSync(join(workspace, 'README.md'), 'utf8'), '# Synthetic project\n');
 });

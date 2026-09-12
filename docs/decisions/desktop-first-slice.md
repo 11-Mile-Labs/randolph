@@ -2,7 +2,7 @@
 
 Status: implemented developer slice; full v1 acceptance remains open.
 
-The subsequent [project harness defaults slice](project-harness-defaults.md) adds editable project settings and persisted conversation overrides. Statements below describe the original desktop boundary except where that follow-up extends it.
+The subsequent [project harness defaults slice](project-harness-defaults.md) adds editable project settings and persisted conversation overrides. Statements below describe the original desktop boundary except where that follow-up or [controlled coding and delivery](controlled-coding.md) extends it.
 
 ## Product transition
 

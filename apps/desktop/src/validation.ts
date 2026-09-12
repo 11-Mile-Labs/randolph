@@ -1,4 +1,4 @@
-import type { ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
+import type { ApproveReviewInput, ConversationModeInput, ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid settings request.');
   return value as Record<string, unknown>;
@@ -7,6 +7,16 @@ function parseSelection(value: unknown): HarnessSelection {
   const input = record(value);
   if (input.harness !== 'codex' || typeof input.model !== 'string' || !input.model.trim() || input.model.length > 200 || typeof input.effort !== 'string' || !input.effort.trim() || input.effort.length > 32) throw new Error('Invalid harness, model, or effort.');
   return { harness: 'codex', model: input.model, effort: input.effort };
+}
+export function parseMode(value: unknown): ConversationModeInput {
+  const input = record(value);
+  if (input.executionMode !== 'read-only' && input.executionMode !== 'code') throw new Error('Invalid execution mode.');
+  return { conversationId: parseId(input.conversationId), executionMode: input.executionMode };
+}
+export function parseReviewApproval(value: unknown): ApproveReviewInput {
+  const input = record(value);
+  if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 16_000 || input.message.includes('\0')) throw new Error('Enter a commit message of at most 16,000 characters.');
+  return { reviewId: parseId(input.reviewId), message: input.message };
 }
 export function parseProjectDefaults(value: unknown): SaveProjectDefaultsInput {
   const input = record(value);

@@ -4,7 +4,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Runtime } from '@randolph/runtime';
 import { CodexAdapter } from '@randolph/harness-codex';
-import { parseSend, parseId, parseProjectDefaults, parseConversationSelection } from './validation.js';
+import { parseSend, parseId, parseProjectDefaults, parseConversationSelection, parseMode, parseReviewApproval } from './validation.js';
 
 const dataRoot = process.env.RANDOLPH_DATA_DIR ? resolve(process.env.RANDOLPH_DATA_DIR) : join(homedir(), '.randolph');
 app.setName('Randolph');
@@ -76,13 +76,18 @@ else {
       command('randolph:create-conversation', id => runtime!.createConversation(parseId(id)));
       command('randolph:save-project-defaults', input => runtime!.saveProjectDefaults(parseProjectDefaults(input)));
       command('randolph:conversation-selection', input => runtime!.setConversationSelection(parseConversationSelection(input)));
+      command('randolph:execution-mode', input => runtime!.setExecutionMode(parseMode(input)));
+      command('randolph:prepare-review', id => runtime!.prepareReview(parseId(id)));
+      command('randolph:verify-review', id => runtime!.verifyReview(parseId(id)));
+      command('randolph:approve-review', input => runtime!.approveReview(parseReviewApproval(input)));
+      command('randolph:stop-review', id => runtime!.stopReview(parseId(id)));
       command('randolph:send', input => runtime!.send(parseSend(input)));
       command('randolph:stop', id => runtime!.stop(parseId(id)));
       command('randolph:mark-read', id => runtime!.markRead(parseId(id)));
       Menu.setApplicationMenu(Menu.buildFromTemplate([
         { label: 'Randolph', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'quit' }] },
         { role: 'editMenu' },
-        { label: 'Work', submenu: [{ label: 'Stop all work', click: () => { for (const run of runtime!.snapshot().runs) void runtime!.stop(run.id); } }] },
+        { label: 'Work', submenu: [{ label: 'Stop all work', click: () => { void runtime!.stopAll(); } }] },
         { role: 'windowMenu' },
       ]));
       await openWindow();

@@ -1,6 +1,6 @@
 # Project harness defaults
 
-Status: implemented as a follow-up to the [first desktop slice](desktop-first-slice.md). The conversation harness remains Codex and execution remains read-only.
+Status: implemented as a follow-up to the [first desktop slice](desktop-first-slice.md). The conversation harness remains Codex. The subsequent [controlled coding slice](controlled-coding.md) adds execution modes and local delivery.
 
 ## Settings and authority
 

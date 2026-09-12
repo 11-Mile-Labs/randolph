@@ -25,3 +25,11 @@ test('settings IPC validates scoped identities, paired selections and expected r
   }
   assert.throws(() => parseSend({ conversationId: projectId, text: 'Partial selection', model: 'model-a' }));
 });
+
+test('coding IPC accepts only explicit execution modes and review-scoped approval messages', () => {
+  const id = '10000000-0000-0000-0000-000000000001';
+  assert.deepEqual(validation.parseMode({ conversationId: id, executionMode: 'code' }), { conversationId: id, executionMode: 'code' });
+  assert.deepEqual(validation.parseReviewApproval({ reviewId: id, message: 'Apply reviewed changes' }), { reviewId: id, message: 'Apply reviewed changes' });
+  for (const input of [{ conversationId: id, executionMode: 'yolo' }, { conversationId: '/tmp/repo', executionMode: 'code' }]) assert.throws(() => validation.parseMode(input));
+  for (const input of [{ reviewId: id, message: '' }, { reviewId: id, message: 'x'.repeat(16001) }, { reviewId: id, message: 'nul\0byte' }, { reviewId: '../review', message: 'message' }]) assert.throws(() => validation.parseReviewApproval(input));
+});

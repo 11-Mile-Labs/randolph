@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Conversation, Message, Project, Run, RunEvent, WorkspaceSnapshot } from './contracts.js';
+import type { Conversation, Message, Project, ReviewRecord, Run, RunEvent, WorkspaceSnapshot } from './contracts.js';
 
 type Row = Record<string, string | number | null>;
 export class Store {
@@ -11,15 +11,16 @@ export class Store {
     this.db = new DatabaseSync(join(root, 'app.sqlite'));
     chmodSync(join(root, 'app.sqlite'), 0o600);
     const version = Number((this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version);
-    if (version > 1) { this.db.close(); throw new Error('This data directory was created by a newer Randolph version.'); }
+    if (version > 2) { this.db.close(); throw new Error('This data directory was created by a newer Randolph version.'); }
     this.db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
       CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, root TEXT UNIQUE NOT NULL, document TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), document TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), document TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id), document TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES runs(id), document TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS reviews (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id), document TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS events_run ON events(run_id, sequence);
-      PRAGMA user_version=1;`);
+      PRAGMA user_version=2;`);
   }
   transaction<T>(action: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
@@ -29,7 +30,11 @@ export class Store {
   projects(): Project[] { return this.documents('projects'); }
   conversations(): Conversation[] { return this.documents('conversations'); }
   runs(): Run[] { return this.documents('runs'); }
-  private documents<T>(table: 'projects' | 'conversations' | 'runs' | 'messages'): T[] {
+  reviews(): ReviewRecord[] { return this.documents('reviews'); }
+  putReview(review: ReviewRecord): void {
+    this.db.prepare('INSERT INTO reviews VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET document=excluded.document').run(review.id, review.conversationId, JSON.stringify(review));
+  }
+  private documents<T>(table: 'projects' | 'conversations' | 'runs' | 'messages' | 'reviews'): T[] {
     return (this.db.prepare(`SELECT document FROM ${table} ORDER BY rowid`).all() as Row[]).map(row => JSON.parse(String(row.document)) as T);
   }
   putProject(project: Project): void {
@@ -65,7 +70,7 @@ export class Store {
     const dir = this.runDirectory(run);
     mkdirSync(join(dir, 'logs'), { recursive: true, mode: 0o700 });
     const events = this.events(run.id);
-    this.replace(join(dir, 'manifest.json'), JSON.stringify({ schemaVersion: 1, ...run, executionMode: 'read-only', configuration: { harness: 'codex', model: run.model, effort: run.effort } }, null, 2) + '\n');
+    this.replace(join(dir, 'manifest.json'), JSON.stringify({ schemaVersion: 1, ...run, executionMode: run.executionMode ?? 'read-only', configuration: { harness: 'codex', model: run.model, effort: run.effort } }, null, 2) + '\n');
     this.replace(join(dir, 'logs', 'events.jsonl'), events.map(event => JSON.stringify(event) + '\n').join(''));
     this.replace(join(dir, 'logs', 'activity.log'), events.map(event => `${event.at} #${event.sequence} ${event.type} ${event.summary}\n`).join(''));
   }
@@ -75,7 +80,7 @@ export class Store {
     renameSync(temporary, path);
   }
   snapshot(): WorkspaceSnapshot {
-    return { projects: this.projects(), conversations: this.conversations(), runs: this.runs(), messages: this.documents('messages'), events: this.events(), dataRoot: this.root };
+    return { projects: this.projects(), conversations: this.conversations(), runs: this.runs(), messages: this.documents('messages'), events: this.events(), reviews: this.reviews(), dataRoot: this.root };
   }
   close(): void { this.db.close(); }
 }

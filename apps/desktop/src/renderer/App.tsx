@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type {
   Conversation,
+  ExecutionMode,
   HarnessInfo,
   HarnessModel,
   HarnessSelection,
@@ -12,6 +13,7 @@ import type {
   WorkspaceSnapshot,
 } from '@randolph/runtime/contracts';
 import ProjectSettings from './ProjectSettings';
+import ReviewPanel from './ReviewPanel';
 
 const EMPTY_SNAPSHOT: WorkspaceSnapshot = {
   projects: [],
@@ -19,11 +21,12 @@ const EMPTY_SNAPSHOT: WorkspaceSnapshot = {
   runs: [],
   messages: [],
   events: [],
+  reviews: [],
   dataRoot: '',
 };
 
 const BLOCKING_STATUSES = new Set<Run['status']>(['starting', 'running', 'stopping', 'stop-unconfirmed']);
-const NATIVE_EVENT_TYPES = new Set(['activity', 'session.started', 'message.delta', 'approval.denied']);
+const NATIVE_EVENT_TYPES = new Set(['activity', 'session.started', 'message.delta', 'approval.denied', 'command.completed', 'file.changed', 'verification.check-started', 'verification.check-finished', 'verification.output']);
 
 function formatTime(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
@@ -200,7 +203,7 @@ function ActivityPanel({ run, events, dataRoot, now, stopping, onStop }: Activit
   const lastNativeEvent = events.findLast((event) => NATIVE_EVENT_TYPES.has(event.type));
   const canStop = run ? run.status === 'starting' || run.status === 'running' : false;
   const lastResponse = events.findLast(event => event.type === 'message.delta');
-  const visibleEvents = events.filter(event => event.type.startsWith('run.') || event.type === 'session.started' || event.type === 'approval.denied' || event.sequence === lastResponse?.sequence || (event.data.method === 'item/started' && event.data.itemType === 'commandExecution')).slice(-12);
+  const visibleEvents = events.filter(event => event.type.startsWith('run.') || event.type.startsWith('verification.') || event.type.startsWith('delivery.') || event.type.startsWith('review.') || event.type === 'command.completed' || event.type === 'file.changed' || event.type === 'session.started' || event.type === 'approval.denied' || event.sequence === lastResponse?.sequence || (event.data.method === 'item/started' && event.data.itemType === 'commandExecution')).slice(-12);
 
 
   return (
@@ -325,7 +328,7 @@ function Welcome({ hasProjects, busy, harness, onAddProject }: WelcomeProps) {
         <span aria-hidden="true" />
         {!harness ? 'Checking native harness…' : harnessReady ? 'Native harness ready' : 'Native harness unavailable'}
       </span>
-      <small>Project modification and final delivery are not available in this slice.</small>
+      <small>Code mode edits an isolated Git worktree and requires final review before delivery.</small>
     </div>
   );
 }
@@ -454,8 +457,9 @@ export default function App() {
   const [selectedConversationId, setSelectedConversationId] = useState<string>();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [settingsProjectId, setSettingsProjectId] = useState<string>();
+  const [selectedReviewId, setSelectedReviewId] = useState<string>();
   const [loading, setLoading] = useState(true);
-  const [action, setAction] = useState<'project' | 'conversation' | 'send' | 'stop' | 'settings'>();
+  const [action, setAction] = useState<'project' | 'conversation' | 'send' | 'stop' | 'settings' | 'review'>();
   const [error, setError] = useState<string>();
   const [now, setNow] = useState(Date.now());
   const loadVersion = useRef(0);
@@ -533,6 +537,9 @@ export default function App() {
   const settingsError = selectedProject?.harnessSettings?.error;
   const selectionAvailable = Boolean(harness?.models.some(item => item.id === selectedModelChoice.model && item.efforts.includes(selectedModelChoice.effort)));
   const settingsProject = snapshot.projects.find(item => item.id === settingsProjectId);
+  const currentReview = snapshot.reviews.findLast(item => item.conversationId === selectedConversationId);
+  const selectedReview = snapshot.reviews.find(item => item.id === selectedReviewId);
+  const checking = currentReview?.status === 'checking';
   const lastMessage = messages.at(-1);
   const lastMessageKey = lastMessage ? `${lastMessage.id}:${lastMessage.text.length}` : selectedConversationId;
 
@@ -631,6 +638,23 @@ export default function App() {
     } catch (cause) { setError(`Could not save conversation settings: ${displayError(cause)}`); }
     finally { setAction(undefined); }
   };
+  const changeMode = async (executionMode: ExecutionMode) => {
+    if (!selectedConversationId || action) return;
+    setAction('settings'); setError(undefined);
+    try { await window.randolph.setExecutionMode({ conversationId: selectedConversationId, executionMode }); await reloadSnapshot(); }
+    catch (cause) { setError(displayError(cause)); }
+    finally { setAction(undefined); }
+  };
+  const openReview = async (fresh = false) => {
+    if (!selectedConversationId || action) return;
+    if (!fresh && currentReview && currentReview.status !== 'stale') { setSelectedReviewId(currentReview.id); return; }
+    setAction('review'); setError(undefined);
+    try {
+      const review = await window.randolph.prepareReview(selectedConversationId);
+      await reloadSnapshot(); setSelectedReviewId(review.id);
+    } catch (cause) { if (fresh) throw cause; setError(displayError(cause)); }
+    finally { setAction(undefined); }
+  };
 
   const stopRun = async (runId: string) => {
     setAction('stop');
@@ -646,8 +670,9 @@ export default function App() {
   };
 
   const activeRun = latestRun && BLOCKING_STATUSES.has(latestRun.status);
+  const cleanupBlocked = conversationRuns.some(run => run.cleanupUnconfirmed || run.status === 'stop-unconfirmed') || snapshot.reviews.some(review => review.conversationId === selectedConversationId && review.status === 'stop-unconfirmed');
   const composerDisabled =
-    Boolean(activeRun) || !harness?.available || !harness.authenticated || harness.models.length === 0;
+    Boolean(activeRun) || checking || cleanupBlocked || !harness?.available || !harness.authenticated || harness.models.length === 0;
   const harnessReason = harness
     ? !harness.available || !harness.authenticated
       ? (harness.reason ?? 'Authentication or availability could not be confirmed.')
@@ -686,12 +711,16 @@ export default function App() {
           <>
             <header className="conversation-header">
               <div>
-                <span className="eyebrow">Read-only workspace</span>
+                <span className="eyebrow">{selectedConversation.executionMode === 'code' ? 'Code workspace' : 'Read-only workspace'}</span>
                 <h1>{selectedConversation.title}</h1>
-                <p>{selectedProject?.name}{latestRun && latestRun.workspace !== selectedProject?.root ? " · Committed snapshot" : ""}</p>
+                <p>{selectedProject?.name}{latestRun && latestRun.workspace !== selectedProject?.root ? (latestRun.executionMode === "code" ? " · Isolated worktree" : " · Committed snapshot") : ""}</p>
               </div>
               <div className="header-actions">
                 {harness?.version ? <span className="version-chip">Codex {harness.version}</span> : null}
+                <select aria-label="Conversation mode" value={selectedConversation.executionMode ?? 'read-only'} disabled={Boolean(action) || Boolean(activeRun) || checking || cleanupBlocked} onChange={event => void changeMode(event.target.value as ExecutionMode)}>
+                  <option value="read-only">Read-only</option><option value="code" disabled={!harness?.executionModes?.includes('code')}>Code</option>
+                </select>
+                {selectedConversation.executionMode === 'code' ? <button className="secondary-button" type="button" disabled={Boolean(action) || Boolean(activeRun) || !latestRun} onClick={() => void openReview()}>{checking ? 'Checks running' : 'Review changes'}</button> : null}
                 <button className="secondary-button" type="button" disabled={Boolean(action)} onClick={() => setSettingsProjectId(selectedProject?.id)}>Project settings</button>
               </div>
             </header>
@@ -708,8 +737,8 @@ export default function App() {
               {messages.length === 0 ? (
                 <div className="conversation-empty">
                   <LogoMark />
-                  <h2>What should Randolph inspect?</h2>
-                  <p>Ask a question about the project. Native events will be recorded alongside the response.</p>
+                  <h2>{selectedConversation.executionMode === 'code' ? 'What should Randolph build?' : 'What should Randolph inspect?'}</h2>
+                  <p>{selectedConversation.executionMode === 'code' ? 'Describe the change. Work stays in an isolated worktree until you review and approve delivery.' : 'Ask a question about the project. Native events will be recorded alongside the response.'}</p>
                 </div>
               ) : (
                 <div className="message-column">
@@ -759,7 +788,7 @@ export default function App() {
                 onSubmit={(event) => void sendMessage(event)}
               />
               <p className="composer-caption">
-                {latestRun?.status === 'stop-unconfirmed'
+                {cleanupBlocked
                   ? 'A new message is blocked because process cleanup could not be confirmed.'
                   : activeRun
                     ? 'Wait for this run to finish, or stop it from Live activity.'
@@ -780,6 +809,7 @@ export default function App() {
       />
 
       {settingsProject ? <ProjectSettings key={settingsProject.id} project={settingsProject} harness={harness} onClose={() => setSettingsProjectId(undefined)} onChanged={reloadSnapshot} /> : null}
+      {selectedReview ? <ReviewPanel key={selectedReview.id} review={selectedReview} onClose={() => setSelectedReviewId(undefined)} onChanged={reloadSnapshot} onRefresh={() => openReview(true)} /> : null}
 
       {!selectedConversation && error ? (
         <div className="global-error" role="alert">
