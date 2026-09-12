@@ -23,9 +23,9 @@ createInterface({input:process.stdin}).on('line',line=>{
  else if(m.method==='turn/start'){
   appendFileSync(${JSON.stringify(calls)},'turn\\n');
   send({id:m.id,result:{turn:{id:'turn-fixture'}}});
-  send({method:'item/started',params:{item:{id:'inspect',type:'commandExecution',command:'read README.md'}}});
-  setTimeout(()=>send({method:'item/agentMessage/delta',params:{itemId:'answer',delta:'I can see the fixture project.'}}),250);
-  setTimeout(()=>send({method:'turn/completed',params:{turn:{id:'turn-fixture',status:'completed'}}}),500);
+  send({method:'item/started',params:{threadId:'thread-fixture',turnId:'turn-fixture',item:{id:'inspect',type:'commandExecution',command:'read README.md'}}});
+  setTimeout(()=>send({method:'item/agentMessage/delta',params:{threadId:'thread-fixture',turnId:'turn-fixture',itemId:'answer',delta:'I can see the fixture project.'}}),250);
+  setTimeout(()=>send({method:'turn/completed',params:{threadId:'thread-fixture',turn:{id:'turn-fixture',status:'completed'}}}),500);
  }else send({id:m.id,result:{}});
 });
 `, { mode: 0o700 });

@@ -35,11 +35,11 @@ createInterface({input:process.stdin}).on('line',line=>{
   if(code&&p.sandboxPolicy?.type==='workspaceWrite')writeFileSync(join(cwd,'value.txt'),'after\\n');
   appendFileSync(${JSON.stringify(turns)},'turn\\n');
   send({id:m.id,result:{turn:{id:'fixture-turn'}}});
-  send({method:'item/agentMessage/delta',params:{itemId:'answer',delta:'Updated value.txt. Ready for review.'}});
-  send({method:'turn/completed',params:{turn:{id:'fixture-turn',status:'completed'}}});
+  send({method:'item/agentMessage/delta',params:{threadId:'fixture-thread',turnId:'fixture-turn',itemId:'answer',delta:'Updated value.txt. Ready for review.'}});
+  send({method:'turn/completed',params:{threadId:'fixture-thread',turn:{id:'fixture-turn',status:'completed'}}});
  }else if(m.method==='command/exec'){
   if(p.sandboxPolicy?.type!=='workspaceWrite'||p.sandboxPolicy.networkAccess!==false)throw Error('unsafe verification policy');
-  send({method:'command/exec/outputDelta',params:{processId:p.processId,stream:'stdout',capReached:false,deltaBase64:Buffer.from('Fixture check is running').toString('base64')}});
+  send({method:'command/exec/outputDelta',params:{threadId:'fixture-thread',turnId:'fixture-turn',processId:p.processId,stream:'stdout',capReached:false,deltaBase64:Buffer.from('Fixture check is running').toString('base64')}});
   setTimeout(()=>send({id:m.id,result:{exitCode:0,stdout:'Fixture checks passed.',stderr:''}}),1000);
  }else send({id:m.id,result:{}});
 });

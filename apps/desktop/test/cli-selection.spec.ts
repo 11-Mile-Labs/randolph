@@ -22,8 +22,8 @@ createInterface({input:process.stdin}).on('line',line=>{
  else if(m.method==='turn/start'){
   appendFileSync(${JSON.stringify(calls)},'${name}\\n');
   send({id:m.id,result:{turn:{id:'turn-fixture'}}});
-  send({method:'item/agentMessage/delta',params:{itemId:'answer',delta:'Response from ${name} CLI'}});
-  send({method:'turn/completed',params:{turn:{id:'turn-fixture',status:'completed'}}});
+  send({method:'item/agentMessage/delta',params:{threadId:'thread-fixture',turnId:'turn-fixture',itemId:'answer',delta:'Response from ${name} CLI'}});
+  send({method:'turn/completed',params:{threadId:'thread-fixture',turn:{id:'turn-fixture',status:'completed'}}});
  }else send({id:m.id,result:{}});
 });
 `, { mode: 0o700 });
@@ -57,5 +57,20 @@ createInterface({input:process.stdin}).on('line',line=>{
     await expect(page.getByText('Project defaults saved.', { exact: true })).toBeVisible();
     expect(readFileSync(join(project, 'config.harness.yaml'), 'utf8')).toContain('executable: null');
     expect(readFileSync(calls, 'utf8')).toBe('second\n');
+    await page.getByRole('button', { name: 'Set project CLI permissions', exact: true }).click();
+    await expect(page.getByRole('checkbox', { name: `Allow codex · ${join(first, 'codex')}`, exact: true })).toBeChecked();
+    await page.getByRole('checkbox', { name: `Allow codex · ${join(first, 'codex')}`, exact: true }).uncheck();
+    await page.getByRole('button', { name: 'Save project defaults', exact: true }).click();
+    await expect(page.getByText('Project defaults saved.', { exact: true })).toBeVisible();
+    expect(readFileSync(join(project, 'config.harness.yaml'), 'utf8')).toContain('enabledRoutes: []');
+    await page.getByRole('button', { name: 'Close settings', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Message', exact: true }).fill('This route is disabled');
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
+    await expect(page.getByText(/^Message was not sent:.*This harness CLI is not enabled for this project/)).toBeVisible();
+    expect(readFileSync(calls, 'utf8')).toBe('second\n');
+    await page.getByRole('navigation', { name: 'Project conversations', exact: true }).getByRole('button', { name: 'Project settings', exact: true }).click();
+    await expect(page.getByRole('checkbox', { name: `Allow codex · ${join(first, 'codex')}`, exact: true })).not.toBeChecked();
+    await page.locator('.route-permissions').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: test.info().outputPath('project-cli-permissions.png') });
   } finally { await app.close(); rmSync(root, { recursive: true, force: true }); }
 });

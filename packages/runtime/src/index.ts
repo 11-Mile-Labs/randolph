@@ -8,7 +8,7 @@ import { basename, resolve, join } from 'node:path';
 import { statSync } from 'node:fs';
 import { Store } from './store.js';
 import { canonicalProject, prepareWorkspace } from './workspace.js';
-import { readHarnessSettings, writeHarnessSettings } from './harness-settings.js';
+import { assertHarnessRoute, readHarnessSettings, writeHarnessSettings } from './harness-settings.js';
 import { inspectGitWorkspace } from './git-review.js';
 import { ProjectMemory, type MemoryCommand, type MemorySnapshot, type PreparedMemory } from './memory.js';
 import type { LessonRef, LessonVersion } from './lessons.js';
@@ -219,6 +219,7 @@ export class Runtime {
       const harness = selection?.harness ?? 'codex';
       const info = await this.inspectExecutable(harness, settings.defaults?.harness === harness ? settings.defaults.executable : undefined);
       if (!this.accepting) throw new Error('Application is closing.');
+      assertHarnessRoute(settings, harness, info.executable);
       if (!info.authenticated || !info.executionModes?.includes('code')) throw new Error('Code mode is not verified for this installed harness.');
     }
     if (this.admission.has(input.conversationId) || this.reviews.hasActiveWork(input.conversationId) || this.store.runs().some(run => run.conversationId === input.conversationId && (activeStatuses.has(run.status) || run.cleanupUnconfirmed))) throw new Error('Wait for active work to finish before changing execution mode.');
@@ -335,7 +336,7 @@ export class Runtime {
     const info = await this.inspectExecutable(input.defaults.harness, input.defaults.executable);
     if (!this.accepting) throw new Error('Application is closing.');
     this.validateSelection(input.defaults, info);
-    const settings = writeHarnessSettings(project.root, input.defaults, input.expectedRevision);
+    const settings = writeHarnessSettings(project.root, input.defaults, input.expectedRevision, input.enabledRoutes);
     this.changed();
     return settings;
   }
@@ -349,6 +350,7 @@ export class Runtime {
       if (settings.error) throw new Error(settings.error);
       const info = await this.inspectExecutable(input.selection.harness, settings.defaults?.harness === input.selection.harness ? settings.defaults.executable : undefined);
       if (!this.accepting) throw new Error('Application is closing.');
+      assertHarnessRoute(settings, input.selection.harness, info.executable);
       this.validateSelection(input.selection, info);
     }
     const conversation = { ...this.conversation(input.conversationId), harness: input.selection?.harness, model: input.selection?.model ?? '', effort: input.selection?.effort ?? '', updatedAt: now() };
@@ -406,12 +408,18 @@ export class Runtime {
     let targetConversationId: string | undefined;
     let run: Run | undefined;
     try {
+      const project = this.project(sourceRun.projectId);
+      const settings = readHarnessSettings(project.root);
+      if (settings.error) throw new Error(settings.error);
       const info = await this.inspectExecutable(context.harness, context.executable);
+      const freshSettings = readHarnessSettings(project.root);
+      if (freshSettings.error) throw new Error(freshSettings.error);
+      if (freshSettings.revision !== settings.revision) throw new Error('Project harness settings changed during discovery. Try again.');
+      assertHarnessRoute(settings, context.harness, info.executable);
       if (context.executableVersion && info.version !== context.executableVersion) throw new Error('The checkpoint CLI version changed. Restore files to inspect it; this checkpoint cannot silently switch executables.');
       if (!this.accepting) throw new Error('Application is closing.');
       this.validateSelection({ harness: context.harness, model: context.model, effort: context.effort }, info);
       this.validateExecutionMode(context.executionMode, info);
-      const project = this.project(sourceRun.projectId);
       const createdAt = now();
       const runId = randomUUID();
       const targetConversation: Conversation = kind === 'restart'
@@ -421,6 +429,8 @@ export class Runtime {
       if (targetConversation.id !== sourceConversation.id) this.admission.add(targetConversation.id);
       const workspace = join(project.root, '.worktrees', `randolph-${runId}`);
       run = {
+        harnessAuthorizationRevision: settings.revision,
+        enabledHarnessRoutes: settings.enabledRoutes?.map(route => ({ ...route })) ?? (info.executable ? [{ harness: context.harness, executable: info.executable }] : []),
         executionOrigin: this.executionOrigin,
         projectContext: context.projectContext,
         harness: context.harness,
@@ -502,11 +512,14 @@ export class Runtime {
       if (!this.accepting) throw new Error('Application is closing.');
       conversation = this.conversation(input.conversationId);
       assertWorkspaceIdentity(project.root, rootIdentity);
-      if (readHarnessSettings(project.root).revision !== settings.revision) throw new Error('Project harness settings changed during discovery. Try again.');
+      const freshSettings = readHarnessSettings(project.root);
+      if (freshSettings.error) throw new Error(freshSettings.error);
+      if (freshSettings.revision !== settings.revision) throw new Error('Project harness settings changed during discovery. Try again.');
       if (!selection.model && !selection.effort && !savedSelection && !settings.defaults) {
         selection.model = info.models[0]?.id ?? '';
         selection.effort = info.models[0]?.defaultEffort ?? '';
       }
+      assertHarnessRoute(settings, selection.harness, info.executable);
       this.validateSelection(selection, info);
       const projectContext = readProjectContext(project.root);
       if (projectContext.error) throw new Error(projectContext.error);
@@ -530,7 +543,7 @@ export class Runtime {
       if (executionMode === 'code') inspectGitWorkspace(project.root, workspace);
       this.reviews.invalidate(conversation.id);
       assertWorkspaceIdentity(project.root, rootIdentity);
-      const run: Run = { executionOrigin: this.executionOrigin, workspaceIdentity: workspaceIdentity(workspace), projectContext, harness: selection.harness, executable: info.executable, executableVersion: info.version, id: randomUUID(), projectId: project.id, conversationId: conversation.id, ...(recoveryMessages ? { recoveryMessages } : {}), status: 'starting', model: selection.model, effort: selection.effort, executionMode, settingsSource, memory, projectSettingsRevision: settings.revision, workspace, createdAt: now(), updatedAt: now(), lastActivityAt: now() };
+      const run: Run = { harnessAuthorizationRevision: settings.revision, enabledHarnessRoutes: settings.enabledRoutes?.map(route => ({ ...route })) ?? (info.executable ? [{ harness: selection.harness, executable: info.executable }] : []), executionOrigin: this.executionOrigin, workspaceIdentity: workspaceIdentity(workspace), projectContext, harness: selection.harness, executable: info.executable, executableVersion: info.version, id: randomUUID(), projectId: project.id, conversationId: conversation.id, ...(recoveryMessages ? { recoveryMessages } : {}), status: 'starting', model: selection.model, effort: selection.effort, executionMode, settingsSource, memory, projectSettingsRevision: settings.revision, workspace, createdAt: now(), updatedAt: now(), lastActivityAt: now() };
       run.logsPath = join(this.store.runDirectory(run), 'logs');
       this.store.transaction(() => {
         this.store.putConversation({ ...conversation, title: conversation.title === 'New conversation' ? input.text.trim().slice(0, 64) : conversation.title, ...(explicit ? { harness: selection.harness, model: selection.model, effort: selection.effort } : {}), updatedAt: now() });

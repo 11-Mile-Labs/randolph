@@ -28,7 +28,18 @@ export function parseReviewApproval(value: unknown): ApproveReviewInput {
 export function parseProjectDefaults(value: unknown): SaveProjectDefaultsInput {
   const input = record(value);
   if (input.expectedRevision !== null && (typeof input.expectedRevision !== 'string' || !/^[0-9a-f]{64}$/.test(input.expectedRevision))) throw new Error('Invalid settings revision.');
-  return { projectId: parseId(input.projectId), defaults: { ...parseSelection(input.defaults), ...(record(input.defaults).executable === undefined ? {} : { executable: parseExecutable(record(input.defaults).executable) }) }, expectedRevision: input.expectedRevision };
+  let enabledRoutes;
+  if (input.enabledRoutes !== undefined) {
+    if (!Array.isArray(input.enabledRoutes) || input.enabledRoutes.length > 32) throw new Error('Invalid enabled harness routes.');
+    enabledRoutes = input.enabledRoutes.map(value => {
+      const route = record(value);
+      const executable = parseExecutable(route.executable);
+      if (!executable) throw new Error('Enabled routes require an absolute CLI path.');
+      return { harness: parseHarnessId(route.harness), executable };
+    });
+    if (new Set(enabledRoutes.map(route => `${route.harness}:${route.executable}`)).size !== enabledRoutes.length) throw new Error('Duplicate enabled route.');
+  }
+  return { projectId: parseId(input.projectId), ...(enabledRoutes === undefined ? {} : { enabledRoutes }), defaults: { ...parseSelection(input.defaults), ...(record(input.defaults).executable === undefined ? {} : { executable: parseExecutable(record(input.defaults).executable) }) }, expectedRevision: input.expectedRevision };
 }
 export function parseConversationSelection(value: unknown): ConversationSelectionInput {
   const input = record(value);

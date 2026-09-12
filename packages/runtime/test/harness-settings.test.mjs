@@ -136,3 +136,28 @@ test('Grok defaults round-trip as a complete harness selection', async t => {
   const saved = writeHarnessSettings(root, grok, null);
   assert.deepEqual(readHarnessSettings(root), { revision: saved.revision, defaults: grok });
 });
+
+test('explicit enabled CLI routes persist separately and survive legacy defaults saves', async t => {
+  const { root, path } = await fixture(t);
+  const routes = [{ harness: 'codex', executable: '/opt/codex' }, { harness: 'grok', executable: '/opt/grok' }];
+  const first = writeHarnessSettings(root, defaults, null, routes);
+  assert.deepEqual(first.enabledRoutes, routes);
+  assert.deepEqual(readHarnessSettings(root).enabledRoutes, routes);
+  const next = writeHarnessSettings(root, { ...defaults, effort: 'high' }, first.revision);
+  assert.deepEqual(next.enabledRoutes, routes);
+  const disabled = writeHarnessSettings(root, defaults, next.revision, []);
+  assert.deepEqual(readHarnessSettings(root).enabledRoutes, []);
+  assert.match(await readFile(path, 'utf8'), /enabledRoutes: \[\]/);
+  assert.notEqual(disabled.revision, next.revision);
+});
+
+test('enabled routes reject duplicate, relative, malformed and unbounded routes before saving', async t => {
+  const { root, path } = await fixture(t);
+  const route = { harness: 'codex', executable: '/opt/codex' };
+  for (const routes of [null, {}, [route, route], [{ ...route, executable: 'codex' }], [{ ...route, harness: 'other' }], [{ ...route, executable: '/x\ny' }], Array.from({length: 33}, (_, i) => ({ ...route, executable: `/opt/${i}` }))]) {
+    assert.throws(() => writeHarnessSettings(root, defaults, null, routes));
+    await assert.rejects(readFile(path), { code: 'ENOENT' });
+  }
+  await writeFile(path, `${content}enabledRoutes: [{harness: codex, executable: relative}]\n`);
+  assert.ok(readHarnessSettings(root).error);
+});

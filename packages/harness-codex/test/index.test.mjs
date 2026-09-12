@@ -8,7 +8,7 @@ import { join, delimiter } from 'node:path';
 import { homedir } from 'node:os';
 import { CodexAdapter } from '../dist/index.js';
 
-function fakeChild({ accountType = 'chatgpt', modelId = 'gpt-test', delayInitialize = 0, turnStatus = 'completed', invalid = false, threadResponse, notifications = [], commandResult = { exitCode: 0, stdout: '', stderr: '' }, commandOutput = 'checks passed\n', commandDelay = 0, beforeResponse = () => {} } = {}) {
+function fakeChild({ accountType = 'chatgpt', modelId = 'gpt-test', delayInitialize = 0, turnStatus = 'completed', invalid = false, threadResponse, notifications = [], beforeThreadResponse = () => {}, beforeTurnResponse = () => {}, commandResult = { exitCode: 0, stdout: '', stderr: '' }, commandOutput = 'checks passed\n', commandDelay = 0, beforeResponse = () => {} } = {}) {
   const child = new EventEmitter();
   child.pid = undefined;
   child.exitCode = null;
@@ -36,13 +36,14 @@ function fakeChild({ accountType = 'chatgpt', modelId = 'gpt-test', delayInitial
         send({ method: 'command/exec/outputDelta', params: { processId: request.params.processId, stream: 'stdout', deltaBase64: Buffer.from(commandOutput).toString('base64'), capReached: false } });
         setTimeout(() => { send({ id: request.id, result: commandResult }); }, commandDelay);
       }
-      else if (request.method === 'thread/start') { threadId = 'thread-' + Math.random().toString(16).slice(2); send({ id: request.id, result: { thread: { id: threadId }, ...threadResponse } }); }
+      else if (request.method === 'thread/start') { threadId = 'thread-1'; beforeThreadResponse({ send, threadId }); send({ id: request.id, result: { thread: { id: threadId }, ...threadResponse } }); }
       else if (request.method === 'turn/start') {
+        beforeTurnResponse({ send, threadId, turnId: 'turn-1' });
         send({ id: request.id, result: { turn: { id: 'turn-1' } } });
-        send({ method: 'item/commandExecution/delta', params: { itemId: 'command-1', delta: 'secret command' } });
+        send({ method: 'item/commandExecution/delta', params: { threadId, turnId: 'turn-1', itemId: 'command-1', delta: 'secret command' } });
         for (const notification of notifications) send(notification);
-        send({ method: 'item/agentMessage/delta', params: { itemId: 'message-1', delta: modelId } });
-        send({ method: 'turn/completed', params: { turn: { status: turnStatus } } });
+        send({ method: 'item/agentMessage/delta', params: { threadId, turnId: 'turn-1', itemId: 'message-1', delta: modelId } });
+        send({ method: 'turn/completed', params: { threadId, turn: { id: 'turn-1', status: turnStatus } } });
       } else if (request.method === 'turn/interrupt') send({ id: request.id, result: {} });
       else send({ id: request.id, result: {} });
     };
@@ -97,6 +98,86 @@ test('run emits only agent-message deltas and keeps each concurrent client isola
   assert.ok(eventsA.every((event) => !JSON.stringify(event).includes('secret command')));
   assert.match(first.launch.args.join(' '), /sandbox_mode="read-only"/);
   assert.match(first.launch.args.join(' '), /approval_policy="never"/);
+});
+
+test('run rejects foreign and identity-less turn notifications without leaking their evidence or completing the active turn', async () => {
+  const child = fakeChild({ notifications: [
+    { method: 'item/agentMessage/delta', params: { threadId: 'foreign-thread', turnId: 'turn-1', itemId: 'foreign-message', delta: 'foreign text' } },
+    { method: 'item/completed', params: { threadId: 'foreign-thread', turnId: 'turn-1', item: { type: 'commandExecution', id: 'foreign-command', command: 'foreign command', aggregatedOutput: 'foreign output' } } },
+    { method: 'turn/diff/updated', params: { threadId: 'foreign-thread', turnId: 'turn-1', diff: 'foreign diff' } },
+    { method: 'turn/completed', params: { threadId: 'foreign-thread', turn: { id: 'turn-1', status: 'failed' } } },
+    { method: 'turn/completed', params: { threadId: 'thread-1', turnId: 'turn-1', turn: { id: 'foreign-turn', status: 'failed' } } },
+    { method: 'turn/started', params: { threadId: 'thread-1', turnId: 'turn-1', turn: { id: 'foreign-turn' } } },
+    { method: 'thread/started', params: { threadId: 'thread-1', thread: { id: 'foreign-thread' } } },
+    { method: 'item/agentMessage/delta', params: { itemId: 'missing-message', delta: 'missing text' } },
+    { method: 'item/started', params: { threadId: 'foreign-thread', turnId: 'turn-1', item: { type: 'commandExecution', command: 'foreign activity' } } },
+    { method: 'item/started', params: { item: { type: 'commandExecution', command: 'missing activity' } } },
+    { method: 'thread/status/changed', params: { threadId: 'foreign-thread', status: { type: 'idle' } } },
+    { method: 'thread/tokenUsage/updated', params: { threadId: 'thread-1', turnId: 'foreign-turn', tokenUsage: {} } },
+    { method: 'item/completed', params: { item: { type: 'fileChange', id: 'missing-file', changes: [{ path: 'missing.txt', diff: 'missing diff' }] } } },
+    { method: 'turn/diff/updated', params: { diff: 'missing turn diff' } },
+    { method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'failed' } } },
+  ] });
+  const events = [];
+  const result = await adapterFor([child]).run(runInput(new AbortController().signal, events));
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(events.filter(event => event.type === 'message.delta').map(event => event.data.text), ['gpt-test']);
+  assert.ok(events.every(event => !/foreign|missing/.test(JSON.stringify(event))));
+  assert.equal(events.some(event => event.data?.method === 'thread/tokenUsage/updated'), false);
+  assert.equal(events.some(event => event.data?.method === 'turn/started'), false);
+  assert.equal(events.some(event => event.data?.method === 'thread/started'), false);
+});
+
+test('run retains schema-shaped thread and turn lifecycle notifications delivered before their RPC acknowledgements', async () => {
+  const child = fakeChild({ beforeThreadResponse({ send, threadId }) {
+    send({ method: 'thread/started', params: { thread: { id: threadId } } });
+  }, beforeTurnResponse({ send, threadId, turnId }) {
+    send({ method: 'turn/started', params: { threadId, turn: { id: turnId } } });
+  } });
+  const events = [];
+  const result = await adapterFor([child]).run(runInput(new AbortController().signal, events));
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(events.filter(event => event.type === 'activity').map(event => event.data.method).filter(method => method.endsWith('/started')), ['thread/started', 'turn/started']);
+});
+
+test('run fails closed when pre-ack native notifications exceed the bounded buffer', async () => {
+  const child = fakeChild({ beforeTurnResponse({ send, threadId, turnId }) {
+    for (let index = 0; index <= 64; index++) send({ method: 'item/agentMessage/delta', params: { threadId, turnId, itemId: `early-${index}`, delta: `early ${index}` } });
+  } });
+  await assert.rejects(adapterFor([child]).run(runInput(new AbortController().signal)), /buffer|notification/i);
+  assert.equal(child.exitCode, 0);
+});
+
+test('run retains identity-bearing native events delivered before turn start is acknowledged', async () => {
+  const child = fakeChild({ beforeTurnResponse({ send, threadId, turnId }) {
+    send({ method: 'item/agentMessage/delta', params: { threadId, turnId, itemId: 'early-message', delta: 'early text' } });
+    send({ method: 'item/completed', params: { threadId, turnId, item: { type: 'commandExecution', id: 'early-command', command: 'early command', aggregatedOutput: 'early output', status: 'completed', exitCode: 0 } } });
+    send({ method: 'turn/diff/updated', params: { threadId, turnId, diff: 'early diff' } });
+    send({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'completed' } } });
+  } });
+  const events = [];
+  const result = await adapterFor([child]).run(runInput(new AbortController().signal, events));
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(events.filter(event => event.type === 'message.delta').map(event => event.data.text), ['early text', 'gpt-test']);
+  assert.equal(events.find(event => event.type === 'command.completed').data.output, 'early output');
+  assert.equal(events.find(event => event.type === 'turn.diff').data.diff, 'early diff');
+});
+
+test('run closes native event admission as soon as the caller cancels', async () => {
+  const controller = new AbortController();
+  const events = [];
+  const child = fakeChild({ notifications: [
+    { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'stop-message', delta: 'stop now' } },
+    { method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item: { type: 'commandExecution', id: 'late-command', command: 'late command', aggregatedOutput: 'late output' } } },
+  ] });
+  const result = await adapterFor([child]).run({ ...runInput(controller.signal, events), onEvent(event) {
+    events.push(event);
+    if (event.type === 'message.delta') controller.abort();
+  } });
+  assert.ok(['interrupted', 'stop-unconfirmed'].includes(result.status));
+  assert.deepEqual(events.filter(event => event.type === 'message.delta').map(event => event.data.text), ['stop now']);
+  assert.equal(events.some(event => event.type === 'command.completed'), false);
+  assert.equal(events.filter(event => event.type === 'message.delta').some(event => event.data.text === 'gpt-test'), false);
 });
 
 test('failed turns and malformed transport fail the run', async () => {
@@ -205,12 +286,14 @@ test('code mode declines escalations and captures bounded native verification an
     { id: 91, method: 'item/commandExecution/requestApproval', params: {} },
     { id: 92, method: 'item/fileChange/requestApproval', params: {} },
     { id: 93, method: 'item/permissions/requestApproval', params: {} },
-    { method: 'item/completed', params: { item: { id: 'check', type: 'commandExecution', command: 'node --test', exitCode: 1, aggregatedOutput: 'f'.repeat(100_000), status: 'completed', cwd: workspace } } },
-    { method: 'item/completed', params: { item: { id: 'edit', type: 'fileChange', status: 'completed', changes: [{ path: 'src/a.ts', kind: { type: 'update' }, diff: '+new' }] } } },
-    { method: 'turn/diff/updated', params: { diff: '+new' } },
+    { id: 94, method: 'item/unknown/requestApproval', params: {} },
+    { method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item: { id: 'check', type: 'commandExecution', command: 'node --test', exitCode: 1, aggregatedOutput: 'f'.repeat(100_000), status: 'completed', cwd: workspace } } },
+    { method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item: { id: 'edit', type: 'fileChange', status: 'completed', changes: [{ path: 'src/a.ts', kind: { type: 'update' }, diff: '+new' }] } } },
+    { method: 'turn/diff/updated', params: { threadId: 'thread-1', turnId: 'turn-1', diff: '+new' } },
   ] });
   await adapterFor([child]).run({ ...runInput(new AbortController().signal, events), workspace, executionMode: 'code' });
-  assert.deepEqual(child.replies.map(reply => reply.result), [{ decision: 'decline' }, { decision: 'decline' }, { permissions: {}, scope: 'turn' }]);
+  assert.deepEqual(child.replies.map(reply => reply.result), [{ decision: 'decline' }, { decision: 'decline' }, { permissions: {}, scope: 'turn' }, undefined]);
+  assert.deepEqual(child.replies.at(-1).error, { code: -32601, message: 'Unsupported native request declined by Randolph.' });
   const check = events.find(event => event.type === 'command.completed');
   assert.equal(check.data.exitCode, 1);
   assert.equal(check.data.command, 'node --test');

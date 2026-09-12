@@ -187,3 +187,67 @@ test('withdrawing all execution capabilities blocks sends and retained checkpoin
   assert.equal(grok.calls.length,0);
   assert.equal(runtime.snapshot().runs.length,1);
 });
+
+test('project route permissions reject disabled CLI admission and freeze authorized routes on runs', async t => {
+  const paths = await fixture(t);
+  const codex = adapter('codex', { code: true });
+  const grok = adapter('grok');
+  const runtime = new Runtime({ codex, grok }, paths.dataRoot);
+  t.after(() => runtime.close());
+  const project = runtime.addProject(paths.projectRoot);
+  const defaults = { harness: 'codex', model: 'codex-model', effort: 'low', executable: '/codex' };
+  const permitted = [{ harness: 'codex', executable: '/codex' }];
+  const saved = await runtime.saveProjectDefaults({ projectId: project.id, defaults, enabledRoutes: permitted, expectedRevision: null });
+  const conversation = runtime.createConversation(project.id);
+  await assert.rejects(runtime.send({ conversationId: conversation.id, text: 'Disabled', harness: 'grok', model: 'grok-model', effort: 'low' }), /not enabled/);
+  await assert.rejects(runtime.setConversationSelection({ conversationId: conversation.id, selection: { harness: 'grok', model: 'grok-model', effort: 'low' } }), /not enabled/);
+  assert.equal(grok.calls.length, 0);
+  const run = await runtime.send({ conversationId: conversation.id, text: 'Enabled' });
+  await settle(runtime);
+  assert.deepEqual(run.enabledHarnessRoutes, permitted);
+  assert.equal(run.harnessAuthorizationRevision, saved.revision);
+  await runtime.saveProjectDefaults({ projectId: project.id, defaults, enabledRoutes: [], expectedRevision: saved.revision });
+  assert.deepEqual(runtime.snapshot().runs[0].enabledHarnessRoutes, permitted);
+  await assert.rejects(runtime.send({ conversationId: conversation.id, text: 'Now disabled' }), /not enabled/);
+  await assert.rejects(runtime.setExecutionMode({ conversationId: conversation.id, executionMode: 'code' }), /not enabled/);
+  await assert.rejects(runtime.rerunFromCheckpoint({ runId: run.id, checkpointDigest: runtime.snapshot().runs[0].checkpoints.at(-1).digest }), /not enabled/);
+  assert.equal(codex.calls.length, 1);
+});
+
+test('route changes while discovery is pending cannot authorize dispatch with stale settings', async t => {
+  const paths = await fixture(t);
+  const codex = adapter('codex');
+  const runtime = new Runtime({ codex }, paths.dataRoot);
+  t.after(() => runtime.close());
+  const project = runtime.addProject(paths.projectRoot);
+  const defaults = { harness: 'codex', model: 'codex-model', effort: 'low', executable: '/codex' };
+  const saved = await runtime.saveProjectDefaults({ projectId: project.id, defaults, enabledRoutes: [{ harness: 'codex', executable: '/codex' }], expectedRevision: null });
+  const conversation = runtime.createConversation(project.id);
+  const discover = codex.discover;
+  codex.discover = async executable => {
+    codex.discover = discover;
+    await runtime.saveProjectDefaults({ projectId: project.id, defaults, enabledRoutes: [], expectedRevision: saved.revision });
+    return discover(executable);
+  };
+  await assert.rejects(runtime.send({ conversationId: conversation.id, text: 'Do not launch stale authority' }), /settings changed/);
+  assert.equal(codex.calls.length, 0);
+  assert.equal(runtime.snapshot().runs.length, 0);
+});
+
+
+test('an unreadable config created during discovery cannot preserve implicit authorization', async t => {
+  const paths = await fixture(t);
+  const codex = adapter('codex');
+  const runtime = new Runtime({ codex }, paths.dataRoot);
+  t.after(() => runtime.close());
+  const project = runtime.addProject(paths.projectRoot);
+  const conversation = runtime.createConversation(project.id);
+  const discover = codex.discover;
+  codex.discover = async executable => {
+    await writeFile(join(paths.projectRoot, 'config.harness.yaml'), 'x'.repeat(65_537));
+    return discover(executable);
+  };
+  await assert.rejects(runtime.send({ conversationId: conversation.id, text: 'Do not launch invalid permissions' }), /64 KB|size limit/);
+  assert.equal(codex.calls.length, 0);
+  assert.equal(runtime.snapshot().runs.length, 0);
+});

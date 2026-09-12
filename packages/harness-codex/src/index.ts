@@ -14,8 +14,40 @@ type Exec = (file: string, args: string[], options: { encoding: 'utf8'; timeout:
 type Spawn = (file: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; stdio: ['pipe', 'pipe', 'pipe']; detached: boolean }) => ChildProcessWithoutNullStreams;
 type Pending = { resolve: (value: Json) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
 const MAX_LINE = 1_048_576;
+const MAX_BUFFERED_RUN_NOTIFICATIONS = 64;
 const VERIFIED_CODE_VERSION = /^codex-cli 0\.(149|154)\.0$/;
 const bounded = (value: unknown, limit = 16_384): string => typeof value === 'string' ? value.slice(0, limit) : '';
+const THREAD_NOTIFICATIONS_WITH_TURN_ID = new Set(['thread/tokenUsage/updated']);
+const identity = (value: unknown): string | undefined => typeof value === 'string' && value ? value : undefined;
+const identitiesAgree = (first: string | undefined, second: string | undefined): boolean => !first || !second || first === second;
+const hasOwn = (value: Json, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
+function isRunScopedNotification(method: string): boolean {
+  return method.startsWith('item/') || method.startsWith('turn/') || method.startsWith('thread/');
+}
+function runNotificationIdentity(method: string, params: Json): { threadId: string; turnId?: string } | undefined {
+  if (!isRunScopedNotification(method)) return undefined;
+  const flatThreadId = identity(params.threadId);
+  const thread = object(params.thread);
+  const nestedThreadId = identity(thread.id);
+  const flatTurnId = identity(params.turnId);
+  const turn = object(params.turn);
+  const nestedTurnId = identity(turn.id);
+  if ((hasOwn(params, 'threadId') && !flatThreadId) || (hasOwn(thread, 'id') && !nestedThreadId)
+    || (hasOwn(params, 'turnId') && !flatTurnId) || (hasOwn(turn, 'id') && !nestedTurnId)) return undefined;
+  if (method === 'thread/started') {
+    return nestedThreadId && identitiesAgree(nestedThreadId, flatThreadId) ? { threadId: nestedThreadId } : undefined;
+  }
+  if (method === 'turn/started' || method === 'turn/completed') {
+    return flatThreadId && nestedTurnId && identitiesAgree(flatThreadId, nestedThreadId) && identitiesAgree(nestedTurnId, flatTurnId)
+      ? { threadId: flatThreadId, turnId: nestedTurnId }
+      : undefined;
+  }
+  if (!flatThreadId || !identitiesAgree(flatThreadId, nestedThreadId) || !identitiesAgree(flatTurnId, nestedTurnId)) return undefined;
+  if (flatTurnId) return { threadId: flatThreadId, turnId: flatTurnId };
+  if (nestedTurnId) return undefined;
+  if (method.startsWith('item/') || method.startsWith('turn/') || THREAD_NOTIFICATIONS_WITH_TURN_ID.has(method)) return undefined;
+  return { threadId: flatThreadId };
+}
 function workspacePolicy(workspace: string): Json {
   return { type: 'workspaceWrite', writableRoots: [workspace], networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true };
 }
@@ -307,9 +339,25 @@ export class CodexAdapter implements HarnessAdapter {
     let threadId = ''; let turnId = ''; let outcome: string | undefined;
     let stop: Promise<void> | undefined;
     let eventFailure: Error | undefined;
-    const client = new RpcClient(child, this.timeout, message => {
-      if (eventFailure) throw eventFailure;
+    let acceptingNotifications = true;
+    const bufferedNotifications: Json[] = [];
+    const recordNotification = (message: Json, fromBuffer = false): void => {
+      if (!acceptingNotifications || eventFailure) return;
       const method = String(message.method); const params = object(message.params); const item = object(params.item);
+      const notificationIdentity = runNotificationIdentity(method, params);
+      if (isRunScopedNotification(method)) {
+        if (!notificationIdentity) return;
+        if (!threadId || (notificationIdentity.turnId && !turnId)) {
+          if (!fromBuffer && bufferedNotifications.length < MAX_BUFFERED_RUN_NOTIFICATIONS) bufferedNotifications.push(message);
+          else if (!fromBuffer) {
+            eventFailure = new Error('Codex sent too many native notifications before run identities were acknowledged.');
+            acceptingNotifications = false;
+            bufferedNotifications.length = 0;
+          }
+          return;
+        }
+        if (notificationIdentity.threadId !== threadId || (notificationIdentity.turnId && notificationIdentity.turnId !== turnId)) return;
+      }
       if (method === 'turn/completed') outcome = String(object(params.turn).status ?? 'unknown');
       try {
         if (method === 'item/agentMessage/delta' && typeof params.delta === 'string') input.onEvent({ type: 'message.delta', summary: 'Codex is responding', data: { messageId: String(params.itemId ?? turnId), text: params.delta } });
@@ -322,9 +370,18 @@ export class CodexAdapter implements HarnessAdapter {
         else if (method === 'turn/diff/updated') input.onEvent({ type: 'turn.diff', summary: 'Native turn diff updated', data: { diff: bounded(params.diff, 65_536), diffTruncated: typeof params.diff === 'string' && params.diff.length > 65_536 } });
         else if (!method.includes('reasoning') && !method.endsWith('/delta')) input.onEvent({ type: 'activity', summary: item.type ? `${String(item.type)} ${method.endsWith('/completed') ? 'finished' : 'started'}` : method, data: { method, ...(item.type ? { itemType: item.type } : {}), ...(typeof item.command === 'string' ? { command: item.command } : {}) } });
       } catch (error) { eventFailure = error instanceof Error ? error : new Error('Could not record native event.'); throw eventFailure; }
+    };
+    const flushBufferedNotifications = (): void => {
+      const notifications = bufferedNotifications.splice(0);
+      for (const notification of notifications) recordNotification(notification, true);
+    };
+    const client = new RpcClient(child, this.timeout, message => {
+      recordNotification(message);
     });
     const onAbort = (): void => {
       if (stop) return;
+      acceptingNotifications = false;
+      bufferedNotifications.length = 0;
       stop = (async () => {
         if (threadId && turnId) { try { await client.rpc('turn/interrupt', { threadId, turnId }, 2_000); } catch { /* Termination follows. */ } }
         client.fail(new Error('Run interrupted.'));
@@ -333,7 +390,7 @@ export class CodexAdapter implements HarnessAdapter {
     };
     input.signal.addEventListener('abort', onAbort, { once: true });
     if (input.signal.aborted) onAbort();
-    const checkDispatch = (): void => { if (input.signal.aborted) throw new Error('Run interrupted.'); if (client.error) throw client.error; assertWorkspaceIdentity(input.workspace, identity); };
+    const checkDispatch = (): void => { if (input.signal.aborted) throw new Error('Run interrupted.'); if (eventFailure) throw eventFailure; if (client.error) throw client.error; assertWorkspaceIdentity(input.workspace, identity); };
     let status: 'completed' | 'interrupted' | 'stop-unconfirmed' = 'completed';
     let failure: unknown;
     try {
@@ -355,6 +412,7 @@ export class CodexAdapter implements HarnessAdapter {
       const turn = await client.rpc('turn/start', { threadId, model: input.model, effort: input.effort, approvalPolicy: 'never', sandboxPolicy: code ? workspacePolicy(input.workspace) : { type: 'readOnly' }, input: [{ type: 'text', text }] });
       turnId = String(object(turn.turn).id ?? '');
       if (!turnId) throw new Error('Codex returned no turn identity.');
+      flushBufferedNotifications();
       const deadline = Date.now() + 600_000;
       while (!outcome) { checkDispatch(); if (Date.now() > deadline) throw new Error('Run exceeded the ten-minute limit.'); await delay(25); }
       if (input.signal.aborted || outcome === 'interrupted') status = 'interrupted';
@@ -362,6 +420,8 @@ export class CodexAdapter implements HarnessAdapter {
     } catch (error) { if (input.signal.aborted) status = 'interrupted'; else failure = error; }
     finally {
       input.signal.removeEventListener('abort', onAbort);
+      acceptingNotifications = false;
+      bufferedNotifications.length = 0;
       if (stop) await stop;
       client.fail(new Error('Run ended.'));
       const confirmed = await terminate(child);

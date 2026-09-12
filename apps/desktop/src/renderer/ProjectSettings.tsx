@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import type { HarnessId, HarnessInfo, HarnessInstallation, Project, ProjectHarnessSettings } from '@randolph/runtime/contracts';
+import type { HarnessId, HarnessInfo, HarnessInstallation, HarnessRoute, Project, ProjectHarnessSettings } from '@randolph/runtime/contracts';
 
 type Props = { project: Project; onClose: () => void; onChanged: () => Promise<void> };
 
 export default function ProjectSettings({ project, onClose, onChanged }: Props) {
   const [settings, setSettings] = useState<ProjectHarnessSettings>(project.harnessSettings ?? { defaults: null, revision: null });
+  const [enabledRoutes, setEnabledRoutes] = useState<HarnessRoute[] | undefined>(settings.enabledRoutes);
   const [harness, setHarness] = useState<HarnessInfo>();
   const [harnessId, setHarnessId] = useState<HarnessId>(settings.defaults?.harness ?? 'codex');
   const [installations, setInstallations] = useState<HarnessInstallation[]>([]);
@@ -47,6 +48,7 @@ export default function ProjectSettings({ project, onClose, onChanged }: Props) 
       const [copies, info] = await Promise.all([window.randolph.harnessInstallations(selectedHarness), window.randolph.harness(undefined, next.defaults?.executable ?? undefined, selectedHarness)]);
       setInstallations(copies); setHarness(info); setExecutable(next.defaults?.executable ?? '');
       setSettings(next); setHarnessId(selectedHarness);
+      setEnabledRoutes(next.enabledRoutes);
       setModel(next.defaults?.model ?? info.models[0]?.id ?? '');
       setEffort(next.defaults?.effort ?? info.models[0]?.defaultEffort ?? '');
       await onChanged();
@@ -79,7 +81,7 @@ export default function ProjectSettings({ project, onClose, onChanged }: Props) 
   const save = async () => {
     setBusy(true); setError(undefined); setSaved(false);
     try {
-      const next = await window.randolph.saveProjectDefaults({ projectId: project.id, defaults: { harness: harnessId, model, effort, executable: executable || null }, expectedRevision: settings.revision });
+      const next = await window.randolph.saveProjectDefaults({ projectId: project.id, defaults: { harness: harnessId, model, effort, executable: executable || null }, ...(enabledRoutes === undefined ? {} : { enabledRoutes }), expectedRevision: settings.revision });
       setSettings(next); setSaved(true);
       await onChanged();
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save project settings.'); }
@@ -125,6 +127,22 @@ export default function ProjectSettings({ project, onClose, onChanged }: Props) 
           </select>
         </label>
       </div>
+      <fieldset className="route-permissions" disabled={busy}>
+        <legend>Project CLI permissions</legend>
+        {enabledRoutes === undefined ? <>
+          <p>This project uses its selected main agent. Enabling additional worker CLIs requires explicit project permissions.</p>
+          <button type="button" className="secondary-button" disabled={!harness?.executable} onClick={() => { setEnabledRoutes(harness?.executable ? [{ harness: harnessId, executable: harness.executable }] : []); setSaved(false); }}>Set project CLI permissions</button>
+        </> : <>
+          <p>Only enabled CLIs can start new runs. Saved changes leave active runs on their original permissions.</p>
+          {[...installations.map(item => ({ harness: harnessId, executable: item.executable })), ...enabledRoutes.filter(route => route.harness !== harnessId || !installations.some(item => item.executable === route.executable))].map(route => <label key={`${route.harness}:${route.executable}`}>
+            <input type="checkbox" checked={enabledRoutes.some(item => item.harness === route.harness && item.executable === route.executable)} onChange={event => {
+              setEnabledRoutes(event.target.checked ? [...enabledRoutes, route] : enabledRoutes.filter(item => item.harness !== route.harness || item.executable !== route.executable)); setSaved(false);
+            }} /><span>Allow {route.harness} · {route.executable}</span>
+          </label>)}
+          {!enabledRoutes.length ? <p>No CLI is enabled. New execution will be blocked until you enable one.</p> : null}
+          {harness?.executable && !enabledRoutes.some(route => route.harness === harnessId && route.executable === harness.executable) ? <p>The selected default CLI is disabled for new runs.</p> : null}
+        </>}
+      </fieldset>
       <p className="settings-location">Saving creates or updates <code>config.harness.yaml</code> in the project folder. You can version and edit this file yourself.</p>
       {settings.error ? <p className="inline-error" role="alert">{settings.error} Correct the file, then reload settings.</p> : null}
       {!valid && !settings.error ? <p className="inline-error">Choose an available model and effort before saving.</p> : null}

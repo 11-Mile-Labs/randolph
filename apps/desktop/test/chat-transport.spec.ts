@@ -24,6 +24,7 @@ const stopSeen = ${JSON.stringify(stopSeen)};
 const send = value => process.stdout.write(JSON.stringify(value) + '\\n');
 let stopping = false;
 let activeTurn = 0;
+let activeThreadId = '';
 if (process.argv.includes('--version')) { console.log('codex-cli chat-transport-fixture'); process.exit(0); }
 const interrupted = () => { stopping = true; if (activeTurn === 3) writeFileSync(stopSeen, 'seen'); process.exit(130); };
 process.on('SIGTERM', interrupted);
@@ -33,7 +34,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   if (!message.id) return;
   if (message.method === 'account/read') send({ id: message.id, result: { account: { type: 'chatgpt' } } });
   else if (message.method === 'model/list') send({ id: message.id, result: { data: [{ model: 'fixture-model', displayName: 'Fixture model', supportedReasoningEfforts: [{ reasoningEffort: 'low' }], defaultReasoningEffort: 'low' }] } });
-  else if (message.method === 'thread/start') send({ id: message.id, result: { thread: { id: 'chat-transport-thread-' + Math.random() } } });
+  else if (message.method === 'thread/start') { activeThreadId = 'chat-transport-thread-' + Math.random(); send({ id: message.id, result: { thread: { id: activeThreadId } } }); }
   else if (message.method === 'turn/start') {
     const turnNumber = readFileSync(turns, 'utf8').trim().split('\\n').filter(Boolean).length + 1;
     activeTurn = turnNumber;
@@ -41,20 +42,20 @@ createInterface({ input: process.stdin }).on('line', line => {
     const turnId = 'chat-transport-turn-' + turnNumber;
     send({ id: message.id, result: { turn: { id: turnId } } });
     if (turnNumber === 1) {
-      send({ method: 'item/reasoning/delta', params: { itemId: 'reasoning', delta: 'PRIVATE_REASONING_MUST_NOT_BE_ASSISTANT_TEXT' } });
-      send({ method: 'item/toolCall/delta', params: { itemId: 'tool', delta: 'PRIVATE_TOOL_RESULT_MUST_NOT_BE_ASSISTANT_TEXT' } });
-      send({ method: 'item/agentMessage/delta', params: { itemId: 'first-answer', delta: 'First stream: ' } });
+      send({ method: 'item/reasoning/delta', params: { threadId: activeThreadId, turnId, itemId: 'reasoning', delta: 'PRIVATE_REASONING_MUST_NOT_BE_ASSISTANT_TEXT' } });
+      send({ method: 'item/toolCall/delta', params: { threadId: activeThreadId, turnId, itemId: 'tool', delta: 'PRIVATE_TOOL_RESULT_MUST_NOT_BE_ASSISTANT_TEXT' } });
+      send({ method: 'item/agentMessage/delta', params: { threadId: activeThreadId, turnId, itemId: 'first-answer', delta: 'First stream: ' } });
       const wait = () => {
         if (stopping) return;
         if (!existsSync(releaseFirst)) return setTimeout(wait, 10);
-        send({ method: 'item/agentMessage/delta', params: { itemId: 'first-answer', delta: 'completed.' } });
-        send({ method: 'turn/completed', params: { turn: { id: turnId, status: 'completed' } } });
+        send({ method: 'item/agentMessage/delta', params: { threadId: activeThreadId, turnId, itemId: 'first-answer', delta: 'completed.' } });
+        send({ method: 'turn/completed', params: { threadId: activeThreadId, turn: { id: turnId, status: 'completed' } } });
         activeTurn = 0;
       };
       wait();
     } else if (turnNumber === 2) {
-      send({ method: 'item/agentMessage/delta', params: { itemId: 'second-answer', delta: 'Second stream: independent.' } });
-      send({ method: 'turn/completed', params: { turn: { id: turnId, status: 'completed' } } });
+      send({ method: 'item/agentMessage/delta', params: { threadId: activeThreadId, turnId, itemId: 'second-answer', delta: 'Second stream: independent.' } });
+      send({ method: 'turn/completed', params: { threadId: activeThreadId, turn: { id: turnId, status: 'completed' } } });
       activeTurn = 0;
     } else {
       const wait = () => { if (!stopping) setTimeout(wait, 10); };

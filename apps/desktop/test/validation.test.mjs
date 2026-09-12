@@ -82,3 +82,10 @@ test('project setup IPC binds inspection and approval to bounded identities, rev
  assert.throws(()=>validation.parseSetupApproval({...approval,expectedContextRevision:'new'}));
  assert.throws(()=>validation.parseSetupApproval({...approval,value:{...approval.value,documents:[{path:'../outside',description:''}]}}));
 });
+
+test('project CLI permissions reject malformed IPC routes and retain exact explicit choices', () => {
+  const input = { projectId: '10000000-0000-0000-0000-000000000001', defaults: { harness: 'codex', model: 'm', effort: 'low' }, expectedRevision: null };
+  const route = { harness: 'codex', executable: '/opt/codex' };
+  for (const enabledRoutes of [[], [route]]) assert.deepEqual(validation.parseProjectDefaults({ ...input, enabledRoutes }), { ...input, enabledRoutes });
+  for (const enabledRoutes of [null, {}, [route, route], [{ ...route, executable: 'relative' }], [{ ...route, executable: null }], [{ ...route, harness: 'other' }], Array(33).fill(route)]) assert.throws(() => validation.parseProjectDefaults({ ...input, enabledRoutes }));
+});
