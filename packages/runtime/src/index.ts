@@ -17,6 +17,10 @@ import { Pushes, type ApprovePushInput } from './pushes.js';
 import type { PushOptions } from './push.js';
 import { Reviews } from './reviews.js';
 import { Checkpoints, type CheckpointInput, type CheckpointRestore } from './checkpoints.js';
+import { DelegationCommands } from './delegation-commands.js';
+import { assertDelegationBasis } from './delegation-basis.js';
+import type { DelegationAvailability } from './delegation-plan.js';
+import type { DelegationSnapshot, DelegationRevisionInput, ReviseDelegationInput, SaveDelegationPresetInput } from './delegation-contracts.js';
 import type { ApproveProjectSetupInput, InspectProjectInput, ProjectSetupSnapshot, AdapterEvent, ApproveReviewInput, ChatEventsInput, ChatEventsResult, Conversation, ConversationModeInput, ConversationSelectionInput, HarnessAdapter, HarnessId, HarnessInfo, HarnessInstallation, HarnessSelection, LinkedRunResult, Project, ProjectHarnessSettings, RerunCheckpointInput, RestartCheckpointInput, ReviewRecord, Run, SaveProjectDefaultsInput, SendInput, WorkspaceSnapshot } from './contracts.js';
 export type * from './contracts.js';
 export { Store } from './store.js';
@@ -112,6 +116,7 @@ export class Runtime {
   private readonly pushes: Pushes;
   private readonly integrations: Integrations;
   private readonly memory: ProjectMemory;
+  private readonly delegation: DelegationCommands;
   private readonly executionOrigin: ExecutionOrigin | undefined;
   private readonly active = new Map<string, { controller: AbortController; done: Promise<void>; run: Run }>();
   private readonly listeners = new Set<() => void>();
@@ -126,8 +131,33 @@ export class Runtime {
     this.preferences = new AppSettings(this.store.root);
     this.checkpoints = new Checkpoints(this.store);
     this.memory = new ProjectMemory(this.store, () => this.changed());
+    this.delegation = new DelegationCommands(this.store, {
+      assertMutable: run => {
+        if (!this.accepting || this.admission.has(run.conversationId) || this.active.has(run.id) || this.reviews?.hasActiveWork(run.conversationId) || this.pushes?.hasActiveWork(run.conversationId)) throw new Error('Wait for current work to settle before changing this proposal.');
+        const runs = this.store.runs().filter(candidate => candidate.conversationId === run.conversationId);
+        if (runs.at(-1)?.id !== run.id) throw new Error('A newer conversation request superseded this proposal.');
+        if (runs.some(candidate => activeStatuses.has(candidate.status) || candidate.cleanupUnconfirmed) || this.delegation.records.sessions(run.id).some(session => ['prepared', 'dispatch-intent', 'running', 'cleanup-unconfirmed'].includes(session.state))) throw new Error('Native work and cleanup must settle before a proposal decision.');
+      },
+      assertBasis: (run, plan) => assertDelegationBasis(this.store, run, plan),
+      availability: async (run, plan) => {
+        const routes: DelegationAvailability['routes'] = [];
+        const unique = [...new Map(plan.plan.assignments.map(assignment => [`${assignment.harness}:${assignment.executable}`, assignment])).values()];
+        const results = await Promise.allSettled(unique.map(async assignment => {
+          if (!run.enabledHarnessRoutes?.some(route => route.harness === assignment.harness && route.executable === assignment.executable)) return;
+          const adapter = this.adapters[assignment.harness];
+          if (!adapter) return;
+          const info = await adapter.discover(assignment.executable);
+          if (!info.available || !info.authenticated || info.executable !== assignment.executable || !info.version) return;
+          routes.push({ harness: assignment.harness, executable: info.executable, version: info.version, models: info.models.map(model => ({ id: model.id, efforts: model.efforts })), modes: info.executionModes ?? ['read-only'], enabled: true, commandCapability: Boolean(adapter.runCommand && info.executionModes?.includes('code')) });
+        }));
+        if (results.some(result => result.status === 'rejected')) throw new Error('A proposed CLI could not be inspected. Refresh before approval.');
+        if (!run.executable || !run.executableVersion) throw new Error('The retained main-agent CLI identity is incomplete.');
+        return { routes, mainSelection: { harness: run.harness ?? 'codex', executable: run.executable, executableVersion: run.executableVersion, model: run.model, effort: run.effort } };
+      },
+    }, () => this.changed());
+    this.delegation.records.reconcileUnfinishedSessions();
     for (const run of this.store.runs()) {
-      if (activeStatuses.has(run.status)) {
+      if (activeStatuses.has(run.status) || (!run.cleanupUnconfirmed && this.delegation.records.sessions(run.id).some(session => session.state === 'cleanup-unconfirmed'))) {
         this.store.transaction(() => {
           run.status = 'interrupted'; run.cleanupUnconfirmed = true; run.updatedAt = now();
           run.error = 'The application ended during this run. It has not been restarted; previous process cleanup could not be verified.';
@@ -142,6 +172,11 @@ export class Runtime {
     this.reviews = new Reviews(this.store, run => this.adapterForRun(run), id => !this.admission.has(id) && !this.pushes.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed());
   }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
+  delegationSnapshot(runId: string): Promise<DelegationSnapshot> { return this.delegation.snapshot(runId); }
+  reviseDelegation(input: ReviseDelegationInput): Promise<DelegationSnapshot> { return this.delegation.revise(input); }
+  rejectDelegation(input: DelegationRevisionInput): Promise<DelegationSnapshot> { return this.delegation.reject(input); }
+  approveDelegation(input: DelegationRevisionInput): Promise<DelegationSnapshot> { return this.delegation.approve(input); }
+  saveDelegationPreset(input: SaveDelegationPresetInput): Promise<DelegationSnapshot> { return this.delegation.savePreset(input); }
   private changed(): void { for (const listener of this.listeners) listener(); }
   snapshot(): WorkspaceSnapshot {
     const snapshot = this.store.snapshot();

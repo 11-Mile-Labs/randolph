@@ -12,6 +12,10 @@
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"
     },
+    "./delegation-plan": {
+      "types": "./dist/delegation-plan.d.ts",
+      "default": "./dist/delegation-plan.js"
+    },
     "./project-context": {
       "types": "./dist/project-context.d.ts",
       "import": "./dist/project-context.js"

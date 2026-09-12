@@ -7,6 +7,7 @@ await copyFile('../../randolph.png', 'dist/renderer/randolph.png');
 await bundle({ entryPoints: ['src/main.ts'], outfile: 'dist/main.js', bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external' });
 await bundle({ entryPoints: ['src/preload.ts'], outfile: 'dist/preload.cjs', bundle: true, platform: 'node', format: 'cjs', external: ['electron'], target: 'node24' });
 await bundle({ entryPoints: ['src/validation.ts'], outfile: 'dist/validation.js', bundle: true, platform: 'node', format: 'esm', target: 'node24' });
+await bundle({ entryPoints: ['src/delegation-validation.ts'], outfile: 'dist/delegation-validation.js', bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external' });
 
 await bundle({ entryPoints: ['src/memory-validation.ts'], outfile: 'dist/memory-validation.js', bundle: true, platform: 'node', format: 'esm', target: 'node24' });
 await bundle({ entryPoints: ['src/renderer/chat-transport.ts'], outfile: 'dist/chat-transport.js', bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external' });

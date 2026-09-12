@@ -3,6 +3,7 @@ import { NativeChatSession } from './chat-transport';
 import type { NativeChatMessage } from './chat-transport';
 import HistoryPanel from './HistoryPanel';
 import MemoryPanel from './MemoryPanel';
+import DelegationConversation from './DelegationConversation';
 import WorkspaceHome from './WorkspaceHome';
 import AppSettings from './AppSettings';
 import './app-navigation.css';
@@ -872,6 +873,7 @@ export default function App() {
                   ))}
                 </div>
               )}
+              {latestRun ? <div className="message-column"><DelegationConversation key={latestRun.id} runId={latestRun.id} revision={snapshot.events.filter(event => event.runId === latestRun.id && event.type.startsWith('delegation.')).at(-1)?.sequence ?? 0} /></div> : null}
             </div>
 
             <div className="composer-area">

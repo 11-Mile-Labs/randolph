@@ -16,6 +16,10 @@ export type { MemoryCommand, MemorySnapshot, PreparedMemory } from './memory.js'
 export type { LessonDraft, LessonRef, LessonVersion } from './lessons.js';
 import type { GitDeliveryPlan, GitReview } from './git-review.js';
 import type { VerificationResult } from './verification.js';
+import type { DelegationSnapshot, DelegationRevisionInput, ReviseDelegationInput, SaveDelegationPresetInput } from './delegation-contracts.js';
+export type { DelegationSnapshot, DelegationRevisionInput, ReviseDelegationInput, SaveDelegationPresetInput } from './delegation-contracts.js';
+export type { DelegationPlan, DelegationAssignment, DelegationLimits, DelegationRole } from './delegation-plan.js';
+export type { DelegationPlanRevision, DelegationTask } from './delegation-records.js';
 
 export type RunStatus = 'starting' | 'running' | 'stopping' | 'completed' | 'failed' | 'interrupted' | 'stop-unconfirmed';
 export type WorkspaceIdentity = { device: number; inode: number };
@@ -69,6 +73,11 @@ export type RestartCheckpointInput = { runId: string; checkpointDigest: string }
 export type RerunCheckpointInput = { runId: string; checkpointDigest: string };
 export type LinkedRunResult = { conversation: Conversation; run: Run };
 export interface DesktopBridge {
+  delegationSnapshot(runId: string): Promise<DelegationSnapshot>;
+  reviseDelegation(input: ReviseDelegationInput): Promise<DelegationSnapshot>;
+  rejectDelegation(input: DelegationRevisionInput): Promise<DelegationSnapshot>;
+  approveDelegation(input: DelegationRevisionInput): Promise<DelegationSnapshot>;
+  saveDelegationPreset(input: SaveDelegationPresetInput): Promise<DelegationSnapshot>;
   snapshot(): Promise<WorkspaceSnapshot>;
   projectSetup(projectId: string): Promise<ProjectSetupSnapshot>;
   reconcileProjectSetupCleanup(projectId: string): Promise<ProjectSetupSnapshot>;
