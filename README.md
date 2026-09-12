@@ -31,4 +31,13 @@ No application account or required cloud backend is planned. Harnesses and enabl
 
 The desktop application and execution runtime are intended for open-source release. License selection is pending. Personal service integrations and private operational data remain separate from the public core.
 
-Implementation milestones, installation instructions, and contribution guidance will be added as the project develops.
+## Project documents
+
+- [Product specification](docs/product-spec.md): approved behavior, the 14 initial workflows, v1 scope, and deferred features.
+- [Architecture](docs/architecture.md): accepted responsibilities, proposed technology, and unresolved control boundaries.
+- [User journey](docs/user-journey.md): project setup through an approved bugfix and recovery.
+- [Roadmap](docs/roadmap.md): proposed milestones and their completion evidence.
+- [First controlled-run experiment](docs/plans/first-controlled-run.md): bounded plan before building the full application.
+- [Initial harness findings](docs/research/harness-compatibility.md): observed subscription integration and remaining limitations.
+
+The specification records intended product behavior. Architecture proposals and experiment plans are not claims of implemented functionality. Installation instructions and contribution guidance will be added as working software becomes available.
