@@ -1149,3 +1149,10 @@ html[data-theme='system'] .event-detail { color: var(--ui-text); }
 .checkpoint-card { padding: 12px; border: 1px solid var(--line); border-radius: 8px; display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 12px 0; }
 .checkpoint-card code { align-self: center; font-size: 12px; }
 .history-message { border-top: 1px solid var(--line); padding: 16px 0; }
+.history-timeline { list-style: none; padding: 0; }
+.history-timeline li { border-left: 2px solid var(--line); padding: 0 0 20px 16px; }
+.history-timeline time { font-size: 12px; color: var(--muted); }
+.history-timeline p { margin: 6px 0; overflow-wrap: anywhere; }
+.history-timeline summary { color: var(--muted); font-size: 12px; cursor: pointer; }
+.history-delivery article { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0; padding: 12px; }
+.history-delivery code { overflow-wrap: anywhere; }

@@ -12,7 +12,7 @@ Non-Git folders and repositories without an initial commit still support read-on
 
 ## History and explicit restoration
 
-**Run history** displays earlier runs, their messages, saved model/effort/context, checkpoint boundaries, and capture errors. Opening history never dispatches a turn.
+**Run history** displays earlier runs, their messages, saved model/effort/context, checkpoint boundaries, and capture errors. The selected run also exposes its ordered activity timeline with expandable recorded event data and retained delivery outcomes, including checks, commit, merge target, and cleanup confirmation. Opening history never dispatches a turn.
 
 **Restore files to folder** asks the user to select a destination parent through the native folder picker. The runtime creates a new directory, verifies the selected manifest digest and retained objects, and restores a standalone Git repository with detached base HEAD and the exact checkpoint working tree. Existing destinations are refused. The original database history, project, branch, review approvals, and external effects remain unchanged.
 

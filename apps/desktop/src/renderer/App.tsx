@@ -908,7 +908,7 @@ export default function App() {
       /> : null}
 
       {settingsProject ? <ProjectSettings key={settingsProject.id} project={settingsProject} harness={harness} onClose={() => setSettingsProjectId(undefined)} onChanged={reloadSnapshot} /> : null}
-      {historyProjectId ? <HistoryPanel key={historyProjectId} runs={historyRuns} messages={historyMessages} onClose={() => setHistoryProjectId(undefined)} /> : null}
+      {historyProjectId ? <HistoryPanel key={historyProjectId} runs={historyRuns} messages={historyMessages} events={snapshot.events} reviews={snapshot.reviews} onClose={() => setHistoryProjectId(undefined)} /> : null}
       {memoryProjectId ? <MemoryPanel projectId={memoryProjectId} onClose={() => setMemoryProjectId(undefined)} /> : null}
       {selectedReview ? <ReviewPanel key={selectedReview.id} review={selectedReview} onClose={() => setSelectedReviewId(undefined)} onChanged={reloadSnapshot} onRefresh={() => openReview(true)} /> : null}
 

@@ -22,4 +22,4 @@ Background execution does not solve detached-descendant termination or hard owne
 
 Runtime tests exercise persistence without project/authentication prerequisites, separate global policy, stale external edits, and malformed files. Electron acceptance covers sidebar and keyboard access, native Settings navigation after background-window destruction, persisted appearance, independent settings drafts, and project controls without entering a conversation. The same navigation acceptance test can run against an installed bundle by setting `RANDOLPH_TEST_EXECUTABLE` to its executable. Native macOS visual inspection requires an unlocked desktop.
 
-The installed bundle passed the navigation acceptance test, including native menu entries and window recreation. Direct visual inspection of the macOS menu bar was deferred because the desktop was locked.
+The installed bundle passed the navigation acceptance test, including native menu entries and window recreation. Direct macOS inspection also confirmed the Randolph menu title, About/Settings/Quit entries, and opening the Settings screen from the native menu in the installed application.

@@ -86,6 +86,12 @@ createInterface({input:process.stdin}).on('line',line=>{
     await page.getByRole('navigation', { name: 'Project conversations', exact: true }).getByRole('button', { name: 'Run history', exact: true }).click();
     const history = page.getByRole('dialog', { name: 'Run history' });
     await expect(history.getByText('Completed turn', { exact: true })).toBeVisible();
+    const timeline = history.getByRole('region', { name: 'Recorded activity', exact: true });
+    await expect(timeline.getByText('Approved commit merged into the parent branch.', { exact: true })).toBeVisible();
+    await timeline.getByText('delivery.merged', { exact: true }).click();
+    await expect(timeline.getByRole('listitem').filter({ hasText: 'delivery.merged' }).locator('pre')).toContainText(snapshot.reviews[0]!.commitOid!);
+    await expect(history.getByRole('region', { name: 'Recorded delivery', exact: true })).toContainText('Merged to main');
+    expect(readFileSync(turns, 'utf8')).toBe('turn\n');
     await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, root);
     await history.locator('.checkpoint-card').filter({ hasText: 'Completed turn' }).getByRole('button', { name: 'Restore files to folder' }).click();
     await expect(history.getByRole('status')).toContainText('Restored to');
