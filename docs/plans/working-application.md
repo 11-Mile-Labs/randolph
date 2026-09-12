@@ -27,7 +27,7 @@ Status: active implementation toward the complete [approved v1 scope](../product
 - [x] Present verification, changed files, combined diff, and target parent before final approval.
 - [x] Bind final approval to the exact worktree tree, parent revision, and successful checks; invalidate stale requests.
 - [x] Record delivery intent before mutation, then reconcile commit, merge, and cleanup outcomes independently after interruption.
-- [ ] Support parent integration/conflicts and fresh verification/approval; push remains a separate explicit action.
+- [x] Support parent integration/conflicts and fresh verification/approval; push remains a separate explicit action.
 - [x] Verify with real synthetic repositories, fake native protocol tests, actual Electron UI, and bounded native compatibility evidence where needed.
 
 **Files:** extend `packages/harness-codex/src/index.ts`, runtime contracts/store/orchestration, Electron bridge/validation and renderer. Add focused Git review/delivery and verification modules with behavioral tests. Keep native fault fixtures outside real projects.
@@ -49,7 +49,8 @@ Status: active implementation toward the complete [approved v1 scope](../product
 ## 4. Workflows, memory, and backlog
 
 - [ ] Implement guided workflow creation and the approved 14-workflow catalog with limits, retries, and outcomes.
-- [ ] Add built-in scoped memory/lesson review and optional integration contracts.
+- [x] Add built-in scoped memory/lesson review, version history, exact pins, and retained context provenance.
+- [ ] Add optional memory integration contracts and broader context preparation.
 - [ ] Add local and Linear backlog views, linked conversations, outcome-driven advancement, and reconciliation.
 - [ ] Complete project/shared attention views, settings management, import/export, and retention controls.
 

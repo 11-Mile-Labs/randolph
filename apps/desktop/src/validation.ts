@@ -1,4 +1,4 @@
-import type { ApproveReviewInput, ConversationModeInput, ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
+import type { ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid settings request.');
   return value as Record<string, unknown>;
@@ -39,4 +39,10 @@ export function parseSend(value: unknown): SendInput {
   if (input.model === undefined && input.effort === undefined) return message;
   const selection = parseSelection({ harness: 'codex', model: input.model, effort: input.effort });
   return { ...message, model: selection.model, effort: selection.effort };
+}
+
+export function parsePushApproval(value: unknown): ApprovePushInput {
+  const input = record(value);
+  if (typeof input.revision !== 'string' || !/^[0-9a-f]{64}$/.test(input.revision)) throw new Error('Invalid push preview revision.');
+  return { reviewId: parseId(input.reviewId), revision: input.revision };
 }

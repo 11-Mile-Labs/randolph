@@ -1,4 +1,9 @@
 :root {
+  --surface: #faf9f6;
+  --surface-muted: #eeebe4;
+  --line: #d6d0c4;
+  --ink: #263039;
+  --muted: #66726a;
   color: #263039;
   background: #eceae5;
   font-family:
@@ -972,3 +977,35 @@ button:disabled {
 .review-consent { display: flex; align-items: center; gap: 9px; margin-top: 14px; font-size: 12px; }
 .review-panel .primary-button { padding: 10px 14px; }
 .delivery-success { margin: 16px 0; padding: 14px; border-radius: 8px; color: #41674c; background: #edf3eb; font-size: 12px; }
+
+.memory-panel { width: min(1040px, calc(100vw - 48px)); max-height: calc(100vh - 64px); padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink); overflow-y: auto; }
+.memory-panel::backdrop { background: #161c2055; }
+.memory-panel header, .memory-panel footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.memory-panel h2 { margin: 4px 0; font-family: Georgia, serif; font-size: 28px; }
+.memory-layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 24px; margin: 24px 0; }
+.memory-layout aside { border-right: 1px solid var(--line); padding-right: 18px; }
+.memory-row { display: flex; align-items: flex-start; gap: 8px; padding: 10px 4px; border-bottom: 1px solid var(--line); }
+.memory-row.selected { background: var(--surface-muted); }
+.memory-row button { display: grid; gap: 5px; border: 0; background: transparent; text-align: left; color: inherit; cursor: pointer; }
+.memory-row small { color: var(--muted); font-size: 11px; }
+.memory-editor { display: grid; gap: 14px; align-content: start; }
+.memory-editor label { display: grid; gap: 6px; }
+.memory-editor input, .memory-editor textarea, .memory-editor select { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 9px; color: inherit; font: inherit; }
+.memory-actions, .memory-group-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.memory-group-actions { margin: 12px 0; }
+.memory-preferences { border-top: 1px solid var(--line); padding: 16px 0; }
+.memory-preferences label { display: block; margin: 12px 0; }
+.memory-editor details p { white-space: pre-wrap; }
+
+.memory-project-preferences textarea { display: block; width: 100%; max-width: 480px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+
+.integration-attention { border: 1px solid #bb9569; background: #fbf2e5; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+.integration-attention button { margin-right: 8px; }
+.run-context pre { white-space: pre-wrap; max-height: 240px; overflow: auto; }
+
+.memory-panel .primary-button, .memory-group-actions button { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line); cursor: pointer; }
+
+.push-controls { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 8px; }
+.push-controls code { overflow-wrap: anywhere; }
+.push-controls label { display: block; margin: 12px 0; }
+.push-controls button { margin: 6px 8px 6px 0; }

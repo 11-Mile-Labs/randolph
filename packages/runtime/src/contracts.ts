@@ -1,3 +1,11 @@
+import type { PushRecord, ApprovePushInput } from './pushes.js';
+export type { PushRecord, ApprovePushInput } from './pushes.js';
+import type { IntegrationState } from './integrations.js';
+export type { IntegrationState } from './integrations.js';
+import type { MemoryCommand, MemorySnapshot, PreparedMemory } from './memory.js';
+import type { LessonRef, LessonVersion } from './lessons.js';
+export type { MemoryCommand, MemorySnapshot, PreparedMemory } from './memory.js';
+export type { LessonDraft, LessonRef, LessonVersion } from './lessons.js';
 import type { GitDeliveryPlan, GitReview } from './git-review.js';
 import type { VerificationResult } from './verification.js';
 
@@ -9,10 +17,10 @@ export type SaveProjectDefaultsInput = { projectId: string; defaults: HarnessSel
 export type ConversationSelectionInput = { conversationId: string; selection: HarnessSelection | null };
 export type ConversationModeInput = { conversationId: string; executionMode: ExecutionMode };
 export type ApproveReviewInput = { reviewId: string; message: string };
-export type ReviewRecord = { id: string; projectId: string; conversationId: string; runId: string; createdAt: string; updatedAt: string; status: 'pending' | 'checking' | 'stale' | 'delivering' | 'interrupted' | 'delivered' | 'failed' | 'stop-unconfirmed'; basis: GitReview; progress?: { checkId: string; startedAt: string; output: string }; verification?: VerificationResult; deliveryPlan?: GitDeliveryPlan; commitOid?: string; merged?: boolean; cleaned?: boolean; error?: string };
+export type ReviewRecord = { id: string; projectId: string; conversationId: string; runId: string; createdAt: string; updatedAt: string; status: 'pending' | 'checking' | 'stale' | 'delivering' | 'interrupted' | 'delivered' | 'failed' | 'stop-unconfirmed'; basis: GitReview; push?: PushRecord; originOperation?: 'active' | 'cleanup-unconfirmed'; progress?: { checkId: string; startedAt: string; output: string }; verification?: VerificationResult; deliveryPlan?: GitDeliveryPlan; commitOid?: string; merged?: boolean; cleaned?: boolean; error?: string };
 export type Project = { id: string; name: string; root: string; createdAt: string; harnessSettings?: ProjectHarnessSettings };
 export type Conversation = { id: string; projectId: string; title: string; model: string; effort: string; executionMode?: ExecutionMode; createdAt: string; updatedAt: string; lastReadSequence: number };
-export type Run = { id: string; projectId: string; conversationId: string; status: RunStatus; cleanupUnconfirmed?: boolean; model: string; effort: string; executionMode?: ExecutionMode; settingsSource?: 'project' | 'conversation' | 'native'; projectSettingsRevision?: string | null; workspace: string; logsPath?: string; createdAt: string; updatedAt: string; lastActivityAt: string; error?: string };
+export type Run = { id: string; projectId: string; conversationId: string; status: RunStatus; cleanupUnconfirmed?: boolean; memory?: PreparedMemory; integration?: IntegrationState; model: string; effort: string; executionMode?: ExecutionMode; settingsSource?: 'project' | 'conversation' | 'native'; projectSettingsRevision?: string | null; workspace: string; logsPath?: string; createdAt: string; updatedAt: string; lastActivityAt: string; error?: string };
 export type Message = { id: string; conversationId: string; runId: string; role: 'user' | 'assistant'; text: string; createdAt: string };
 export type RunEvent = { sequence: number; runId: string; projectId: string; conversationId: string; at: string; type: string; summary: string; data: Record<string, unknown> };
 export type WorkspaceSnapshot = { projects: Project[]; conversations: Conversation[]; runs: Run[]; messages: Message[]; events: RunEvent[]; reviews: ReviewRecord[]; dataRoot: string };
@@ -30,15 +38,24 @@ export interface HarnessAdapter {
 export type SendInput = { conversationId: string; text: string; model?: string; effort?: string };
 export interface DesktopBridge {
   snapshot(): Promise<WorkspaceSnapshot>;
+  memorySnapshot(projectId: string): Promise<MemorySnapshot>;
+  memoryCommand(input: MemoryCommand): Promise<MemorySnapshot>;
+  memoryHistory(projectId: string, reference: LessonRef): Promise<LessonVersion[]>;
   harness(): Promise<HarnessInfo>;
   addProject(): Promise<Project | null>;
   createConversation(projectId: string): Promise<Conversation>;
   saveProjectDefaults(input: SaveProjectDefaultsInput): Promise<ProjectHarnessSettings>;
   setConversationSelection(input: ConversationSelectionInput): Promise<Conversation>;
   setExecutionMode(input: ConversationModeInput): Promise<Conversation>;
+  integrateConversation(conversationId: string): Promise<IntegrationState | null>;
+  confirmIntegration(conversationId: string): Promise<IntegrationState>;
   prepareReview(conversationId: string): Promise<ReviewRecord>;
   verifyReview(reviewId: string): Promise<ReviewRecord>;
   approveReview(input: ApproveReviewInput): Promise<ReviewRecord>;
+  previewPush(reviewId: string): Promise<ReviewRecord>;
+  approvePush(input: ApprovePushInput): Promise<ReviewRecord>;
+  checkPush(reviewId: string): Promise<ReviewRecord>;
+  stopPush(reviewId: string): Promise<void>;
   stopReview(reviewId: string): Promise<void>;
   send(input: SendInput): Promise<Run>;
   stop(runId: string): Promise<void>;

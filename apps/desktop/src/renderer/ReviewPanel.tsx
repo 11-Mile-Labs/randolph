@@ -1,3 +1,4 @@
+import PushControls from './PushControls';
 import { useEffect, useRef, useState } from 'react';
 import type { ReviewRecord } from '@randolph/runtime/contracts';
 
@@ -61,7 +62,7 @@ export default function ReviewPanel({ review, onClose, onChanged, onRefresh }: P
         {review.verification?.status === 'unavailable' ? <p>No supported project checks were found. Add verification scripts to the project and request a new review.</p> : null}
       </section>
       {(error || review.error) ? <p className="inline-error" role="alert">{error || review.error}</p> : null}
-      {delivered ? <div className="delivery-success" role="status"><strong>Local delivery complete</strong><p>Commit <code>{review.commitOid?.slice(0, 8)}</code> merged into {review.basis.parentBranch}. {review.cleaned ? 'The temporary worktree was removed.' : 'Worktree cleanup is pending.'} Nothing was pushed.</p></div> : <>
+      {delivered ? <div className="delivery-success" role="status"><strong>Local delivery complete</strong><p>Commit <code>{review.commitOid?.slice(0, 8)}</code> merged into {review.basis.parentBranch}. {review.cleaned ? 'The temporary worktree was removed.' : 'Worktree cleanup is pending.'} {review.push?.status === 'pushed' ? 'The separately approved push is confirmed.' : 'Push is separate from this local delivery.'}</p><PushControls review={review} onChanged={onChanged} /></div> : <>
         <label className="commit-message-label">Commit message<textarea aria-label="Commit message" maxLength={16000} value={message} disabled={busy || Boolean(review.deliveryPlan)} onChange={event => { setMessage(event.target.value); setAccepted(false); }} rows={2} /></label>
         <label className="review-consent"><input type="checkbox" checked={accepted} disabled={busy || checking || !canApprove} onChange={event => setAccepted(event.target.checked)} />I reviewed the changes and checks</label>
         <p className="review-approval-copy">Final approval commits all non-ignored worktree changes, merges the reviewed result into {review.basis.parentBranch}, and removes the temporary worktree. Push is a separate action.</p>

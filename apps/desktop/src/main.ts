@@ -1,3 +1,5 @@
+import { parsePushApproval } from './validation.js';
+import { parseMemoryCommand, parseLessonRef } from './memory-validation.js';
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -67,6 +69,12 @@ else {
       runtime = new Runtime(new CodexAdapter(), dataRoot);
       runtime.subscribe(() => { if (window && !window.isDestroyed()) window.webContents.send('randolph:changed'); });
       command('randolph:snapshot', () => runtime!.snapshot());
+      command('randolph:memory', id => runtime!.memorySnapshot(parseId(id)));
+      command('randolph:memory-command', input => runtime!.memoryCommand(parseMemoryCommand(input)));
+      command('randolph:memory-history', input => {
+        if (!input || typeof input !== 'object' || !('projectId' in input) || !('reference' in input)) throw new Error('Invalid memory history request.');
+        return runtime!.memoryHistory(parseId(input.projectId), parseLessonRef(input.reference));
+      });
       command('randolph:harness', () => runtime!.harness());
       command('randolph:add-project', async () => {
         const choice = await dialog.showOpenDialog(window!, { title: 'Choose a project folder', properties: ['openDirectory'] });
@@ -77,9 +85,15 @@ else {
       command('randolph:save-project-defaults', input => runtime!.saveProjectDefaults(parseProjectDefaults(input)));
       command('randolph:conversation-selection', input => runtime!.setConversationSelection(parseConversationSelection(input)));
       command('randolph:execution-mode', input => runtime!.setExecutionMode(parseMode(input)));
+      command('randolph:integrate', id => runtime!.integrateConversation(parseId(id)));
+      command('randolph:confirm-integration', id => runtime!.confirmIntegration(parseId(id)));
       command('randolph:prepare-review', id => runtime!.prepareReview(parseId(id)));
       command('randolph:verify-review', id => runtime!.verifyReview(parseId(id)));
       command('randolph:approve-review', input => runtime!.approveReview(parseReviewApproval(input)));
+      command('randolph:preview-push', id => runtime!.previewPush(parseId(id)));
+      command('randolph:approve-push', input => runtime!.approvePush(parsePushApproval(input)));
+      command('randolph:check-push', id => runtime!.checkPush(parseId(id)));
+      command('randolph:stop-push', id => runtime!.stopPush(parseId(id)));
       command('randolph:stop-review', id => runtime!.stopReview(parseId(id)));
       command('randolph:send', input => runtime!.send(parseSend(input)));
       command('randolph:stop', id => runtime!.stop(parseId(id)));

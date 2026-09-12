@@ -72,6 +72,10 @@ createInterface({input:process.stdin}).on('line',line=>{
     await page.screenshot({ path: join(tmpdir(), 'randolph-code-review.png') });
     await page.getByRole('button', { name: 'Approve commit and merge', exact: true }).click();
     await expect(page.getByText('Local delivery complete', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Preview origin push', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Push approved commit', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Preview origin push', exact: true }).click();
+    await expect(page.getByRole('region', { name: 'Separate origin push' }).getByRole('alert')).toBeVisible();
     const snapshot = await page.evaluate(() => (window as unknown as { randolph: DesktopBridge }).randolph.snapshot());
     expect(snapshot.reviews[0]!.status).toBe('delivered');
     expect(snapshot.reviews[0]!.cleaned).toBe(true);

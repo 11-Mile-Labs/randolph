@@ -5,6 +5,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Runtime } from '../dist/index.js';
+import { Pushes } from '../dist/pushes.js';
+import { CleanupUnconfirmedError } from '../dist/push.js';
 
 function git(root, args) {
   return execFileSync('/usr/bin/git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', '-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -37,7 +39,7 @@ function fixture(t, options = {}) {
     },
   };
   const dataRoot = join(root, 'data');
-  const runtime = new Runtime(adapter, dataRoot);
+  const runtime = new Runtime(adapter, dataRoot, options.localPush ? { push: { allowLocalTransport: true } } : {});
   const project = runtime.addProject(projectRoot);
   const conversation = runtime.createConversation(project.id);
   let closed = false;
@@ -145,4 +147,85 @@ test('lost run ownership persists cleanup uncertainty across repeated reopenings
     } finally { await reopened.close(); }
   }
   assert.equal(f.calls.length, 1);
+});
+
+test('review integrates newer parent content before checks without changing the parent', async t => {
+  const f = fixture(t);
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  const run = await f.runtime.send({ conversationId: f.conversation.id, text: 'Update value.' }); await settled(f.runtime);
+  writeFileSync(join(f.projectRoot, 'parent.txt'), 'new parent content\n');
+  git(f.projectRoot, ['add', 'parent.txt']); git(f.projectRoot, ['commit', '-m', 'advance parent']);
+  const advanced = git(f.projectRoot, ['rev-parse', 'HEAD']);
+  const review = f.runtime.prepareReview(f.conversation.id);
+  assert.equal(review.basis.parentOid, advanced);
+  assert.equal(git(run.workspace, ['rev-parse', 'HEAD']), advanced);
+  assert.equal(readFileSync(join(run.workspace, 'parent.txt'), 'utf8'), 'new parent content\n');
+  assert.equal(readFileSync(join(run.workspace, 'value.txt'), 'utf8'), 'after\n');
+  assert.equal(readFileSync(join(f.projectRoot, 'value.txt'), 'utf8'), 'before\n');
+  assert.equal(git(f.projectRoot, ['rev-parse', 'HEAD']), advanced);
+  assert.equal(review.verification, undefined);
+});
+
+test('conflict markers block review until resolution is explicitly confirmed and checks rerun', async t => {
+  const f = fixture(t);
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  const run = await f.runtime.send({ conversationId: f.conversation.id, text: 'Update value.' }); await settled(f.runtime);
+  writeFileSync(join(f.projectRoot, 'value.txt'), 'parent update\n');
+  git(f.projectRoot, ['add', 'value.txt']); git(f.projectRoot, ['commit', '-m', 'conflicting parent']);
+  const advanced = git(f.projectRoot, ['rev-parse', 'HEAD']);
+  const integration = f.runtime.integrateConversation(f.conversation.id);
+  assert.equal(integration.status, 'conflicted');
+  assert.throws(() => f.runtime.prepareReview(f.conversation.id), /conflict/i);
+  assert.throws(() => f.runtime.confirmIntegration(f.conversation.id), /conflict|marker|git/i);
+  writeFileSync(join(run.workspace, 'value.txt'), 'resolved both changes\n');
+  assert.equal(f.runtime.confirmIntegration(f.conversation.id).status, 'resolved');
+  const review = f.runtime.prepareReview(f.conversation.id);
+  await assert.rejects(f.runtime.approveReview({ reviewId: review.id, message: 'Resolved integration' }), /checks/i);
+  assert.equal(review.basis.parentOid, advanced);
+  assert.equal(git(f.projectRoot, ['rev-parse', 'HEAD']), advanced);
+  assert.equal(readFileSync(join(f.projectRoot, 'value.txt'), 'utf8'), 'parent update\n');
+});
+
+test('local delivery never pushes; a separate exact preview approval publishes and reconciles', async t => {
+  const f = fixture(t, { localPush: true });
+  const origin = join(f.projectRoot, '..', 'origin.git');
+  git(f.projectRoot, ['init', '--bare', origin]); git(f.projectRoot, ['remote', 'add', 'origin', origin]);
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  await f.runtime.send({ conversationId: f.conversation.id, text: 'Update value.' }); await settled(f.runtime);
+  const review = f.runtime.prepareReview(f.conversation.id); await f.runtime.verifyReview(review.id);
+  await f.runtime.approveReview({ reviewId: review.id, message: 'Reviewed local delivery' });
+  assert.equal(git(origin, ['for-each-ref', '--format=%(refname)']), '');
+  const preview = await f.runtime.previewPush(review.id);
+  assert.equal(preview.push.status, 'preview');
+  assert.equal(git(origin, ['for-each-ref', '--format=%(refname)']), '');
+  await assert.rejects(f.runtime.approvePush({ reviewId: review.id, revision: '0'.repeat(64) }), /preview|changed/i);
+  const pushed = await f.runtime.approvePush({ reviewId: review.id, revision: preview.push.revision });
+  assert.equal(pushed.push.status, 'pushed');
+  assert.equal(git(origin, ['rev-parse', 'refs/heads/main']), pushed.commitOid);
+  writeFileSync(join(f.projectRoot, 'later.txt'), 'later unpushed work\n');
+  git(f.projectRoot, ['add', 'later.txt']); git(f.projectRoot, ['commit', '-m', 'later work']);
+  assert.equal((await f.runtime.checkPush(review.id)).push.status, 'pushed');
+  assert.equal(git(origin, ['rev-parse', 'refs/heads/main']), pushed.commitOid);
+  const retained = f.runtime.snapshot().reviews.find(item => item.id === review.id);
+  f.runtime.store.putReview({ ...retained, originOperation: 'active' });
+  new Pushes(f.runtime.store, () => true, () => {});
+  await assert.rejects(f.runtime.send({ conversationId: f.conversation.id, text: 'No work until cleanup is known' }), /active|cleanup/i);
+  assert.equal(f.runtime.snapshot().reviews[0].originOperation, 'cleanup-unconfirmed');
+});
+
+test('a failed push preview with unknown process cleanup quarantines even without a push plan', async t => {
+  const f = fixture(t);
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  await f.runtime.send({ conversationId: f.conversation.id, text: 'Update value.' }); await settled(f.runtime);
+  const review = f.runtime.prepareReview(f.conversation.id); await f.runtime.verifyReview(review.id);
+  await f.runtime.approveReview({ reviewId: review.id, message: 'Reviewed local delivery' });
+  const pushes = new Pushes(f.runtime.store, () => true, () => {}, {}, {
+    async preview() { throw new CleanupUnconfirmedError('Synthetic process did not exit'); },
+    async execute() { throw new Error('No push is authorized'); },
+    async reconcile() { throw new Error('No push exists'); },
+  });
+  await assert.rejects(pushes.preview(review.id), /did not exit/);
+  assert.equal(f.runtime.snapshot().reviews[0].push, undefined);
+  assert.equal(f.runtime.snapshot().reviews[0].originOperation, 'cleanup-unconfirmed');
+  await assert.rejects(f.runtime.send({ conversationId: f.conversation.id, text: 'Must stay blocked' }), /active|cleanup/i);
 });

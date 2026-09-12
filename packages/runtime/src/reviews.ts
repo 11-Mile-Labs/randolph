@@ -1,3 +1,4 @@
+import { reconcileSupersededDelivery } from './integration.js';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -66,7 +67,7 @@ export class Reviews {
     if (!project) throw new Error('Project does not exist.');
     const priorDeliveries = this.store.reviews().filter(review => review.conversationId === conversationId && review.deliveryPlan && review.status !== 'delivered' && review.status !== 'stale');
     for (const prior of priorDeliveries) {
-      if (reconcileGitDelivery(prior.basis.root, prior.basis.workspace, prior.deliveryPlan!).merged) throw new Error('The earlier delivery already merged. Continue its cleanup before requesting a new review.');
+      if (reconcileSupersededDelivery(prior.basis.root, prior.basis.workspace, prior.deliveryPlan!).merged) throw new Error('The earlier delivery already merged. Continue its cleanup before requesting a new review.');
     }
     let evidenceDir = join(this.store.runDirectory(run), 'reviews');
     mkdirSync(evidenceDir, { recursive: true, mode: 0o700 });

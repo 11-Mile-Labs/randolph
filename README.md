@@ -8,7 +8,7 @@ An independent project from [11 Mile Labs](https://github.com/11-Mile-Labs).
 
 ## Status
 
-A developer desktop build now lives in `apps/desktop`, backed by `packages/runtime` and `packages/harness-codex`. It supports read-only conversations and controlled coding through an installed, ChatGPT-authenticated Codex CLI, with project checks and explicit local commit/merge approval. This is an initial product slice, not the complete v1 release.
+A developer desktop build now lives in `apps/desktop`, backed by `packages/runtime` and `packages/harness-codex`. It supports read-only conversations and controlled coding through an installed, ChatGPT-authenticated Codex CLI, with project checks, explicit local commit/merge approval, scoped lessons, parent integration, and separately approved origin push. This is an initial product slice, not the complete v1 release.
 
 ## Run the desktop
 
@@ -24,6 +24,8 @@ Choose **Add project**, select a local folder, choose a Codex model and effort, 
 Open **Project settings** to save model/effort defaults in the project's `config.harness.yaml`. Changing a composer picker saves a conversation override immediately; **Use project default** restores inheritance. Active runs retain their starting settings. Invalid or unavailable saved choices are shown explicitly and block new sends until corrected. See [project harness defaults](docs/decisions/project-harness-defaults.md) for external editing and compatibility behavior.
 
 Choose **Code** to edit an isolated worktree with a verified native CLI. Open **Review changes**, run the detected project checks, inspect the diff, and approve the exact result for local delivery. Changing the worktree or parent invalidates approval. See [controlled coding and delivery](docs/decisions/controlled-coding.md) for supported boundaries and recovery.
+
+Open **Memory** to review and pin project/global lessons. After local delivery, **Preview origin push** starts a separate approval flow. See [memory, integration, and push](docs/decisions/memory-integration-and-push.md) for retained versions, conflict handling, and transport limits.
 
 Git projects use a per-conversation worktree under `.worktrees/`, starting from committed HEAD. Uncommitted source edits are not copied in this slice. Non-Git folders are read in place. Durable state lives in `~/.randolph/app.sqlite`, with readable and JSONL run logs below `~/.randolph/projects/`. `RANDOLPH_DATA_DIR` selects a separate app-data directory for development/testing. Run logs can contain project content; they are private local data, not repository files.
 
@@ -44,9 +46,11 @@ The default tests use temporary fixtures and no model inference. The desktop tes
 - Visible activity, unread indicators, Stop requests, exact log locations, and history reopening.
 - SQLite-backed run/message/event state, frozen run model/effort, derived JSONL/readable logs, and per-conversation worktrees.
 - Code mode, retained file/command evidence, complete review trees, visible checks, and explicit local delivery with interruption recovery.
+- Scoped lesson editing, version history, explicit approval, exact pins, and retained run context provenance.
+- Clean-parent integration, visible conflicts, and a separate exact origin-push preview and approval.
 - A narrow Electron preload/IPC boundary with an isolated renderer and locally bundled assets.
 
-Push, checkpoint restoration, Claude/Grok adapters, workflow/memory/configuration interfaces, background/tray support and AI SDK UI transport integration are not implemented in this slice. Process-group cleanup does not prove termination of detached descendants; hard owner-loss shutdown remains a release blocker. **Stop** requests native interruption and process-group termination, and reports uncertainty when that cleanup cannot be confirmed. Unconfirmed cleanup blocks further work in that conversation across reopening. There is no claim of application-level sandboxing; safety sandbox work is deferred until v2 at the earliest.
+Checkpoint restoration, Claude/Grok adapters, workflow/backlog interfaces, broader project configuration, background/tray support and AI SDK UI transport integration are not implemented in this slice. Process-group cleanup does not prove termination of detached descendants; hard owner-loss shutdown remains a release blocker. **Stop** requests native interruption and process-group termination, and reports uncertainty when that cleanup cannot be confirmed. Unconfirmed cleanup blocks further work in that conversation across reopening. There is no claim of application-level sandboxing; safety sandbox work is deferred until v2 at the earliest.
 
 ## What we are building
 
@@ -82,6 +86,7 @@ The desktop application and execution runtime are intended for open-source relea
 - [Checkpoint and restart proof](docs/research/checkpoint-restart-2026-09-12.md): restored after source-repository deletion and verified in a fresh subscription-backed native session.
 - [Desktop implementation boundary](docs/decisions/desktop-first-slice.md): selected package structure, storage/IPC decisions, verified behavior and remaining work.
 - [Controlled coding and delivery](docs/decisions/controlled-coding.md): native execution, review/checks, exact approval, recovery, and remaining limits.
+- [Memory, integration, and push](docs/decisions/memory-integration-and-push.md): scoped lesson versions, parent conflicts, separate push approval, and tested limits.
 - [Project harness defaults](docs/decisions/project-harness-defaults.md): project YAML authority, conversation inheritance, external-edit checks, and immutable run settings.
 - [Permission follow-up](docs/research/permission-followup-2026-09-12.md): verified workspace semantics and a real declined approval; standalone Git remains unverified.
 - [Controlled-run results](docs/research/controlled-run-2026-09-12.md): observed subscription execution, denied diagnostic mutations, and incomplete protection proof.

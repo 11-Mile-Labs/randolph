@@ -1,3 +1,4 @@
+import MemoryPanel from './MemoryPanel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type {
@@ -239,6 +240,7 @@ function ActivityPanel({ run, events, dataRoot, now, stopping, onStop }: Activit
             </div>
           </div>
 
+          {run.memory?.references.length ? <details className="run-context"><summary>{run.memory.references.length} supplied lessons · ~{run.memory.estimatedTokens} tokens (estimate)</summary><pre>{run.memory.text}</pre></details> : null}
           {run.error ? (
             <div className="inline-error" role="alert">
               {run.error}
@@ -457,6 +459,7 @@ export default function App() {
   const [selectedConversationId, setSelectedConversationId] = useState<string>();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [settingsProjectId, setSettingsProjectId] = useState<string>();
+  const [memoryProjectId, setMemoryProjectId] = useState<string>();
   const [selectedReviewId, setSelectedReviewId] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState<'project' | 'conversation' | 'send' | 'stop' | 'settings' | 'review'>();
@@ -525,6 +528,7 @@ export default function App() {
     [selectedConversationId, snapshot.runs],
   );
   const latestRun = conversationRuns[0];
+  const integration = conversationRuns.find(run => run.integration)?.integration;
   const runEvents = latestRun ? conversationEvents.filter((event) => event.runId === latestRun.id) : [];
   const messages = snapshot.messages
     .filter((message) => message.conversationId === selectedConversationId)
@@ -656,6 +660,16 @@ export default function App() {
     finally { setAction(undefined); }
   };
 
+  const integrate = async (resolveConflicts = false) => {
+    if (!selectedConversationId || action) return;
+    setAction('review'); setError(undefined);
+    try {
+      if (resolveConflicts) await window.randolph.confirmIntegration(selectedConversationId);
+      else await window.randolph.integrateConversation(selectedConversationId);
+    } catch (cause) { setError(displayError(cause)); }
+    finally { await reloadSnapshot(); setAction(undefined); }
+  };
+
   const stopRun = async (runId: string) => {
     setAction('stop');
     setError(undefined);
@@ -672,7 +686,7 @@ export default function App() {
   const activeRun = latestRun && BLOCKING_STATUSES.has(latestRun.status);
   const cleanupBlocked = conversationRuns.some(run => run.cleanupUnconfirmed || run.status === 'stop-unconfirmed') || snapshot.reviews.some(review => review.conversationId === selectedConversationId && review.status === 'stop-unconfirmed');
   const composerDisabled =
-    Boolean(activeRun) || checking || cleanupBlocked || !harness?.available || !harness.authenticated || harness.models.length === 0;
+    Boolean(activeRun) || checking || cleanupBlocked || integration?.status === 'interrupted' || integration?.status === 'applying' || !harness?.available || !harness.authenticated || harness.models.length === 0;
   const harnessReason = harness
     ? !harness.available || !harness.authenticated
       ? (harness.reason ?? 'Authentication or availability could not be confirmed.')
@@ -717,6 +731,7 @@ export default function App() {
               </div>
               <div className="header-actions">
                 {harness?.version ? <span className="version-chip">Codex {harness.version}</span> : null}
+                <button className="secondary-button" type="button" onClick={() => setMemoryProjectId(selectedConversation.projectId)}>Memory</button>
                 <select aria-label="Conversation mode" value={selectedConversation.executionMode ?? 'read-only'} disabled={Boolean(action) || Boolean(activeRun) || checking || cleanupBlocked} onChange={event => void changeMode(event.target.value as ExecutionMode)}>
                   <option value="read-only">Read-only</option><option value="code" disabled={!harness?.executionModes?.includes('code')}>Code</option>
                 </select>
@@ -750,6 +765,14 @@ export default function App() {
             </div>
 
             <div className="composer-area">
+              {integration && integration.status !== 'integrated' && integration.status !== 'resolved' ? <div className="integration-attention" role="status">
+                <strong>{integration.status === 'conflicted' ? 'Parent integration needs conflict resolution' : 'Parent integration was interrupted'}</strong>
+                <p>{integration.error || integration.plan.conflicts.join(', ')}</p>
+                {integration.status === 'conflicted' ? <>
+                  <button className="secondary-button" disabled={Boolean(action) || Boolean(activeRun)} onClick={() => setDrafts(current => ({ ...current, [selectedConversationId!]: `Resolve the parent integration conflicts in ${integration.plan.conflicts.join(', ')}. Preserve the intended changes from both sides. Run relevant checks. Do not commit or push.` }))}>Prepare conflict-resolution message</button>
+                  <button className="secondary-button" disabled={Boolean(action) || Boolean(activeRun)} onClick={() => void integrate(true)}>Confirm conflicts resolved</button>
+                </> : <button className="secondary-button" disabled={Boolean(action) || Boolean(activeRun)} onClick={() => void integrate()}>Continue integration</button>}
+              </div> : null}
               {error ? (
                 <div className="composer-error" role="alert">
                   <strong>Randolph hit a snag.</strong>
@@ -788,7 +811,7 @@ export default function App() {
                 onSubmit={(event) => void sendMessage(event)}
               />
               <p className="composer-caption">
-                {cleanupBlocked
+                {integration?.status === 'interrupted' ? 'Continue parent integration before sending another message.' : cleanupBlocked
                   ? 'A new message is blocked because process cleanup could not be confirmed.'
                   : activeRun
                     ? 'Wait for this run to finish, or stop it from Live activity.'
@@ -809,6 +832,7 @@ export default function App() {
       />
 
       {settingsProject ? <ProjectSettings key={settingsProject.id} project={settingsProject} harness={harness} onClose={() => setSettingsProjectId(undefined)} onChanged={reloadSnapshot} /> : null}
+      {memoryProjectId ? <MemoryPanel projectId={memoryProjectId} onClose={() => setMemoryProjectId(undefined)} /> : null}
       {selectedReview ? <ReviewPanel key={selectedReview.id} review={selectedReview} onClose={() => setSelectedReviewId(undefined)} onChanged={reloadSnapshot} onRefresh={() => openReview(true)} /> : null}
 
       {!selectedConversation && error ? (

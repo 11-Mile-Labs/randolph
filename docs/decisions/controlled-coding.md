@@ -16,7 +16,7 @@ Review captures the complete eligible worktree tree into Git objects with a sepa
 
 The desktop presents changed files, the combined diff, target branch/revision, check results, and explicit final approval. It shows the active check, elapsed time, and bounded output while verification runs. Supported detection covers declared pnpm lint/typecheck/build/test scripts, Go build/vet/test, and configured pytest. Unsupported package-manager declarations, missing checks, invalid/linked manifests, command failures, cancellation, and unconfirmed cleanup cannot produce a passing review.
 
-Successful checks bind to the exact reviewed tree and parent. Changes after review or verification require a fresh review and checks. Parent integration is being implemented separately; the current delivery path requires the worktree HEAD to match the parent. Unrelated uncommitted parent changes are preserved and currently block delivery, including unsaved-to-Git project settings.
+Successful checks bind to the exact reviewed tree and parent. Changes after review or verification require a fresh review and checks. An advanced clean parent is integrated before fresh review; conflicts require explicit resolution confirmation and new checks. See [integration and push](memory-integration-and-push.md) for supported cases and limits. The delivery path requires the resulting worktree HEAD to match the parent. Unrelated uncommitted parent changes are preserved and currently block delivery, including unsaved-to-Git project settings.
 
 ## Approval and recovery
 
@@ -32,4 +32,4 @@ Real temporary Git tests cover exact trees, stale approvals, side-effect suppres
 
 A separate installed-native command proof exercised ordinary worktree edits and denied parent, Git metadata, commit, and push mutations; it also checked sanitized GUI-hosted toolchain execution. It used command RPCs without inference and retained local evidence outside the repository. This proof is version-specific and does not establish complete descendant containment.
 
-Push UI, complete parent/conflict integration, checkpoints/restart, all three harnesses, context/delegation, workflows, memory/backlog, application lifetime controls, and distribution acceptance remain tracked in the working application plan. No public release or complete-v1 claim follows from this increment.
+Checkpoints/restart, all three harnesses, broader context/delegation, workflows/backlog, application lifetime controls, and distribution acceptance remain tracked in the working application plan. No public release or complete-v1 claim follows from this increment.
