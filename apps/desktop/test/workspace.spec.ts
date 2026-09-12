@@ -36,11 +36,11 @@ createInterface({input:process.stdin}).on('line',line=>{
   try {
     let page = await app.firstWindow();
     page.on('pageerror', error => errors.push(error.message));
-    await expect(page.getByRole('heading', { name: 'Bring a project into focus' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Your projects, in one place.' })).toBeVisible();
     await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, project);
     await page.getByRole('button', { name: 'Add your first project' }).click();
     await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('fixture-model');
-    await page.getByRole('button', { name: 'Project settings', exact: true }).click();
+    await page.getByRole('navigation', { name: 'Project conversations', exact: true }).getByRole('button', { name: 'Project settings', exact: true }).click();
     await page.getByRole('combobox', { name: 'Default model', exact: true }).selectOption('fixture-thorough');
     await expect(page.getByRole('combobox', { name: 'Default reasoning effort', exact: true })).toHaveValue('high');
     await page.getByRole('button', { name: 'Save project defaults', exact: true }).click();
@@ -79,7 +79,7 @@ createInterface({input:process.stdin}).on('line',line=>{
     await expect(page.getByRole('combobox', { name: 'Reasoning effort', exact: true })).toHaveValue('low');
     await page.getByRole('button', { name: 'Use project default', exact: true }).click();
     await expect(page.getByRole('combobox', { name: 'Reasoning effort', exact: true })).toHaveValue('high');
-    await page.getByRole('button', { name: 'Project settings', exact: true }).click();
+    await page.getByRole('navigation', { name: 'Project conversations', exact: true }).getByRole('button', { name: 'Project settings', exact: true }).click();
     const externalSettings = 'schemaVersion: 1\nharness: codex\nmodel: fixture-model\neffort: low\n';
     writeFileSync(join(project, 'config.harness.yaml'), externalSettings);
     await page.getByRole('button', { name: 'Save project defaults', exact: true }).click();
@@ -92,7 +92,7 @@ createInterface({input:process.stdin}).on('line',line=>{
     expect(readFileSync(calls, 'utf8')).toBe('turn\n');
     await page.screenshot({ path: join(tmpdir(), 'randolph-desktop-workspace.png') });
     writeFileSync(join(project, 'config.harness.yaml'), 'schemaVersion: 1\nharness: codex\nmodel: removed-model\neffort: low\n');
-    await page.getByRole('button', { name: 'Project settings', exact: true }).click();
+    await page.getByRole('navigation', { name: 'Project conversations', exact: true }).getByRole('button', { name: 'Project settings', exact: true }).click();
     await page.getByRole('button', { name: 'Reload settings', exact: true }).click();
     await expect(page.getByRole('combobox', { name: 'Default model', exact: true })).toHaveValue('removed-model');
     await page.getByRole('button', { name: 'Close settings', exact: true }).click();

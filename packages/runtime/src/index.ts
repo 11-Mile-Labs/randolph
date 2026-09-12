@@ -1,3 +1,4 @@
+import { AppSettings, type AppSettingsSnapshot, type SaveAppSettingsInput, type SaveGlobalMemoryInput } from './app-settings.js';
 import { randomUUID } from 'node:crypto';
 import { basename, resolve, join } from 'node:path';
 import { statSync } from 'node:fs';
@@ -19,6 +20,7 @@ const activeStatuses = new Set(['starting', 'running', 'stopping', 'stop-unconfi
 const now = (): string => new Date().toISOString();
 export class Runtime {
   readonly store: Store;
+  private readonly preferences: AppSettings;
   private readonly reviews: Reviews;
   private readonly checkpoints: Checkpoints;
   private readonly pushes: Pushes;
@@ -30,6 +32,7 @@ export class Runtime {
   private admission = new Set<string>();
   constructor(readonly adapter: HarnessAdapter, dataRoot: string, options: { push?: PushOptions } = {}) {
     this.store = new Store(resolve(dataRoot));
+    this.preferences = new AppSettings(this.store.root);
     this.checkpoints = new Checkpoints(this.store);
     this.memory = new ProjectMemory(this.store, () => this.changed());
     for (const run of this.store.runs()) {
@@ -56,6 +59,15 @@ export class Runtime {
   restoreCheckpoint(input: CheckpointInput, destination: string): CheckpointRestore {
     if (!this.accepting) throw new Error('Application is closing.');
     return this.checkpoints.restore(input, destination);
+  }
+  appSettings(): AppSettingsSnapshot { return this.preferences.read(); }
+  saveAppSettings(input: SaveAppSettingsInput): AppSettingsSnapshot {
+    if (!this.accepting) throw new Error('Application is closing.');
+    const result = this.preferences.save(input); this.changed(); return result;
+  }
+  saveGlobalMemory(input: SaveGlobalMemoryInput): AppSettingsSnapshot {
+    if (!this.accepting) throw new Error('Application is closing.');
+    const result = this.preferences.saveGlobalMemory(input); this.changed(); return result;
   }
   memorySnapshot(projectId: string): MemorySnapshot { return this.memory.snapshot(projectId); }
   memoryHistory(projectId: string, reference: LessonRef): LessonVersion[] { return this.memory.history(projectId, reference); }

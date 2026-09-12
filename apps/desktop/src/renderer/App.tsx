@@ -1,5 +1,8 @@
 import HistoryPanel from './HistoryPanel';
 import MemoryPanel from './MemoryPanel';
+import WorkspaceHome from './WorkspaceHome';
+import AppSettings from './AppSettings';
+import './app-navigation.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type {
@@ -13,6 +16,7 @@ import type {
   Run,
   RunEvent,
   WorkspaceSnapshot,
+  AppSettingsSnapshot,
 } from '@randolph/runtime/contracts';
 import ProjectSettings from './ProjectSettings';
 import ReviewPanel from './ReviewPanel';
@@ -66,11 +70,7 @@ function unreadCount(events: RunEvent[], conversation: Conversation): number {
 }
 
 function LogoMark() {
-  return (
-    <span className="logo-mark" aria-hidden="true">
-      R
-    </span>
-  );
+  return <img className="logo-mark" src="/randolph.png" alt="" />;
 }
 
 function PlusIcon() {
@@ -94,10 +94,16 @@ type SidebarProps = {
   conversations: Conversation[];
   events: RunEvent[];
   selectedConversationId?: string;
+  screen: 'workspace' | 'chat' | 'settings';
   busy: boolean;
   onAddProject: () => void;
   onCreateConversation: (projectId: string) => void;
   onSelectConversation: (conversationId: string) => void;
+  onOpenWorkspace: () => void;
+  onOpenSettings: () => void;
+  onOpenProjectMemory: (projectId: string) => void;
+  onOpenProjectSettings: (projectId: string) => void;
+  onOpenProjectHistory: (projectId: string) => void;
 };
 
 function Sidebar({
@@ -105,10 +111,16 @@ function Sidebar({
   conversations,
   events,
   selectedConversationId,
+  screen,
   busy,
   onAddProject,
   onCreateConversation,
   onSelectConversation,
+  onOpenWorkspace,
+  onOpenSettings,
+  onOpenProjectMemory,
+  onOpenProjectSettings,
+  onOpenProjectHistory,
 }: SidebarProps) {
   return (
     <aside className="sidebar" aria-label="Projects and conversations">
@@ -124,6 +136,11 @@ function Sidebar({
         <PlusIcon />
         Add project
       </button>
+
+      <nav className="app-navigation" aria-label="Application">
+        <button className={screen === 'workspace' ? 'selected' : ''} type="button" onClick={onOpenWorkspace} aria-current={screen === 'workspace' ? 'page' : undefined}>Workspace</button>
+        <button className={screen === 'settings' ? 'selected' : ''} type="button" onClick={onOpenSettings} aria-current={screen === 'settings' ? 'page' : undefined}>Settings</button>
+      </nav>
 
       <nav className="project-list" aria-label="Project conversations">
         {projects.length === 0 ? (
@@ -152,6 +169,11 @@ function Sidebar({
                   </button>
                 </div>
                 <div className="conversation-list">
+                  <div className="project-links" aria-label={`${project.name} tools`}>
+                    <button type="button" onClick={() => onOpenProjectMemory(project.id)}>Memory</button>
+                    <button type="button" onClick={() => onOpenProjectHistory(project.id)}>Run history</button>
+                    <button type="button" onClick={() => onOpenProjectSettings(project.id)}>Project settings</button>
+                  </div>
                   {projectConversations.length === 0 ? (
                     <button
                       className="new-conversation-prompt"
@@ -458,10 +480,12 @@ function MessageBubble({ message }: { message: Message }) {
 export default function App() {
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>(EMPTY_SNAPSHOT);
   const [harness, setHarness] = useState<HarnessInfo>();
+  const [appSettings, setAppSettings] = useState<AppSettingsSnapshot>();
   const [selectedConversationId, setSelectedConversationId] = useState<string>();
+  const [screen, setScreen] = useState<'workspace' | 'chat' | 'settings'>('workspace');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [settingsProjectId, setSettingsProjectId] = useState<string>();
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyProjectId, setHistoryProjectId] = useState<string>();
   const [memoryProjectId, setMemoryProjectId] = useState<string>();
   const [selectedReviewId, setSelectedReviewId] = useState<string>();
   const [loading, setLoading] = useState(true);
@@ -484,8 +508,23 @@ export default function App() {
     }
   }, []);
 
+  const applyTheme = useCallback((theme: AppSettingsSnapshot['value']['theme']) => {
+    document.documentElement.dataset.theme = theme;
+  }, []);
+
+  const reloadAppSettings = useCallback(async () => {
+    try {
+      const next = await window.randolph.appSettings();
+      setAppSettings(next);
+      applyTheme(next.value.theme);
+    } catch (settingsError) {
+      setError(`Could not load application settings: ${displayError(settingsError)}`);
+    }
+  }, [applyTheme]);
+
   useEffect(() => {
     void reloadSnapshot();
+    void reloadAppSettings();
     let disposed = false;
     const loadHarness = async (): Promise<void> => {
       try {
@@ -497,14 +536,21 @@ export default function App() {
     };
     void loadHarness();
     const unsubscribe = window.randolph.onChanged(() => void reloadSnapshot());
+    const unsubscribeNavigation = window.randolph.onNavigate(destination => setScreen(destination));
+    const onShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === ',') { event.preventDefault(); setScreen('settings'); }
+    };
+    window.addEventListener('keydown', onShortcut);
     const onFocus = () => { void reloadSnapshot(); };
     window.addEventListener('focus', onFocus);
     return () => {
       disposed = true;
       unsubscribe();
+      unsubscribeNavigation();
+      window.removeEventListener('keydown', onShortcut);
       window.removeEventListener('focus', onFocus);
     };
-  }, [reloadSnapshot]);
+  }, [reloadAppSettings, reloadSnapshot]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
@@ -536,6 +582,12 @@ export default function App() {
   const messages = snapshot.messages
     .filter((message) => message.conversationId === selectedConversationId)
     .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const historyRuns = historyProjectId
+    ? snapshot.runs.filter(run => run.projectId === historyProjectId).toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
+    : conversationRuns;
+  const historyMessages = historyProjectId
+    ? snapshot.messages.filter(message => historyRuns.some(run => run.id === message.runId)).toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
+    : messages;
   const selectedDraft = selectedConversationId ? (drafts[selectedConversationId] ?? '') : '';
   const hasOverride = Boolean(selectedConversation?.model || selectedConversation?.effort);
   const selectedModelChoice = hasOverride
@@ -560,7 +612,7 @@ export default function App() {
   }, [lastMessageKey, selectedConversationId]);
 
   useEffect(() => {
-    if (!selectedConversation) return;
+    if (!selectedConversation || screen !== 'chat') return;
     const newest = latestSequence(snapshot.events, selectedConversation.id);
     if (newest <= selectedConversation.lastReadSequence) return;
     let disposed = false;
@@ -575,11 +627,12 @@ export default function App() {
     return () => {
       disposed = true;
     };
-  }, [selectedConversation, snapshot.events]);
+  }, [selectedConversation, snapshot.events, screen]);
 
   const selectConversation = (conversationId: string) => {
     nearMessageEnd.current = true;
     setSelectedConversationId(conversationId);
+    setScreen('chat');
     setError(undefined);
     void reloadSnapshot();
   };
@@ -592,6 +645,7 @@ export default function App() {
       if (!project) return;
       const conversation = await window.randolph.createConversation(project.id);
       setSelectedConversationId(conversation.id);
+      setScreen('chat');
       await reloadSnapshot();
     } catch (addError) {
       setError(`Could not add the project: ${displayError(addError)}`);
@@ -606,6 +660,7 @@ export default function App() {
     try {
       const conversation = await window.randolph.createConversation(projectId);
       setSelectedConversationId(conversation.id);
+      setScreen('chat');
       await reloadSnapshot();
     } catch (createError) {
       setError(`Could not create the conversation: ${displayError(createError)}`);
@@ -699,20 +754,37 @@ export default function App() {
     : undefined;
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-screen={screen}>
       <Sidebar
         projects={snapshot.projects}
         conversations={snapshot.conversations}
         events={snapshot.events}
-        selectedConversationId={selectedConversationId}
+        selectedConversationId={screen === 'chat' ? selectedConversationId : undefined}
+        screen={screen}
         busy={action === 'project' || action === 'conversation'}
         onAddProject={() => void addProject()}
         onCreateConversation={(projectId) => void createConversation(projectId)}
         onSelectConversation={selectConversation}
+        onOpenWorkspace={() => setScreen('workspace')}
+        onOpenSettings={() => setScreen('settings')}
+        onOpenProjectMemory={setMemoryProjectId}
+        onOpenProjectSettings={setSettingsProjectId}
+        onOpenProjectHistory={setHistoryProjectId}
       />
 
       <main className="workspace">
-        {loading ? (
+        {screen === 'settings' ? <AppSettings settings={appSettings} harness={harness} snapshot={snapshot} onReload={reloadAppSettings} onSaved={next => { setAppSettings(next); applyTheme(next.value.theme); }} /> : screen === 'workspace' ? <WorkspaceHome
+          projects={snapshot.projects}
+          conversations={snapshot.conversations}
+          runs={snapshot.runs}
+          busy={action === 'project' || action === 'conversation'}
+          onAddProject={() => void addProject()}
+          onOpenConversation={selectConversation}
+          onCreateConversation={projectId => void createConversation(projectId)}
+          onOpenProjectSettings={setSettingsProjectId}
+          onOpenMemory={setMemoryProjectId}
+          onOpenHistory={setHistoryProjectId}
+        /> : loading ? (
           <div className="loading-state" role="status">
             <span className="button-spinner" aria-hidden="true" />
             Opening workspace…
@@ -734,7 +806,7 @@ export default function App() {
               </div>
               <div className="header-actions">
                 {harness?.version ? <span className="version-chip">Codex {harness.version}</span> : null}
-                <button className="secondary-button" type="button" onClick={() => setHistoryOpen(true)}>Run history</button>
+                <button className="secondary-button" type="button" onClick={() => setHistoryProjectId(selectedConversation.projectId)}>Run history</button>
                 <button className="secondary-button" type="button" onClick={() => setMemoryProjectId(selectedConversation.projectId)}>Memory</button>
                 <select aria-label="Conversation mode" value={selectedConversation.executionMode ?? 'read-only'} disabled={Boolean(action) || Boolean(activeRun) || checking || cleanupBlocked} onChange={event => void changeMode(event.target.value as ExecutionMode)}>
                   <option value="read-only">Read-only</option><option value="code" disabled={!harness?.executionModes?.includes('code')}>Code</option>
@@ -826,21 +898,21 @@ export default function App() {
         )}
       </main>
 
-      <ActivityPanel
+      {screen === 'chat' ? <ActivityPanel
         run={latestRun}
         events={runEvents}
         dataRoot={snapshot.dataRoot}
         now={now}
         stopping={action === 'stop'}
         onStop={(runId) => void stopRun(runId)}
-      />
+      /> : null}
 
       {settingsProject ? <ProjectSettings key={settingsProject.id} project={settingsProject} harness={harness} onClose={() => setSettingsProjectId(undefined)} onChanged={reloadSnapshot} /> : null}
-      {historyOpen ? <HistoryPanel key={selectedConversationId} runs={conversationRuns} messages={messages} onClose={() => setHistoryOpen(false)} /> : null}
+      {historyProjectId ? <HistoryPanel key={historyProjectId} runs={historyRuns} messages={historyMessages} onClose={() => setHistoryProjectId(undefined)} /> : null}
       {memoryProjectId ? <MemoryPanel projectId={memoryProjectId} onClose={() => setMemoryProjectId(undefined)} /> : null}
       {selectedReview ? <ReviewPanel key={selectedReview.id} review={selectedReview} onClose={() => setSelectedReviewId(undefined)} onChanged={reloadSnapshot} onRefresh={() => openReview(true)} /> : null}
 
-      {!selectedConversation && error ? (
+      {(screen !== 'chat' || !selectedConversation) && error ? (
         <div className="global-error" role="alert">
           <span>{error}</span>
           <button type="button" onClick={() => setError(undefined)}>

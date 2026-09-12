@@ -1,3 +1,5 @@
+import type { AppSettingsSnapshot, SaveAppSettingsInput, SaveGlobalMemoryInput } from './app-settings.js';
+export type { AppSettingsSnapshot, AppPreferences, SaveAppSettingsInput, SaveGlobalMemoryInput } from './app-settings.js';
 import type { CheckpointRecord, CheckpointInput, CheckpointRestore } from './checkpoints.js';
 export type { CheckpointRecord, CheckpointInput, CheckpointRestore } from './checkpoints.js';
 import type { PushRecord, ApprovePushInput } from './pushes.js';
@@ -40,6 +42,10 @@ export interface HarnessAdapter {
 export type SendInput = { conversationId: string; text: string; model?: string; effort?: string };
 export interface DesktopBridge {
   snapshot(): Promise<WorkspaceSnapshot>;
+  appSettings(): Promise<AppSettingsSnapshot>;
+  saveAppSettings(input: SaveAppSettingsInput): Promise<AppSettingsSnapshot>;
+  saveGlobalMemory(input: SaveGlobalMemoryInput): Promise<AppSettingsSnapshot>;
+  onNavigate(listener: (destination: 'workspace' | 'settings') => void): () => void;
   restoreCheckpoint(input: CheckpointInput): Promise<CheckpointRestore | null>;
   memorySnapshot(projectId: string): Promise<MemorySnapshot>;
   memoryCommand(input: MemoryCommand): Promise<MemorySnapshot>;

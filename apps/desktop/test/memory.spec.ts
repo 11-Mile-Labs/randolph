@@ -21,7 +21,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
     const page = await app.firstWindow();
     await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, project);
     await page.getByRole('button', { name: 'Add your first project' }).click();
-    await page.getByRole('button', { name: 'Memory', exact: true }).click();
+    await page.getByRole('navigation', { name: 'Project conversations', exact: true }).getByRole('button', { name: 'Memory', exact: true }).click();
     await page.getByRole('textbox', { name: 'Lesson title', exact: true }).fill('Preserve migration evidence');
     await page.getByRole('textbox', { name: 'Lesson text', exact: true }).fill('Retain the database verification result.');
     await page.getByRole('button', { name: 'Create lesson' }).click();

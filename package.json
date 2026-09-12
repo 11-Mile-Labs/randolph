@@ -11,14 +11,16 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r --filter './packages/*' build && pnpm -r typecheck",
     "build": "pnpm -r build",
+    "package:mac": "pnpm build && node scripts/package-macos.mjs",
     "test": "pnpm build && pnpm -r test",
     "desktop": "pnpm build && pnpm --filter @randolph/desktop start",
     "test:desktop": "pnpm --filter @randolph/desktop test:e2e"
   },
   "devDependencies": {
-    "typescript": "7.0.2",
+    "@electron/packager": "20.3.0",
+    "@types/node": "24.13.4",
     "oxlint": "1.82.0",
-    "@types/node": "24.13.4"
+    "typescript": "7.0.2"
   },
   "volta": {
     "node": "24.18.0"

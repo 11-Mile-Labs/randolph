@@ -83,7 +83,7 @@ createInterface({input:process.stdin}).on('line',line=>{
     expect(readFileSync(join(project, 'value.txt'), 'utf8')).toBe('after\n');
     expect(git('rev-parse', 'HEAD^')).toBe(base);
     await page.getByRole('button', { name: 'Close review', exact: true }).click();
-    await page.getByRole('button', { name: 'Run history', exact: true }).click();
+    await page.getByRole('navigation', { name: 'Project conversations', exact: true }).getByRole('button', { name: 'Run history', exact: true }).click();
     const history = page.getByRole('dialog', { name: 'Run history' });
     await expect(history.getByText('Completed turn', { exact: true })).toBeVisible();
     await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, root);

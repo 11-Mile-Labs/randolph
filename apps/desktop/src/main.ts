@@ -1,12 +1,12 @@
 import { realpathSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { parseCheckpoint, parsePushApproval } from './validation.js';
+import { parseAppSettings, parseGlobalMemory, parseCheckpoint, parsePushApproval } from './validation.js';
 import { parseMemoryCommand, parseLessonRef } from './memory-validation.js';
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, session, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, net, protocol, session, Tray, type IpcMainInvokeEvent } from 'electron';
 import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { Runtime } from '@randolph/runtime';
+import { Runtime, type AppPreferences, type AppSettingsSnapshot } from '@randolph/runtime';
 import { CodexAdapter } from '@randolph/harness-codex';
 import { parseSend, parseId, parseProjectDefaults, parseConversationSelection, parseMode, parseReviewApproval } from './validation.js';
 
@@ -20,6 +20,12 @@ let window: BrowserWindow | undefined;
 let runtime: Runtime | undefined;
 let quitting = false;
 let confirming = false;
+let preferences: AppPreferences | undefined;
+let tray: Tray | undefined;
+let trayActive: boolean | undefined;
+let pendingNavigation: { sequence: number; destination: 'workspace' | 'settings' } | undefined;
+let navigationSequence = 0;
+let notificationCursor = 0;
 
 function assertSender(event: IpcMainInvokeEvent): void {
   if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== page) throw new Error('Untrusted application request.');
@@ -32,28 +38,81 @@ async function openWindow(): Promise<void> {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => { event.preventDefault(); });
   window.webContents.on('will-attach-webview', event => { event.preventDefault(); });
-  window.on('close', event => { if (!quitting) { event.preventDefault(); app.quit(); } });
+  window.on('close', event => {
+    if (quitting) return;
+    event.preventDefault();
+    if (preferences?.background) window?.hide();
+    else void shutdown('close');
+  });
   window.on('closed', () => { window = undefined; });
   await window.loadURL(page);
 }
-async function shutdown(): Promise<void> {
+async function shutdown(reason: 'close' | 'quit' = 'quit'): Promise<void> {
   if (confirming || quitting) return;
   confirming = true;
   try {
     if (runtime?.hasActiveWork()) {
-      const answer = await dialog.showMessageBox({ type: 'warning', title: 'Quit Randolph?', message: 'Quit and stop active conversations?', detail: 'Work will not restart automatically when you reopen Randolph.', buttons: ['Cancel', 'Stop work and quit'], defaultId: 0, cancelId: 0 });
+      const closing = reason === 'close';
+      const answer = await dialog.showMessageBox({ type: 'warning', title: closing ? 'Close Randolph?' : 'Quit Randolph?', message: closing ? 'Closing will stop active work.' : 'Quit and stop active conversations?', detail: closing ? 'Enable background execution in Settings to keep work running after closing the window.' : 'Work will not restart automatically when you reopen Randolph.', buttons: closing ? ['Cancel', 'Stop work and close', 'Change settings'] : ['Cancel', 'Stop work and quit'], defaultId: 0, cancelId: 0 });
+      if (closing && answer.response === 2) { await showPage('settings'); return; }
       if (answer.response !== 1) return;
     }
     await runtime?.close();
+    tray?.destroy(); tray = undefined;
     quitting = true; app.quit();
   } catch {
     dialog.showErrorBox('Unable to finish shutdown', 'Run state or process cleanup could not be confirmed. Randolph remains open.');
   } finally { confirming = false; }
 }
+async function showPage(destination: 'workspace' | 'settings'): Promise<void> {
+  if (quitting) return;
+  pendingNavigation = { sequence: ++navigationSequence, destination };
+  if (!window || window.isDestroyed()) await openWindow();
+  window?.show(); window?.focus();
+  if (window && !window.webContents.isLoadingMainFrame() && pendingNavigation) window.webContents.send('randolph:navigate', pendingNavigation);
+}
+function updateTray(): void {
+  if (!preferences?.background) { tray?.destroy(); tray = undefined; trayActive = undefined; return; }
+  if (!tray) {
+    tray = new Tray(nativeImage.createFromPath(join(rendererRoot, 'randolph.png')).resize({ width: 18, height: 18 }));
+    tray.on('click', () => { void showPage('workspace'); });
+  }
+  const active = runtime?.hasActiveWork() ?? false;
+  if (trayActive === active) return;
+  trayActive = active;
+  tray.setToolTip(active ? 'Randolph — work running' : 'Randolph');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open Randolph', click: () => { void showPage('workspace'); } },
+    { label: 'Settings…', click: () => { void showPage('settings'); } },
+    { type: 'separator' },
+    { label: 'Stop all work', enabled: active, click: () => { void runtime?.stopAll(); } },
+    { type: 'separator' }, { label: 'Quit Randolph', click: () => app.quit() },
+  ]));
+}
+function applySettings(settings: AppSettingsSnapshot): void {
+  if (settings.error) return;
+  preferences = settings.value; nativeTheme.themeSource = preferences.theme; updateTray();
+}
+function notifyChanges(): void {
+  for (const event of runtime?.store.events() ?? []) {
+    if (event.sequence <= notificationCursor) continue;
+    notificationCursor = event.sequence;
+    if (window?.isFocused() || !Notification.isSupported() || !preferences) continue;
+    const enabled = event.type === 'run.completed' ? preferences.notifications.completed
+      : ['run.failed', 'run.stop-unconfirmed', 'verification.failed', 'verification.stop-unconfirmed', 'delivery.failed'].includes(event.type) ? preferences.notifications.failures
+        : event.type === 'verification.completed' && event.data.status === 'passed' ? preferences.notifications.approvals : false;
+    if (!enabled) continue;
+    const notification = new Notification({ title: event.type === 'verification.completed' ? 'Randolph: review ready' : 'Randolph', body: event.summary.slice(0, 240) });
+    notification.on('click', () => { void showPage('workspace'); });
+    notification.show();
+  }
+}
+app.on('window-all-closed', () => { if (!quitting && !preferences?.background) app.quit(); });
 app.on('before-quit', event => { if (!quitting) { event.preventDefault(); void shutdown(); } });
 if (!app.requestSingleInstanceLock()) { quitting = true; app.quit(); }
 else {
-  app.on('second-instance', () => { window?.show(); window?.focus(); });
+  app.on('second-instance', () => { void showPage('workspace'); });
+  app.on('activate', () => { if (runtime && !quitting) void showPage('workspace'); });
   async function start(): Promise<void> {
     try {
       await app.whenReady();
@@ -69,8 +128,20 @@ else {
       session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => { callback(false); });
       session.defaultSession.setPermissionCheckHandler(() => false);
       runtime = new Runtime(new CodexAdapter(), dataRoot);
-      runtime.subscribe(() => { if (window && !window.isDestroyed()) window.webContents.send('randolph:changed'); });
+      notificationCursor = runtime.store.events().at(-1)?.sequence ?? 0;
+      applySettings(runtime.appSettings());
+      app.dock?.setIcon(join(rendererRoot, 'randolph.png'));
+      app.setAboutPanelOptions({ applicationName: 'Randolph', applicationVersion: app.getVersion(), copyright: '11 Mile Labs', iconPath: join(rendererRoot, 'randolph.png') });
+      runtime.subscribe(() => {
+        if (window && !window.isDestroyed()) window.webContents.send('randolph:changed');
+        updateTray(); notifyChanges();
+      });
       command('randolph:snapshot', () => runtime!.snapshot());
+      command('randolph:initial-navigation', () => pendingNavigation ?? null);
+      command('randolph:ack-navigation', sequence => { if (typeof sequence === 'number' && pendingNavigation?.sequence === sequence) pendingNavigation = undefined; });
+      command('randolph:app-settings', () => { const settings = runtime!.appSettings(); applySettings(settings); return settings; });
+      command('randolph:save-app-settings', input => { const settings = runtime!.saveAppSettings(parseAppSettings(input)); applySettings(settings); return settings; });
+      command('randolph:save-global-memory', input => runtime!.saveGlobalMemory(parseGlobalMemory(input)));
       command('randolph:restore-checkpoint', async input => {
         const checkpoint = parseCheckpoint(input);
         const choice = await dialog.showOpenDialog(window!, { title: 'Choose a folder for the restored checkpoint', message: 'Creates a new folder with retained files and Git history. No agent or delivery action starts.', properties: ['openDirectory', 'createDirectory'] });
@@ -107,10 +178,19 @@ else {
       command('randolph:stop', id => runtime!.stop(parseId(id)));
       command('randolph:mark-read', id => runtime!.markRead(parseId(id)));
       Menu.setApplicationMenu(Menu.buildFromTemplate([
-        { label: 'Randolph', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'quit' }] },
+        { label: 'Randolph', submenu: [
+          { label: 'About Randolph', click: () => app.showAboutPanel() }, { type: 'separator' },
+          { label: 'Settings…', accelerator: 'CommandOrControl+,', click: () => { void showPage('settings'); } },
+          { type: 'separator' }, { role: 'services' }, { type: 'separator' },
+          { role: 'hide', label: 'Hide Randolph' }, { role: 'hideOthers' }, { role: 'unhide' },
+          { type: 'separator' }, { role: 'quit', label: 'Quit Randolph' },
+        ] },
+        { label: 'File', submenu: [{ label: 'Open Workspace', accelerator: 'CommandOrControl+1', click: () => { void showPage('workspace'); } }, { type: 'separator' }, { role: 'close' }] },
         { role: 'editMenu' },
+        { label: 'View', submenu: [{ role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
         { label: 'Work', submenu: [{ label: 'Stop all work', click: () => { void runtime!.stopAll(); } }] },
         { role: 'windowMenu' },
+        { role: 'help', submenu: [{ label: 'Open Workspace', click: () => { void showPage('workspace'); } }, { label: 'Application Settings', click: () => { void showPage('settings'); } }] },
       ]));
       await openWindow();
     } catch (error) {

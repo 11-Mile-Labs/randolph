@@ -16,8 +16,13 @@ Requires macOS, Node 24.16 or later (development pins 24.18), pnpm 11.8, and an 
 
 ```sh
 pnpm install
-pnpm desktop
+pnpm package:mac
+open dist/macos/Randolph.app
 ```
+
+The local macOS bundle uses Randolph’s name, artwork, and native application menu. You can copy it to your Applications folder. This build is signed locally for development; public signing, notarization, and updates remain pending. For development directly from the checkout, use `pnpm desktop`.
+
+The opening **Workspace** screen lists projects and their controls. **Settings** stays visible in the sidebar and in **Randolph → Settings…** (`⌘,`). Application settings include theme, background execution, notifications, and global lesson approval. Project settings, Memory, and Run history are also available directly from each project. See [application navigation and settings](docs/decisions/application-navigation.md).
 
 Choose **Add project**, select a local folder, choose a Codex model and effort, and send a message. The right panel shows native activity and the location of retained run logs. Multiple conversations can run independently. Reopening a conversation displays its history; it never sends a new turn automatically.
 
@@ -41,6 +46,8 @@ The default tests use temporary fixtures and no model inference. The desktop tes
 
 ## What works in this slice
 
+- Workspace and persistent application navigation, native macOS menus, app artwork, and a local macOS bundle.
+- Application preferences, optional background execution with menu-bar controls, and opt-in notifications.
 - Projects, conversations, native model/effort discovery, streamed chat and conversation-scoped drafts.
 - Editable project model/effort defaults, persisted conversation overrides, and run configuration provenance.
 - Visible activity, unread indicators, Stop requests, exact log locations, and history reopening.
@@ -51,7 +58,7 @@ The default tests use temporary fixtures and no model inference. The desktop tes
 - Automatic Git checkpoints before and after completed turns, historical run inspection, and explicit file restoration after source loss.
 - A narrow Electron preload/IPC boundary with an isolated renderer and locally bundled assets.
 
-Linked model Restart/rerun, Claude/Grok adapters, workflow/backlog interfaces, broader project configuration, background/tray support and AI SDK UI transport integration are not implemented in this slice. Process-group cleanup does not prove termination of detached descendants; hard owner-loss shutdown remains a release blocker. **Stop** requests native interruption and process-group termination, and reports uncertainty when that cleanup cannot be confirmed. Unconfirmed cleanup blocks further work in that conversation across reopening. There is no claim of application-level sandboxing; safety sandbox work is deferred until v2 at the earliest.
+Linked model Restart/rerun, Claude/Grok adapters, workflow/backlog interfaces, broader project configuration, Pause/Resume and AI SDK UI transport integration are not implemented in this slice. Process-group cleanup does not prove termination of detached descendants; hard owner-loss shutdown remains a release blocker. **Stop** requests native interruption and process-group termination, and reports uncertainty when that cleanup cannot be confirmed. Unconfirmed cleanup blocks further work in that conversation across reopening. There is no claim of application-level sandboxing; safety sandbox work is deferred until v2 at the earliest.
 
 ## What we are building
 

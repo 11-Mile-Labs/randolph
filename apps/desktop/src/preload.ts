@@ -2,6 +2,20 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { DesktopBridge } from '@randolph/runtime/contracts';
 const bridge: DesktopBridge = {
   snapshot: async () => ipcRenderer.invoke('randolph:snapshot'),
+  appSettings: async () => ipcRenderer.invoke('randolph:app-settings'),
+  saveAppSettings: async input => ipcRenderer.invoke('randolph:save-app-settings', input),
+  saveGlobalMemory: async input => ipcRenderer.invoke('randolph:save-global-memory', input),
+  onNavigate: listener => {
+    let active = true;
+    const navigate = (_event: unknown, value: unknown): void => {
+      if (!active || !value || typeof value !== 'object' || !('destination' in value) || !('sequence' in value) || typeof value.sequence !== 'number' || (value.destination !== 'workspace' && value.destination !== 'settings')) return;
+      listener(value.destination);
+      void (async () => { try { await ipcRenderer.invoke('randolph:ack-navigation', value.sequence); } catch { /* Retain pending navigation until the host can acknowledge it. */ } })();
+    };
+    ipcRenderer.on('randolph:navigate', navigate);
+    void (async () => { try { navigate(undefined, await ipcRenderer.invoke('randolph:initial-navigation')); } catch { /* The host may be closing. */ } })();
+    return () => { active = false; ipcRenderer.removeListener('randolph:navigate', navigate); };
+  },
   restoreCheckpoint: async input => ipcRenderer.invoke('randolph:restore-checkpoint', input),
   memorySnapshot: async id => ipcRenderer.invoke('randolph:memory', id),
   memoryCommand: async input => ipcRenderer.invoke('randolph:memory-command', input),

@@ -1,4 +1,4 @@
-import type { CheckpointInput, ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
+import type { SaveAppSettingsInput, SaveGlobalMemoryInput, CheckpointInput, ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid settings request.');
   return value as Record<string, unknown>;
@@ -51,4 +51,19 @@ export function parseCheckpoint(value: unknown): CheckpointInput {
   const input = record(value);
   if (typeof input.digest !== 'string' || !/^[0-9a-f]{64}$/.test(input.digest)) throw new Error('Invalid checkpoint digest.');
   return { runId: parseId(input.runId), digest: input.digest };
+}
+
+function parseRevision(value: unknown): string | null {
+  if (value !== null && (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value))) throw new Error('Invalid settings revision.');
+  return value;
+}
+export function parseAppSettings(value: unknown): SaveAppSettingsInput {
+  const input = record(value), preferences = record(input.value), notifications = record(preferences.notifications);
+  if (!['system', 'light', 'dark'].includes(String(preferences.theme)) || typeof preferences.background !== 'boolean' || ['completed', 'failures', 'approvals'].some(key => typeof notifications[key] !== 'boolean')) throw new Error('Invalid application settings.');
+  return { expectedRevision: parseRevision(input.expectedRevision), value: { theme: preferences.theme as 'system' | 'light' | 'dark', background: preferences.background, notifications: { completed: notifications.completed as boolean, failures: notifications.failures as boolean, approvals: notifications.approvals as boolean } } };
+}
+export function parseGlobalMemory(value: unknown): SaveGlobalMemoryInput {
+  const input = record(value);
+  if (typeof input.autoApprove !== 'boolean') throw new Error('Invalid global lesson setting.');
+  return { autoApprove: input.autoApprove, expectedRevision: parseRevision(input.expectedRevision) };
 }
