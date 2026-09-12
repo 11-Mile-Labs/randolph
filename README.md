@@ -41,6 +41,8 @@ The desktop application and execution runtime are intended for open-source relea
 - [Experiment getting started](experiments/controlled-run/README.md): offline checks and explicit native execution prerequisites.
 - [Deterministic Git proof](docs/research/scripted-git-2026-09-12.md): passed real native execution, sandbox denial, declined approval and permitted positive control, without model inference.
 - [Completed lifecycle experiment](docs/research/lifecycle-completion-2026-09-12.md): Stop and controller/harness-crash cleanup passed; a detached-child escape failed containment and remains a release blocker.
+- [Checkpoint and restart proof](docs/research/checkpoint-restart-2026-09-12.md): restored after source-repository deletion and verified in a fresh subscription-backed native session.
+- [Sandbox research](docs/research/sandbox-direction-2026-09-12.md): containment options, guest subscription authentication and the proposed next feasibility proof.
 - [Permission follow-up](docs/research/permission-followup-2026-09-12.md): verified workspace semantics and a real declined approval; standalone Git remains unverified.
 - [Controlled-run results](docs/research/controlled-run-2026-09-12.md): observed subscription execution, denied diagnostic mutations, and incomplete protection proof.
 - [Initial harness findings](docs/research/harness-compatibility.md): observed subscription integration and remaining limitations.

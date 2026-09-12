@@ -15,7 +15,8 @@
     "test:native": "pnpm build && node dist/src/cli.js",
     "test:followup": "pnpm build && node dist/src/followup.js",
     "test:scripted": "pnpm build && node dist/src/scripted-git.js",
-    "test:lifecycle": "pnpm build && node dist/src/lifecycle-probe.js"
+    "test:lifecycle": "pnpm build && node dist/src/lifecycle-probe.js",
+    "test:checkpoint": "pnpm build && node dist/src/checkpoint-probe.js"
   },
   "dependencies": {
     "smol-toml": "1.8.0"

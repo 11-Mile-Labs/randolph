@@ -1,6 +1,6 @@
 # Controlled-run experiment
 
-A bounded, headless Codex experiment. This is research code, not the Randolph application or a production security boundary. The [initial result](../../docs/research/controlled-run-2026-09-12.md) was unverified; subsequent probes established [Git enforcement](../../docs/research/scripted-git-2026-09-12.md) and [partial lifecycle evidence](../../docs/research/lifecycle-2026-09-12.md). Checkpoints and delivery remain unimplemented.
+A bounded, headless Codex experiment. This is research code, not the Randolph application or a production security boundary. The [initial result](../../docs/research/controlled-run-2026-09-12.md) was unverified; subsequent probes established [Git enforcement](../../docs/research/scripted-git-2026-09-12.md), a [completed failed containment experiment](../../docs/research/lifecycle-completion-2026-09-12.md), and a [passing checkpoint/restart proof](../../docs/research/checkpoint-restart-2026-09-12.md). Final delivery remains unimplemented.
 
 ## Offline checks
 
@@ -85,3 +85,15 @@ The candidate is a per-run supervisor connected to the controller by IPC. It clo
 Polling cannot guarantee observation of a child that reparents between snapshots. The synthetic detached case deliberately tests this gap without cooperative registration. The independent observer verifies active native tools, watches heartbeat/canary writes, checks an unrelated sentinel, and records failures before watchdog rescue. The candidate never reads fixture PID receipts. Each journal has one writer; a separate process reopens retained state without dispatch. This does not implement checkpoint restoration or Restart.
 
 Helper binaries are volatile scratch; logs/results remain outside the repository. Fixture removal requires observed cleanup. A failed boundary ends the probe and remains failed after rescue. Supervisor loss, atomic PID-bound signaling, arbitrary process containment and Electron failure modes require separate designs or evidence.
+
+## Checkpoint and explicit Restart
+
+The [checkpoint proof](../../docs/research/checkpoint-restart-2026-09-12.md) passed with one real subscription-backed Luna/low turn. It deletes the entire disposable source repository, restores code and context from durable blobs plus a Git bundle, proves reopen is read-only, then explicitly starts a new native session. It requires the existing ChatGPT subscription login; credentials remain in the harness-owned home.
+
+```sh
+pnpm test:checkpoint --run --model gpt-5.6-luna --effort low \
+  --data-dir "$HOME/.randolph/experiments/new-checkpoint-id" \
+  --fixture-root "$HOME/.randolph/fixtures/new-checkpoint-id"
+```
+
+This is an explicit opt-in, not an instruction to repeat the completed test. Both roots and the sibling `-restored` destination must be new. The run permits one model turn and no automatic inference retry. The original source history, checkpoint and new run journals remain in the evidence directory. Reopening history cannot grant Restart. Corrupt or uncommitted checkpoint publication prevents restoration and dispatch. Restoration does not resolve the lifecycle containment blocker or implement final delivery.
