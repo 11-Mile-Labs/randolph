@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { DesktopBridge } from '@randolph/runtime/contracts';
 const bridge: DesktopBridge = {
   snapshot: async () => ipcRenderer.invoke('randolph:snapshot'),
+  restoreCheckpoint: async input => ipcRenderer.invoke('randolph:restore-checkpoint', input),
   memorySnapshot: async id => ipcRenderer.invoke('randolph:memory', id),
   memoryCommand: async input => ipcRenderer.invoke('randolph:memory-command', input),
   memoryHistory: async (id, reference) => ipcRenderer.invoke('randolph:memory-history', { projectId: id, reference }),

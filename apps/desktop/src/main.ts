@@ -1,4 +1,6 @@
-import { parsePushApproval } from './validation.js';
+import { realpathSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { parseCheckpoint, parsePushApproval } from './validation.js';
 import { parseMemoryCommand, parseLessonRef } from './memory-validation.js';
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { homedir } from 'node:os';
@@ -69,6 +71,12 @@ else {
       runtime = new Runtime(new CodexAdapter(), dataRoot);
       runtime.subscribe(() => { if (window && !window.isDestroyed()) window.webContents.send('randolph:changed'); });
       command('randolph:snapshot', () => runtime!.snapshot());
+      command('randolph:restore-checkpoint', async input => {
+        const checkpoint = parseCheckpoint(input);
+        const choice = await dialog.showOpenDialog(window!, { title: 'Choose a folder for the restored checkpoint', message: 'Creates a new folder with retained files and Git history. No agent or delivery action starts.', properties: ['openDirectory', 'createDirectory'] });
+        if (choice.canceled || !choice.filePaths[0]) return null;
+        return runtime!.restoreCheckpoint(checkpoint, join(realpathSync(choice.filePaths[0]), `randolph-recovery-${randomUUID()}`));
+      });
       command('randolph:memory', id => runtime!.memorySnapshot(parseId(id)));
       command('randolph:memory-command', input => runtime!.memoryCommand(parseMemoryCommand(input)));
       command('randolph:memory-history', input => {

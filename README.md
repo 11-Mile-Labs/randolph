@@ -48,9 +48,10 @@ The default tests use temporary fixtures and no model inference. The desktop tes
 - Code mode, retained file/command evidence, complete review trees, visible checks, and explicit local delivery with interruption recovery.
 - Scoped lesson editing, version history, explicit approval, exact pins, and retained run context provenance.
 - Clean-parent integration, visible conflicts, and a separate exact origin-push preview and approval.
+- Automatic Git checkpoints before and after completed turns, historical run inspection, and explicit file restoration after source loss.
 - A narrow Electron preload/IPC boundary with an isolated renderer and locally bundled assets.
 
-Checkpoint restoration, Claude/Grok adapters, workflow/backlog interfaces, broader project configuration, background/tray support and AI SDK UI transport integration are not implemented in this slice. Process-group cleanup does not prove termination of detached descendants; hard owner-loss shutdown remains a release blocker. **Stop** requests native interruption and process-group termination, and reports uncertainty when that cleanup cannot be confirmed. Unconfirmed cleanup blocks further work in that conversation across reopening. There is no claim of application-level sandboxing; safety sandbox work is deferred until v2 at the earliest.
+Linked model Restart/rerun, Claude/Grok adapters, workflow/backlog interfaces, broader project configuration, background/tray support and AI SDK UI transport integration are not implemented in this slice. Process-group cleanup does not prove termination of detached descendants; hard owner-loss shutdown remains a release blocker. **Stop** requests native interruption and process-group termination, and reports uncertainty when that cleanup cannot be confirmed. Unconfirmed cleanup blocks further work in that conversation across reopening. There is no claim of application-level sandboxing; safety sandbox work is deferred until v2 at the earliest.
 
 ## What we are building
 
@@ -86,6 +87,7 @@ The desktop application and execution runtime are intended for open-source relea
 - [Checkpoint and restart proof](docs/research/checkpoint-restart-2026-09-12.md): restored after source-repository deletion and verified in a fresh subscription-backed native session.
 - [Desktop implementation boundary](docs/decisions/desktop-first-slice.md): selected package structure, storage/IPC decisions, verified behavior and remaining work.
 - [Controlled coding and delivery](docs/decisions/controlled-coding.md): native execution, review/checks, exact approval, recovery, and remaining limits.
+- [Checkpoint recovery](docs/decisions/checkpoint-recovery.md): durable code/context retention, historical file restoration, and remaining execution-restart work.
 - [Memory, integration, and push](docs/decisions/memory-integration-and-push.md): scoped lesson versions, parent conflicts, separate push approval, and tested limits.
 - [Project harness defaults](docs/decisions/project-harness-defaults.md): project YAML authority, conversation inheritance, external-edit checks, and immutable run settings.
 - [Permission follow-up](docs/research/permission-followup-2026-09-12.md): verified workspace semantics and a real declined approval; standalone Git remains unverified.

@@ -34,8 +34,10 @@ Status: active implementation toward the complete [approved v1 scope](../product
 
 ## 2. Recovery and application lifetime
 
-- [ ] Promote self-contained checkpoints into the runtime and expose explicit Restart/rerun history controls.
-- [ ] Verify restoration after original source/worktree loss; retain original history and external-effect reconciliation.
+- [x] Promote self-contained Git checkpoints into the runtime and expose history/file restoration controls.
+- [ ] Implement linked model Restart/rerun with retained configuration/context and fresh approvals.
+- [x] Verify file restoration after original source/worktree loss while preserving original history.
+- [ ] Reconcile external effects for linked execution restart and cover non-Git recovery.
 - [ ] Implement Pause/Resume, background setting, menu-bar controls, notifications, and explicit quit behavior.
 - [ ] Complete descendant and owner-loss control without a VM; rerun fault cases and retain honest compatibility limits.
 

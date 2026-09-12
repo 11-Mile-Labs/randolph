@@ -1,3 +1,5 @@
+import type { CheckpointRecord, CheckpointInput, CheckpointRestore } from './checkpoints.js';
+export type { CheckpointRecord, CheckpointInput, CheckpointRestore } from './checkpoints.js';
 import type { PushRecord, ApprovePushInput } from './pushes.js';
 export type { PushRecord, ApprovePushInput } from './pushes.js';
 import type { IntegrationState } from './integrations.js';
@@ -20,7 +22,7 @@ export type ApproveReviewInput = { reviewId: string; message: string };
 export type ReviewRecord = { id: string; projectId: string; conversationId: string; runId: string; createdAt: string; updatedAt: string; status: 'pending' | 'checking' | 'stale' | 'delivering' | 'interrupted' | 'delivered' | 'failed' | 'stop-unconfirmed'; basis: GitReview; push?: PushRecord; originOperation?: 'active' | 'cleanup-unconfirmed'; progress?: { checkId: string; startedAt: string; output: string }; verification?: VerificationResult; deliveryPlan?: GitDeliveryPlan; commitOid?: string; merged?: boolean; cleaned?: boolean; error?: string };
 export type Project = { id: string; name: string; root: string; createdAt: string; harnessSettings?: ProjectHarnessSettings };
 export type Conversation = { id: string; projectId: string; title: string; model: string; effort: string; executionMode?: ExecutionMode; createdAt: string; updatedAt: string; lastReadSequence: number };
-export type Run = { id: string; projectId: string; conversationId: string; status: RunStatus; cleanupUnconfirmed?: boolean; memory?: PreparedMemory; integration?: IntegrationState; model: string; effort: string; executionMode?: ExecutionMode; settingsSource?: 'project' | 'conversation' | 'native'; projectSettingsRevision?: string | null; workspace: string; logsPath?: string; createdAt: string; updatedAt: string; lastActivityAt: string; error?: string };
+export type Run = { id: string; projectId: string; conversationId: string; status: RunStatus; cleanupUnconfirmed?: boolean; checkpoints?: CheckpointRecord[]; checkpointError?: string; memory?: PreparedMemory; integration?: IntegrationState; model: string; effort: string; executionMode?: ExecutionMode; settingsSource?: 'project' | 'conversation' | 'native'; projectSettingsRevision?: string | null; workspace: string; logsPath?: string; createdAt: string; updatedAt: string; lastActivityAt: string; error?: string };
 export type Message = { id: string; conversationId: string; runId: string; role: 'user' | 'assistant'; text: string; createdAt: string };
 export type RunEvent = { sequence: number; runId: string; projectId: string; conversationId: string; at: string; type: string; summary: string; data: Record<string, unknown> };
 export type WorkspaceSnapshot = { projects: Project[]; conversations: Conversation[]; runs: Run[]; messages: Message[]; events: RunEvent[]; reviews: ReviewRecord[]; dataRoot: string };
@@ -38,6 +40,7 @@ export interface HarnessAdapter {
 export type SendInput = { conversationId: string; text: string; model?: string; effort?: string };
 export interface DesktopBridge {
   snapshot(): Promise<WorkspaceSnapshot>;
+  restoreCheckpoint(input: CheckpointInput): Promise<CheckpointRestore | null>;
   memorySnapshot(projectId: string): Promise<MemorySnapshot>;
   memoryCommand(input: MemoryCommand): Promise<MemorySnapshot>;
   memoryHistory(projectId: string, reference: LessonRef): Promise<LessonVersion[]>;

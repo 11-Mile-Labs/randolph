@@ -1,4 +1,4 @@
-import type { ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
+import type { CheckpointInput, ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid settings request.');
   return value as Record<string, unknown>;
@@ -45,4 +45,10 @@ export function parsePushApproval(value: unknown): ApprovePushInput {
   const input = record(value);
   if (typeof input.revision !== 'string' || !/^[0-9a-f]{64}$/.test(input.revision)) throw new Error('Invalid push preview revision.');
   return { reviewId: parseId(input.reviewId), revision: input.revision };
+}
+
+export function parseCheckpoint(value: unknown): CheckpointInput {
+  const input = record(value);
+  if (typeof input.digest !== 'string' || !/^[0-9a-f]{64}$/.test(input.digest)) throw new Error('Invalid checkpoint digest.');
+  return { runId: parseId(input.runId), digest: input.digest };
 }

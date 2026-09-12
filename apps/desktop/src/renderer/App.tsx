@@ -1,3 +1,4 @@
+import HistoryPanel from './HistoryPanel';
 import MemoryPanel from './MemoryPanel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -240,6 +241,7 @@ function ActivityPanel({ run, events, dataRoot, now, stopping, onStop }: Activit
             </div>
           </div>
 
+          {run.checkpointError ? <p className="inline-error" role="status">Checkpoint unavailable: {run.checkpointError}</p> : run.checkpoints?.length ? <p className="muted-copy">{run.checkpoints.length} recoverable checkpoints · Open Run history to restore</p> : null}
           {run.memory?.references.length ? <details className="run-context"><summary>{run.memory.references.length} supplied lessons · ~{run.memory.estimatedTokens} tokens (estimate)</summary><pre>{run.memory.text}</pre></details> : null}
           {run.error ? (
             <div className="inline-error" role="alert">
@@ -459,6 +461,7 @@ export default function App() {
   const [selectedConversationId, setSelectedConversationId] = useState<string>();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [settingsProjectId, setSettingsProjectId] = useState<string>();
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [memoryProjectId, setMemoryProjectId] = useState<string>();
   const [selectedReviewId, setSelectedReviewId] = useState<string>();
   const [loading, setLoading] = useState(true);
@@ -731,6 +734,7 @@ export default function App() {
               </div>
               <div className="header-actions">
                 {harness?.version ? <span className="version-chip">Codex {harness.version}</span> : null}
+                <button className="secondary-button" type="button" onClick={() => setHistoryOpen(true)}>Run history</button>
                 <button className="secondary-button" type="button" onClick={() => setMemoryProjectId(selectedConversation.projectId)}>Memory</button>
                 <select aria-label="Conversation mode" value={selectedConversation.executionMode ?? 'read-only'} disabled={Boolean(action) || Boolean(activeRun) || checking || cleanupBlocked} onChange={event => void changeMode(event.target.value as ExecutionMode)}>
                   <option value="read-only">Read-only</option><option value="code" disabled={!harness?.executionModes?.includes('code')}>Code</option>
@@ -832,6 +836,7 @@ export default function App() {
       />
 
       {settingsProject ? <ProjectSettings key={settingsProject.id} project={settingsProject} harness={harness} onClose={() => setSettingsProjectId(undefined)} onChanged={reloadSnapshot} /> : null}
+      {historyOpen ? <HistoryPanel key={selectedConversationId} runs={conversationRuns} messages={messages} onClose={() => setHistoryOpen(false)} /> : null}
       {memoryProjectId ? <MemoryPanel projectId={memoryProjectId} onClose={() => setMemoryProjectId(undefined)} /> : null}
       {selectedReview ? <ReviewPanel key={selectedReview.id} review={selectedReview} onClose={() => setSelectedReviewId(undefined)} onChanged={reloadSnapshot} onRefresh={() => openReview(true)} /> : null}
 

@@ -1009,3 +1009,20 @@ button:disabled {
 .push-controls code { overflow-wrap: anywhere; }
 .push-controls label { display: block; margin: 12px 0; }
 .push-controls button { margin: 6px 8px 6px 0; }
+
+.history-dialog { padding: 0; color: var(--ink); width: min(1000px, calc(100vw - 48px)); max-height: calc(100vh - 64px); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; box-shadow: 0 24px 100px #0003; flex-direction: column; }
+.history-dialog[open] { display: flex; }
+.history-dialog::backdrop { background: #18271d66; }
+.history-dialog > header { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-bottom: 1px solid var(--line); }
+.history-dialog h2 { margin: 4px 0; }
+.history-body { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: 0; }
+.history-body > nav { overflow-y: auto; padding: 12px; border-right: 1px solid var(--line); }
+.history-body > nav button { display: grid; gap: 5px; width: 100%; text-align: left; padding: 12px; background: transparent; border: 1px solid transparent; border-radius: 8px; }
+.history-body > nav button.selected { background: var(--surface-muted); border-color: var(--line); }
+.history-body > nav span, .checkpoint-card > span { font-size: 12px; color: var(--muted); }
+.history-detail { padding: 16px 24px 28px; overflow-y: auto; }
+.history-detail pre, .history-message p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.history-detail pre { font-size: 12px; }
+.checkpoint-card { padding: 12px; border: 1px solid var(--line); border-radius: 8px; display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 12px 0; }
+.checkpoint-card code { align-self: center; font-size: 12px; }
+.history-message { border-top: 1px solid var(--line); padding: 16px 0; }

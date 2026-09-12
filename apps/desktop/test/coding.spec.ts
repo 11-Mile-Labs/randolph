@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { DesktopBridge } from '@randolph/runtime/contracts';
@@ -82,6 +82,16 @@ createInterface({input:process.stdin}).on('line',line=>{
     expect(existsSync(snapshot.runs[0]!.workspace)).toBe(false);
     expect(readFileSync(join(project, 'value.txt'), 'utf8')).toBe('after\n');
     expect(git('rev-parse', 'HEAD^')).toBe(base);
+    await page.getByRole('button', { name: 'Close review', exact: true }).click();
+    await page.getByRole('button', { name: 'Run history', exact: true }).click();
+    const history = page.getByRole('dialog', { name: 'Run history' });
+    await expect(history.getByText('Completed turn', { exact: true })).toBeVisible();
+    await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, root);
+    await history.locator('.checkpoint-card').filter({ hasText: 'Completed turn' }).getByRole('button', { name: 'Restore files to folder' }).click();
+    await expect(history.getByRole('status')).toContainText('Restored to');
+    const recovery = readdirSync(root).find(name => name.startsWith('randolph-recovery-'))!;
+    expect(readFileSync(join(root, recovery, 'value.txt'), 'utf8')).toBe('after\n');
+    await page.screenshot({ path: join(tmpdir(), 'randolph-history.png') });
     await app.close();
     app = await electron.launch({ args: [resolve('.')], env });
     page = await app.firstWindow();

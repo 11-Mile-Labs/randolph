@@ -11,6 +11,7 @@ import { Integrations, type IntegrationState } from './integrations.js';
 import { Pushes, type ApprovePushInput } from './pushes.js';
 import type { PushOptions } from './push.js';
 import { Reviews } from './reviews.js';
+import { Checkpoints, type CheckpointInput, type CheckpointRestore } from './checkpoints.js';
 import type { AdapterEvent, ApproveReviewInput, Conversation, ConversationModeInput, ConversationSelectionInput, HarnessAdapter, HarnessInfo, HarnessSelection, Project, ProjectHarnessSettings, ReviewRecord, Run, SaveProjectDefaultsInput, SendInput, WorkspaceSnapshot } from './contracts.js';
 export type * from './contracts.js';
 export { Store } from './store.js';
@@ -19,6 +20,7 @@ const now = (): string => new Date().toISOString();
 export class Runtime {
   readonly store: Store;
   private readonly reviews: Reviews;
+  private readonly checkpoints: Checkpoints;
   private readonly pushes: Pushes;
   private readonly integrations: Integrations;
   private readonly memory: ProjectMemory;
@@ -28,6 +30,7 @@ export class Runtime {
   private admission = new Set<string>();
   constructor(readonly adapter: HarnessAdapter, dataRoot: string, options: { push?: PushOptions } = {}) {
     this.store = new Store(resolve(dataRoot));
+    this.checkpoints = new Checkpoints(this.store);
     this.memory = new ProjectMemory(this.store, () => this.changed());
     for (const run of this.store.runs()) {
       if (activeStatuses.has(run.status)) {
@@ -49,6 +52,10 @@ export class Runtime {
   snapshot(): WorkspaceSnapshot {
     const snapshot = this.store.snapshot();
     return { ...snapshot, projects: snapshot.projects.map(project => ({ ...project, harnessSettings: readHarnessSettings(project.root) })) };
+  }
+  restoreCheckpoint(input: CheckpointInput, destination: string): CheckpointRestore {
+    if (!this.accepting) throw new Error('Application is closing.');
+    return this.checkpoints.restore(input, destination);
   }
   memorySnapshot(projectId: string): MemorySnapshot { return this.memory.snapshot(projectId); }
   memoryHistory(projectId: string, reference: LessonRef): LessonVersion[] { return this.memory.history(projectId, reference); }
@@ -182,6 +189,12 @@ export class Runtime {
       });
       try { this.memory.retain(project.id, run.id, memory); this.store.exportRun(run); }
       catch { this.finish(run, 'failed', 'Could not export run logs. No harness was launched.'); throw new Error('Could not export run logs.'); }
+      if (workspace !== project.root) {
+        try { this.checkpoints.capture(run, 'before-turn'); }
+        catch (cause) { this.checkpoints.failed(run, cause); this.finish(run, 'failed', 'Could not retain the starting checkpoint. No harness was launched.'); throw cause; }
+      } else {
+        this.checkpoints.failed(run, new Error('File recovery is currently supported only for Git worktrees with a committed HEAD. This read-only folder run has retained history but no recoverable code checkpoint.'));
+      }
       const controller = new AbortController();
       // Register ownership before asynchronous adapter startup; Stop can interrupt launch too.
       const state = { controller, done: Promise.resolve(), run };
@@ -198,6 +211,10 @@ export class Runtime {
       if (run.memory?.text) messages.unshift({ role: 'user', text: run.memory.text });
       const result = await this.adapter.run({ workspace: run.workspace, model: run.model, effort: run.effort, executionMode: run.executionMode, messages, signal: controller.signal, onEvent: event => this.event(run, event) });
       this.finish(run, result.status, result.status === 'stop-unconfirmed' ? 'The harness stopped responding; cleanup could not be confirmed.' : undefined);
+      if (result.status === 'completed' && run.checkpoints?.length) {
+        try { this.checkpoints.capture(run, 'completed-turn'); }
+        catch (cause) { this.checkpoints.failed(run, cause); }
+      }
     } catch (error) {
       this.finish(run, 'failed', error instanceof Error ? error.message : 'Harness failed.');
     } finally { this.active.delete(run.id); this.changed(); }
