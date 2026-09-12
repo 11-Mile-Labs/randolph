@@ -2,6 +2,8 @@
 
 Status: proposed implementation sequence for the [approved product scope](product-spec.md). Milestones are outcome boundaries, not promised dates or authorization to execute every stage. The current implementation is the [first desktop product slice](decisions/desktop-first-slice.md): read-only Codex project conversations, visible activity, and durable history in normal app/runtime packages. M1 is not fully passed; its detached-process lifecycle failure remains open.
 
+The [project harness defaults follow-up](decisions/project-harness-defaults.md) adds editable model/effort defaults, saved conversation overrides, and immutable run settings. It covers that part of M2/M3; full configuration management and additional harnesses remain unfinished.
+
 ## Milestones
 
 | Milestone | Deliverable | Exit evidence |

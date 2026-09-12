@@ -1,4 +1,22 @@
-import type { SendInput } from '@randolph/runtime/contracts';
+import type { ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
+function record(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid settings request.');
+  return value as Record<string, unknown>;
+}
+function parseSelection(value: unknown): HarnessSelection {
+  const input = record(value);
+  if (input.harness !== 'codex' || typeof input.model !== 'string' || !input.model.trim() || input.model.length > 200 || typeof input.effort !== 'string' || !input.effort.trim() || input.effort.length > 32) throw new Error('Invalid harness, model, or effort.');
+  return { harness: 'codex', model: input.model, effort: input.effort };
+}
+export function parseProjectDefaults(value: unknown): SaveProjectDefaultsInput {
+  const input = record(value);
+  if (input.expectedRevision !== null && (typeof input.expectedRevision !== 'string' || !/^[0-9a-f]{64}$/.test(input.expectedRevision))) throw new Error('Invalid settings revision.');
+  return { projectId: parseId(input.projectId), defaults: parseSelection(input.defaults), expectedRevision: input.expectedRevision };
+}
+export function parseConversationSelection(value: unknown): ConversationSelectionInput {
+  const input = record(value);
+  return { conversationId: parseId(input.conversationId), selection: input.selection === null ? null : parseSelection(input.selection) };
+}
 export function parseId(value: unknown): string {
   if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value)) throw new Error('Invalid project, conversation, or run identifier.');
   return value;
@@ -6,6 +24,9 @@ export function parseId(value: unknown): string {
 export function parseSend(value: unknown): SendInput {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid message request.');
   const input = value as Record<string, unknown>;
-  if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 64_000 || typeof input.model !== 'string' || input.model.length > 200 || typeof input.effort !== 'string' || input.effort.length > 32) throw new Error('Invalid message, model, or effort.');
-  return { conversationId: parseId(input.conversationId), text: input.text, model: input.model, effort: input.effort };
+  if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 64_000) throw new Error('Invalid message.');
+  const message = { conversationId: parseId(input.conversationId), text: input.text };
+  if (input.model === undefined && input.effort === undefined) return message;
+  const selection = parseSelection({ harness: 'codex', model: input.model, effort: input.effort });
+  return { ...message, model: selection.model, effort: selection.effort };
 }

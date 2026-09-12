@@ -4,12 +4,14 @@ import type {
   Conversation,
   HarnessInfo,
   HarnessModel,
+  HarnessSelection,
   Message,
   Project,
   Run,
   RunEvent,
   WorkspaceSnapshot,
 } from '@randolph/runtime/contracts';
+import ProjectSettings from './ProjectSettings';
 
 const EMPTY_SNAPSHOT: WorkspaceSnapshot = {
   projects: [],
@@ -334,6 +336,8 @@ type ComposerProps = {
   effort: string;
   value: string;
   disabled: boolean;
+  settingsDisabled: boolean;
+  sendBlocked: boolean;
   sending: boolean;
   onModelChange: (model: HarnessModel) => void;
   onEffortChange: (effort: string) => void;
@@ -347,6 +351,8 @@ function Composer({
   effort,
   value,
   disabled,
+  settingsDisabled,
+  sendBlocked,
   sending,
   onModelChange,
   onEffortChange,
@@ -376,12 +382,13 @@ function Composer({
             <span className="sr-only">Model</span>
             <select
               value={model}
-              disabled={disabled || !harness?.available}
+              disabled={settingsDisabled || !harness?.available}
               onChange={(event) => {
                 const next = harness?.models.find((item) => item.id === event.target.value);
                 if (next) onModelChange(next);
               }}
             >
+              {!selectedModel ? <option value={model}>{model ? `${model} (unavailable)` : 'No models available'}</option> : null}
               {harness?.models.map((item) => (
                 <option value={item.id} key={item.id}>
                   {item.name}
@@ -393,9 +400,10 @@ function Composer({
             <span className="sr-only">Reasoning effort</span>
             <select
               value={effort}
-              disabled={disabled || !selectedModel}
+              disabled={settingsDisabled || !selectedModel}
               onChange={(event) => onEffortChange(event.target.value)}
             >
+              {!selectedModel?.efforts.includes(effort) ? <option value={effort}>{effort ? `${effort} (unavailable)` : 'No effort available'}</option> : null}
               {selectedModel?.efforts.map((item) => (
                 <option value={item} key={item}>
                   {item} effort
@@ -408,7 +416,7 @@ function Composer({
           className="send-button"
           type="submit"
           aria-label="Send message"
-          disabled={disabled || sending || value.trim().length === 0 || !model || !effort}
+          disabled={disabled || sendBlocked || sending || value.trim().length === 0 || !model || !effort}
         >
           {sending ? (
             <span className="button-spinner" aria-hidden="true" />
@@ -445,9 +453,9 @@ export default function App() {
   const [harness, setHarness] = useState<HarnessInfo>();
   const [selectedConversationId, setSelectedConversationId] = useState<string>();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [modelChoices, setModelChoices] = useState<Record<string, { model: string; effort: string }>>({});
+  const [settingsProjectId, setSettingsProjectId] = useState<string>();
   const [loading, setLoading] = useState(true);
-  const [action, setAction] = useState<'project' | 'conversation' | 'send' | 'stop'>();
+  const [action, setAction] = useState<'project' | 'conversation' | 'send' | 'stop' | 'settings'>();
   const [error, setError] = useState<string>();
   const [now, setNow] = useState(Date.now());
   const loadVersion = useRef(0);
@@ -479,9 +487,12 @@ export default function App() {
     };
     void loadHarness();
     const unsubscribe = window.randolph.onChanged(() => void reloadSnapshot());
+    const onFocus = () => { void reloadSnapshot(); };
+    window.addEventListener('focus', onFocus);
     return () => {
       disposed = true;
       unsubscribe();
+      window.removeEventListener('focus', onFocus);
     };
   }, [reloadSnapshot]);
 
@@ -494,25 +505,6 @@ export default function App() {
   const selectedProject = selectedConversation
     ? snapshot.projects.find((item) => item.id === selectedConversation.projectId)
     : undefined;
-
-  useEffect(() => {
-    if (!selectedConversation) return;
-    setModelChoices((current) => {
-      const existing = current[selectedConversation.id];
-      const existingModel = harness?.models.find((item) => item.id === existing?.model);
-      if (existing && existingModel?.efforts.includes(existing.effort)) return current;
-      const conversationModel = harness?.models.find((item) => item.id === selectedConversation.model);
-      const fallbackModel = conversationModel ?? harness?.models[0];
-      const next = {
-        model: fallbackModel?.id ?? selectedConversation.model,
-        effort: fallbackModel?.efforts.includes(selectedConversation.effort)
-          ? selectedConversation.effort
-          : (fallbackModel?.defaultEffort ?? selectedConversation.effort),
-      };
-      if (existing?.model === next.model && existing.effort === next.effort) return current;
-      return { ...current, [selectedConversation.id]: next };
-    });
-  }, [harness, selectedConversation?.effort, selectedConversation?.id, selectedConversation?.model]);
 
   const conversationEvents = useMemo(
     () =>
@@ -534,9 +526,13 @@ export default function App() {
     .filter((message) => message.conversationId === selectedConversationId)
     .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
   const selectedDraft = selectedConversationId ? (drafts[selectedConversationId] ?? '') : '';
-  const selectedModelChoice = selectedConversationId
-    ? modelChoices[selectedConversationId] ?? { model: '', effort: '' }
-    : { model: '', effort: '' };
+  const hasOverride = Boolean(selectedConversation?.model || selectedConversation?.effort);
+  const selectedModelChoice = hasOverride
+    ? { model: selectedConversation!.model, effort: selectedConversation!.effort }
+    : selectedProject?.harnessSettings?.defaults ?? { model: harness?.models[0]?.id ?? '', effort: harness?.models[0]?.defaultEffort ?? '' };
+  const settingsError = selectedProject?.harnessSettings?.error;
+  const selectionAvailable = Boolean(harness?.models.some(item => item.id === selectedModelChoice.model && item.efforts.includes(selectedModelChoice.effort)));
+  const settingsProject = snapshot.projects.find(item => item.id === settingsProjectId);
   const lastMessage = messages.at(-1);
   const lastMessageKey = lastMessage ? `${lastMessage.id}:${lastMessage.text.length}` : selectedConversationId;
 
@@ -571,6 +567,7 @@ export default function App() {
     nearMessageEnd.current = true;
     setSelectedConversationId(conversationId);
     setError(undefined);
+    void reloadSnapshot();
   };
 
   const addProject = async () => {
@@ -608,20 +605,31 @@ export default function App() {
     const conversationId = selectedConversation?.id;
     const text = selectedDraft.trim();
     const { model, effort } = selectedModelChoice;
-    if (!conversationId || !text || !model || !effort) return;
+    if (!conversationId || !text || !model || !effort || action || !selectionAvailable || settingsError) return;
     setAction('send');
     setError(undefined);
     try {
-      await window.randolph.send({ conversationId, text, model, effort });
+      await window.randolph.send({ conversationId, text });
       setDrafts((current) =>
         current[conversationId]?.trim() === text ? { ...current, [conversationId]: '' } : current,
       );
       await reloadSnapshot();
     } catch (sendError) {
       setError(`Message was not sent: ${displayError(sendError)}`);
+      await reloadSnapshot();
     } finally {
       setAction(undefined);
     }
+  };
+
+  const changeSelection = async (selection: HarnessSelection | null) => {
+    if (!selectedConversationId || action) return;
+    setAction('settings'); setError(undefined);
+    try {
+      await window.randolph.setConversationSelection({ conversationId: selectedConversationId, selection });
+      await reloadSnapshot();
+    } catch (cause) { setError(`Could not save conversation settings: ${displayError(cause)}`); }
+    finally { setAction(undefined); }
   };
 
   const stopRun = async (runId: string) => {
@@ -682,7 +690,10 @@ export default function App() {
                 <h1>{selectedConversation.title}</h1>
                 <p>{selectedProject?.name}{latestRun && latestRun.workspace !== selectedProject?.root ? " · Committed snapshot" : ""}</p>
               </div>
-              {harness?.version ? <span className="version-chip">Codex {harness.version}</span> : null}
+              <div className="header-actions">
+                {harness?.version ? <span className="version-chip">Codex {harness.version}</span> : null}
+                <button className="secondary-button" type="button" disabled={Boolean(action)} onClick={() => setSettingsProjectId(selectedProject?.id)}>Project settings</button>
+              </div>
             </header>
 
             <div
@@ -720,26 +731,26 @@ export default function App() {
                 </div>
               ) : null}
               {harnessReason ? <p className="harness-warning">Native harness unavailable: {harnessReason}</p> : null}
+              {settingsError ? <p className="harness-warning" role="alert">{settingsError} Open Project settings to reload after correcting the file.</p> : null}
+              {!settingsError && harness?.available && !selectionAvailable ? <p className="harness-warning" role="alert">The saved model or effort is unavailable. Choose a replacement or update the project default before sending.</p> : null}
+              <div className="selection-source">
+                <span>{action === 'settings' ? 'Saving choice…' : hasOverride ? 'Conversation override' : selectedProject?.harnessSettings?.defaults ? 'Project default' : 'No project default saved'}</span>
+                {hasOverride ? <button type="button" disabled={Boolean(action)} onClick={() => void changeSelection(null)}>Use project default</button> : null}
+              </div>
               <Composer
                 harness={harness}
                 model={selectedModelChoice.model}
                 effort={selectedModelChoice.effort}
                 value={selectedDraft}
                 disabled={composerDisabled}
+                settingsDisabled={Boolean(action)}
+                sendBlocked={Boolean(action) || !selectionAvailable || Boolean(settingsError)}
                 sending={action === 'send'}
                 onModelChange={(nextModel) => {
-                  if (!selectedConversationId) return;
-                  setModelChoices((current) => ({
-                    ...current,
-                    [selectedConversationId]: { model: nextModel.id, effort: nextModel.defaultEffort },
-                  }));
+                  void changeSelection({ harness: 'codex', model: nextModel.id, effort: nextModel.defaultEffort });
                 }}
                 onEffortChange={(nextEffort) => {
-                  if (!selectedConversationId) return;
-                  setModelChoices((current) => ({
-                    ...current,
-                    [selectedConversationId]: { ...selectedModelChoice, effort: nextEffort },
-                  }));
+                  void changeSelection({ harness: 'codex', model: selectedModelChoice.model, effort: nextEffort });
                 }}
                 onValueChange={(nextDraft) => {
                   if (!selectedConversationId) return;
@@ -767,6 +778,8 @@ export default function App() {
         stopping={action === 'stop'}
         onStop={(runId) => void stopRun(runId)}
       />
+
+      {settingsProject ? <ProjectSettings key={settingsProject.id} project={settingsProject} harness={harness} onClose={() => setSettingsProjectId(undefined)} onChanged={reloadSnapshot} /> : null}
 
       {!selectedConversation && error ? (
         <div className="global-error" role="alert">

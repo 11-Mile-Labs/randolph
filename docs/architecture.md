@@ -12,7 +12,7 @@ The [product specification](product-spec.md) defines approved behavior; the [use
 | D02 | Selected main agent supplies task judgment; application code owns authority | Accepted; model output cannot authorize its own delivery or raise execution limits |
 | D03 | Use installed subscription-backed harnesses, with ACP or native protocols as appropriate | Accepted direction; capability verification is required per route, with no API fallback |
 | D04 | Use AI SDK UI with an application-owned transport | Accepted integration direction; Electron transport behavior remains unproven |
-| D05 | Electron/React/TypeScript, one local runtime process, SQLite with derived JSONL | Proposed implementation choices; no versions or stable schemas selected |
+| D05 | Electron/React/TypeScript, runtime hosted in Electron main, SQLite with derived JSONL | Implemented for the [first desktop slice](decisions/desktop-first-slice.md); independent runtime supervision remains unfinished |
 | D06 | Enforce final approval and stop on owner loss through verified native boundaries/supervision | Required behavior; mechanism unresolved and tested first |
 
 ## Recommendation and alternatives
@@ -25,7 +25,7 @@ Build one macOS application with a separately testable local runtime. Keep the r
 | UI wrapping CLIs directly | Small initial prototype | Approval, persistence, and lifecycle behavior become coupled to views |
 | Independent always-running daemon and desktop client | Can later serve multiple clients | Adds installation and lifecycle complexity; conflicts with expected stop-on-quit behavior unless carefully constrained |
 
-Electron, React, TypeScript, AI SDK UI, and SQLite are proposed implementation choices. Electron is a good fit for the requested macOS desktop shell and familiar web-based chat, and supports separate renderer and utility processes. A narrow preload bridge is the intended UI boundary. [Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model).
+Electron, React, TypeScript, and SQLite are selected for the first desktop slice. AI SDK UI transport remains future integration work. Electron supports separate renderer and utility processes; the slice uses a narrow preload bridge to the runtime in Electron main. [Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model).
 
 ## 1. Boundaries and ownership
 
@@ -152,6 +152,8 @@ $APP_DATA/
 ```
 
 Project configuration remains versioned inside the repository using the approved dot-separated filenames; its exact directory remains a design choice. Worktrees remain inside the repository. Temporary scratch uses the OS temporary directory and has no recovery authority. This layout is proposed, not a stable storage API.
+
+The first selected project configuration file is `config.harness.yaml` at the registered project root. It owns model/effort defaults; SQLite owns conversation overrides and frozen run selections. The [project harness defaults decision](decisions/project-harness-defaults.md) records resolution order, external-edit detection, and bounded read/write behavior. The desktop slice decision records the selected app-data layout; other configuration files remain future work.
 
 YAML edits are validated with an expected revision/hash before replacement. Invalid external edits remain visible and block affected new runs; they do not silently replace the last valid active snapshot. Detect duplicate checkouts through canonical repository identity so per-checkout writer ownership cannot be evaded by a symlink or a second project registration.
 

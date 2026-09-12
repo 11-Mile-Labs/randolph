@@ -21,6 +21,8 @@ pnpm desktop
 
 Choose **Add project**, select a local folder, choose a Codex model and effort, and send a message. The right panel shows native activity and the location of retained run logs. Multiple conversations can run independently. Reopening a conversation displays its history; it never sends a new turn automatically.
 
+Open **Project settings** to save model/effort defaults in the project's `config.harness.yaml`. Changing a composer picker saves a conversation override immediately; **Use project default** restores inheritance. Active runs retain their starting settings. Invalid or unavailable saved choices are shown explicitly and block new sends until corrected. See [project harness defaults](docs/decisions/project-harness-defaults.md) for external editing and compatibility behavior.
+
 Git projects use a per-conversation worktree under `.worktrees/`, starting from committed HEAD. Uncommitted source edits are not copied in this slice. Non-Git folders are read in place. Durable state lives in `~/.randolph/app.sqlite`, with readable and JSONL run logs below `~/.randolph/projects/`. `RANDOLPH_DATA_DIR` selects a separate app-data directory for development/testing. Run logs can contain project content; they are private local data, not repository files.
 
 ```sh
@@ -36,6 +38,7 @@ The default tests use temporary fixtures and no model inference. The desktop tes
 ## What works in this slice
 
 - Projects, conversations, native model/effort discovery, streamed chat and conversation-scoped drafts.
+- Editable project model/effort defaults, persisted conversation overrides, and run configuration provenance.
 - Visible activity, unread indicators, Stop requests, exact log locations, and history reopening.
 - SQLite-backed run/message/event state, frozen run model/effort, derived JSONL/readable logs, and per-conversation worktrees.
 - A narrow Electron preload/IPC boundary with an isolated renderer and locally bundled assets.
@@ -75,6 +78,7 @@ The desktop application and execution runtime are intended for open-source relea
 - [Completed lifecycle experiment](docs/research/lifecycle-completion-2026-09-12.md): Stop and controller/harness-crash cleanup passed; a detached-child escape failed containment and remains a release blocker.
 - [Checkpoint and restart proof](docs/research/checkpoint-restart-2026-09-12.md): restored after source-repository deletion and verified in a fresh subscription-backed native session.
 - [Desktop implementation boundary](docs/decisions/desktop-first-slice.md): selected package structure, storage/IPC decisions, verified behavior and remaining work.
+- [Project harness defaults](docs/decisions/project-harness-defaults.md): project YAML authority, conversation inheritance, external-edit checks, and immutable run settings.
 - [Permission follow-up](docs/research/permission-followup-2026-09-12.md): verified workspace semantics and a real declined approval; standalone Git remains unverified.
 - [Controlled-run results](docs/research/controlled-run-2026-09-12.md): observed subscription execution, denied diagnostic mutations, and incomplete protection proof.
 - [Initial harness findings](docs/research/harness-compatibility.md): observed subscription integration and remaining limitations.

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -259,5 +259,73 @@ test('failed initial log projection prevents adapter launch while SQLite records
   assert.equal(adapter.runCalls.length, 0);
   assert.equal(snapshot.runs[0].status, 'failed');
   assert.deepEqual(snapshot.events.map(event => event.type), ['run.created', 'run.failed']);
+  await runtime.close();
+});
+
+test('project defaults and unsent conversation overrides survive reopening without starting work', async t => {
+  const paths = await fixture(t);
+  let runtime = new Runtime(new FakeHarnessAdapter(), paths.dataRoot);
+  const project = runtime.addProject(paths.projectRoot);
+  const inherited = runtime.createConversation(project.id);
+  const overridden = runtime.createConversation(project.id);
+  await runtime.saveProjectDefaults({ projectId: project.id, defaults: { harness: 'codex', model: 'model-b', effort: 'high' }, expectedRevision: null });
+  await runtime.setConversationSelection({ conversationId: overridden.id, selection: { harness: 'codex', model: 'model-a', effort: 'low' } });
+  await runtime.close();
+
+  const adapter = new FakeHarnessAdapter();
+  runtime = new Runtime(adapter, paths.dataRoot);
+  assert.equal(runtime.snapshot().projects[0].harnessSettings.defaults.model, 'model-b');
+  assert.equal(runtime.snapshot().conversations.find(c => c.id === overridden.id).model, 'model-a');
+  assert.equal(adapter.discoverCalls, 0);
+  assert.equal(runtime.snapshot().runs.length, 0);
+  await runtime.send({ conversationId: inherited.id, text: 'Inherit defaults.' });
+  await waitFor(() => !runtime.hasActiveWork());
+  await runtime.send({ conversationId: overridden.id, text: 'Use override.' });
+  await waitFor(() => !runtime.hasActiveWork());
+  await runtime.setConversationSelection({ conversationId: overridden.id, selection: null });
+  await runtime.send({ conversationId: overridden.id, text: 'Back to defaults.' });
+  await waitFor(() => !runtime.hasActiveWork());
+  assert.deepEqual(runtime.snapshot().runs.map(run => [run.model, run.effort, run.settingsSource]), [
+    ['model-b', 'high', 'project'], ['model-a', 'low', 'conversation'], ['model-b', 'high', 'project'],
+  ]);
+  assert.equal(runtime.snapshot().conversations.find(c => c.id === inherited.id).model, '');
+  await runtime.close();
+});
+
+test('external defaults affect new runs while active runs and their manifests retain the starting choice', async t => {
+  const paths = await fixture(t);
+  const gate = deferred();
+  const runtime = new Runtime(new FakeHarnessAdapter({ run: async (_input, index) => index === 0 ? gate.promise : { status: 'completed' } }), paths.dataRoot);
+  const project = runtime.addProject(paths.projectRoot);
+  const first = runtime.createConversation(project.id);
+  const second = runtime.createConversation(project.id);
+  const saved = await runtime.saveProjectDefaults({ projectId: project.id, defaults: { harness: 'codex', model: 'model-a', effort: 'low' }, expectedRevision: null });
+  const run = await runtime.send({ conversationId: first.id, text: 'First choice.' });
+  await writeFile(join(paths.projectRoot, 'config.harness.yaml'), 'schemaVersion: 1\nharness: codex\nmodel: model-b\neffort: high\n');
+  await assert.rejects(runtime.saveProjectDefaults({ projectId: project.id, defaults: { harness: 'codex', model: 'model-a', effort: 'low' }, expectedRevision: saved.revision }), /changed|stale/i);
+  await runtime.send({ conversationId: second.id, text: 'New choice.' });
+  const manifest = JSON.parse(await readFile(join(runtime.store.runDirectory(run), 'manifest.json'), 'utf8'));
+  assert.equal(manifest.configuration.model, 'model-a');
+  assert.equal(manifest.projectSettingsRevision, saved.revision);
+  assert.deepEqual(runtime.snapshot().runs.map(r => [r.model, r.effort]), [['model-a', 'low'], ['model-b', 'high']]);
+  gate.resolve({ status: 'completed' });
+  await waitFor(() => !runtime.hasActiveWork());
+  await runtime.close();
+});
+
+test('invalid project config and unavailable saved models block dispatch without a silent substitution', async t => {
+  const paths = await fixture(t);
+  const adapter = new FakeHarnessAdapter();
+  const runtime = new Runtime(adapter, paths.dataRoot);
+  const project = runtime.addProject(paths.projectRoot);
+  const conversation = runtime.createConversation(project.id);
+  await writeFile(join(paths.projectRoot, 'config.harness.yaml'), 'schemaVersion: 999\n');
+  assert.ok(runtime.snapshot().projects[0].harnessSettings.error);
+  await assert.rejects(runtime.send({ conversationId: conversation.id, text: 'Invalid settings.' }), /config|settings|version/i);
+  await writeFile(join(paths.projectRoot, 'config.harness.yaml'), 'schemaVersion: 1\nharness: codex\nmodel: unavailable-model\neffort: low\n');
+  await assert.rejects(runtime.send({ conversationId: conversation.id, text: 'Unavailable choice.' }), /available model/i);
+  await assert.rejects(runtime.setConversationSelection({ conversationId: conversation.id, selection: { harness: 'codex', model: 'model-a', effort: 'high' } }), /available model/i);
+  assert.equal(adapter.runCalls.length, 0);
+  assert.equal(runtime.snapshot().runs.length, 0);
   await runtime.close();
 });

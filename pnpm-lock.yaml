@@ -44,7 +44,7 @@ importers:
         version: 19.3.0(@types/react@19.3.0)
       '@vitejs/plugin-react':
         specifier: 6.1.1
-        version: 6.1.1(vite@8.3.0(@types/node@24.13.4)(esbuild@0.28.2))
+        version: 6.1.1(vite@8.3.0(@types/node@24.13.4)(esbuild@0.28.2)(yaml@2.9.0))
       electron:
         specifier: 44.3.0
         version: 44.3.0
@@ -53,7 +53,7 @@ importers:
         version: 0.28.2
       vite:
         specifier: 8.3.0
-        version: 8.3.0(@types/node@24.13.4)(esbuild@0.28.2)
+        version: 8.3.0(@types/node@24.13.4)(esbuild@0.28.2)(yaml@2.9.0)
 
   packages/harness-codex:
     dependencies:
@@ -64,7 +64,11 @@ importers:
         specifier: 1.8.0
         version: 1.8.0
 
-  packages/runtime: {}
+  packages/runtime:
+    dependencies:
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
 
 packages:
 
@@ -868,6 +872,11 @@ packages:
       yaml:
         optional: true
 
+  yaml@2.9.0:
+    resolution: {integrity: sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
 snapshots:
 
   '@electron-internal/extract-zip@1.0.5': {}
@@ -1145,10 +1154,10 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  '@vitejs/plugin-react@6.1.1(vite@8.3.0(@types/node@24.13.4)(esbuild@0.28.2))':
+  '@vitejs/plugin-react@6.1.1(vite@8.3.0(@types/node@24.13.4)(esbuild@0.28.2)(yaml@2.9.0))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
-      vite: 8.3.0(@types/node@24.13.4)(esbuild@0.28.2)
+      vite: 8.3.0(@types/node@24.13.4)(esbuild@0.28.2)(yaml@2.9.0)
 
   csstype@3.2.3: {}
 
@@ -1374,7 +1383,7 @@ snapshots:
   undici@7.29.1:
     optional: true
 
-  vite@8.3.0(@types/node@24.13.4)(esbuild@0.28.2):
+  vite@8.3.0(@types/node@24.13.4)(esbuild@0.28.2)(yaml@2.9.0):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -1385,3 +1394,6 @@ snapshots:
       '@types/node': 24.13.4
       esbuild: 0.28.2
       fsevents: 2.3.3
+      yaml: 2.9.0
+
+  yaml@2.9.0: {}

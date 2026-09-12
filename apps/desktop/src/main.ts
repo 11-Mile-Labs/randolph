@@ -4,7 +4,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Runtime } from '@randolph/runtime';
 import { CodexAdapter } from '@randolph/harness-codex';
-import { parseSend, parseId } from './validation.js';
+import { parseSend, parseId, parseProjectDefaults, parseConversationSelection } from './validation.js';
 
 const dataRoot = process.env.RANDOLPH_DATA_DIR ? resolve(process.env.RANDOLPH_DATA_DIR) : join(homedir(), '.randolph');
 app.setName('Randolph');
@@ -74,6 +74,8 @@ else {
         return runtime!.addProject(choice.filePaths[0]);
       });
       command('randolph:create-conversation', id => runtime!.createConversation(parseId(id)));
+      command('randolph:save-project-defaults', input => runtime!.saveProjectDefaults(parseProjectDefaults(input)));
+      command('randolph:conversation-selection', input => runtime!.setConversationSelection(parseConversationSelection(input)));
       command('randolph:send', input => runtime!.send(parseSend(input)));
       command('randolph:stop', id => runtime!.stop(parseId(id)));
       command('randolph:mark-read', id => runtime!.markRead(parseId(id)));

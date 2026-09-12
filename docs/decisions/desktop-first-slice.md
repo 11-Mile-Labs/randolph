@@ -2,6 +2,8 @@
 
 Status: implemented developer slice; full v1 acceptance remains open.
 
+The subsequent [project harness defaults slice](project-harness-defaults.md) adds editable project settings and persisted conversation overrides. Statements below describe the original desktop boundary except where that follow-up extends it.
+
 ## Product transition
 
 Reusable product code belongs in `apps/desktop`, `packages/runtime`, and `packages/harness-codex`. Existing experiment programs retain version-specific probes and reproductions; product packages do not import them. New product behavior and its tests are developed in the product packages.
@@ -17,7 +19,7 @@ The first slice is useful read-only conversation about a selected local project.
 - Existing native extensions and MCP servers are disabled for this initial adapter. Native harness global instructions/configuration are not presented as portable Randolph project configuration.
 - Each run gets an independent RPC client and clean ephemeral native thread. Recorded speaker-labeled history is supplied to subsequent turns; opening a conversation never starts a turn. AI SDK UI transport remains an accepted future integration direction; this slice uses the application bridge directly.
 - SQLite owns projects, conversations, run state, messages and ordered events. State changes and associated events are committed together. Per-run JSONL and human-readable activity logs are derived, rebuilt on reopen, and never competing state authorities.
-- The default global root is `~/.randolph`. Per-run data lives at `projects/<project-id>/runs/<YYYYMMDD>_<run-id>/`, including a manifest and `logs/`. Local project content may appear in these private logs. Nothing is stored in the repository except the worktree itself.
+- The default global root is `~/.randolph`. Per-run data lives at `projects/<project-id>/runs/<YYYYMMDD>_<run-id>/`, including a manifest and `logs/`. Local project content may appear in these private logs. Durable run data stays outside the repository; worktrees and explicit project configuration files live inside it.
 - Git project conversations get detached worktrees under `.worktrees/randolph-<conversation-id>`. They begin from committed HEAD; copying dirty edits, parent selection and disabling worktrees are later UI work. Worktrees are retained. Non-Git or unborn repositories are read in place.
 - Run model/effort is immutable after dispatch. Concurrent conversations have independent sessions; duplicate sends within a conversation are rejected, including while discovery is pending.
 
