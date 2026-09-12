@@ -4,9 +4,9 @@ import type { Journal } from './evidence.js';
 import { hash } from './codex.js';
 
 type Json = Record<string, any>;
-export type ScriptedCall = { id: string; command: string; cwd: string; escalated: boolean };
+export type ScriptedCall = { id: string; command: string; cwd: string; escalated: boolean; timeoutMs?: number };
 export function scriptedToolResponse(call: ScriptedCall): string {
-  const args = { command: call.command, workdir: call.cwd, timeout_ms: 5_000,
+  const args = { command: call.command, workdir: call.cwd, timeout_ms: call.timeoutMs ?? 5_000,
     ...(call.escalated ? { sandbox_permissions: 'require_escalated', justification: 'Authorized disposable fixture permission test' } : {}) };
   return sse(call.id, { type: 'function_call', call_id: call.id, name: 'shell_command', arguments: JSON.stringify(args) });
 }

@@ -1,6 +1,6 @@
 # Controlled-run experiment
 
-A bounded, headless Codex subscription experiment. This is research code, not the Randolph application or a production security boundary. The [observed result](../../docs/research/controlled-run-2026-09-12.md) is **unverified**. Native testing stopped before lifecycle, checkpoints and delivery.
+A bounded, headless Codex experiment. This is research code, not the Randolph application or a production security boundary. The [initial result](../../docs/research/controlled-run-2026-09-12.md) was unverified; subsequent probes established [Git enforcement](../../docs/research/scripted-git-2026-09-12.md) and [partial lifecycle evidence](../../docs/research/lifecycle-2026-09-12.md). Checkpoints and delivery remain unimplemented.
 
 ## Offline checks
 
@@ -73,3 +73,13 @@ pnpm test:scripted --run \
 Both directories must be new and satisfy the existing fixture constraints. The script uses a fresh Codex home outside the writable worktree. It runs four bounded cases: ordinary write, denied direct commit, declined commit approval, and the exact commit explicitly permitted once as the positive control. Only disposable fixture refs may change. It does not merge or push. Each scripted native turn remains bounded to 60 seconds; the provider never retries or falls back to a live service. Scripted turns are recorded separately from model inference reservations.
 
 Private evidence includes exact commands, cwd, call IDs, actual tool outputs and refs. Do not publish these files wholesale. Routine cleanup removes the fixture and isolated home and closes the native process group and loopback server. This is not a crash-recovery guarantee.
+
+## Lifecycle probe
+
+`pnpm test:lifecycle --run --data-dir "$HOME/.randolph/experiments/<unique-lifecycle-run>" --fixture-root "$HOME/.randolph/fixtures/<unique-lifecycle-run>"` opts into four bounded native cases: Stop, controller SIGKILL, harness SIGKILL and a rapidly detached child. Both directories must be absolute and new. The installed Codex 0.149.0 App Server uses only local scripted Responses fixtures with a new credential-free home; no inference calls or subscription credentials are needed.
+
+The candidate is a per-run supervisor connected to the controller by IPC. It closes dispatch on Stop or controller loss, requests native cancellation, allows two seconds for graceful shutdown, then terminates observed descendants using PID, UID and microsecond start identities. The target is five seconds from the observed fault to the termination result. macOS `libproc` supplies identities through a small C helper built with `clang` in active OS scratch space. Default offline tests compile and exercise this helper on macOS; other platforms skip its native test. No system service is installed.
+
+Polling cannot guarantee observation of a child that reparents between snapshots. The synthetic detached case deliberately tests this gap without cooperative registration. The independent observer verifies active native tools, watches heartbeat/canary writes, checks an unrelated sentinel, and records failures before watchdog rescue. The candidate never reads fixture PID receipts. Each journal has one writer; a separate process reopens retained state without dispatch. This does not implement checkpoint restoration or Restart.
+
+Helper binaries are volatile scratch; logs/results remain outside the repository. Fixture removal requires observed cleanup. A failed boundary ends the probe and remains failed after rescue. Supervisor loss, atomic PID-bound signaling, arbitrary process containment and Electron failure modes require separate designs or evidence.

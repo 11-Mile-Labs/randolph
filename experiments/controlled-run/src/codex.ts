@@ -72,6 +72,7 @@ export class CodexClient {
   sequence = 0;
   stderrLines = 0;
   lastActivity = Date.now();
+  dispatchClosed = false;
 
   constructor(readonly journal: Journal, readonly worktree: string, readonly executable = 'codex', readonly scripted?: ScriptedTestOptions) {}
 
@@ -141,7 +142,7 @@ export class CodexClient {
       }
       if ('id' in message) {
         this.approvals.push(message.method);
-        const commandDecision = message.method === 'item/commandExecution/requestApproval' ? this.scripted?.commandDecision?.(message.params ?? {}) ?? 'decline' : 'decline';
+        const commandDecision = !this.dispatchClosed && message.method === 'item/commandExecution/requestApproval' ? this.scripted?.commandDecision?.(message.params ?? {}) ?? 'decline' : 'decline';
         this.journal.append('native.approval-decision', 'Controlled test resolves native request', {
           method: message.method, requestDigest: hash(JSON.stringify(message.id)),
           itemDigest: hash(message.params?.itemId ?? ''),
@@ -170,12 +171,19 @@ export class CodexClient {
   }
 
   rpc(method: string, params: Json, timeoutMs = 20_000): Promise<Json> {
+    if (this.dispatchClosed && ['thread/start', 'turn/start'].includes(method)) return Promise.reject(new Error('Dispatch is closed'));
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`Native RPC timed out: ${method}`)); }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       try { this.send({ id, method, params }); } catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
     });
+  }
+
+  closeDispatch(): void {
+    if (this.dispatchClosed) return;
+    this.dispatchClosed = true;
+    this.journal.append('dispatch.closed', 'New work and permission grants disabled', {});
   }
 
   async startThread(model: string): Promise<Json> {
