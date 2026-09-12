@@ -1,0 +1,26 @@
+{
+  "name": "randolph",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.8.0",
+  "engines": {
+    "node": ">=24.16.0"
+  },
+  "scripts": {
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -r build",
+    "test": "pnpm build && pnpm -r test",
+    "desktop": "pnpm build && pnpm --filter @randolph/desktop start",
+    "test:desktop": "pnpm --filter @randolph/desktop test:e2e"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "oxlint": "1.82.0",
+    "@types/node": "24.13.4"
+  },
+  "volta": {
+    "node": "24.18.0"
+  }
+}

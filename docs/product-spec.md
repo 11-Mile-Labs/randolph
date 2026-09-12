@@ -198,7 +198,7 @@ Each workflow still needs its own inputs, completion criteria, default limits, a
 
 ## Deferred scope
 
-- Sandbox execution, preferably with a worktree inside the sandbox: v1.5/v2 consideration. Micro-VM technology is not selected.
+- Safety sandbox execution, preferably with a worktree inside the sandbox: v2 minimum. Micro-VM technology is not selected and is not an execution or lifecycle requirement.
 - Guided follow-up work suggestions and cross-conversation creation/context handoff: v1.5/v2.
 - Multi-repository projects, API connections/billing, additional desktop platforms, and additional issue trackers.
 - Team collaboration.

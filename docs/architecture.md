@@ -1,8 +1,8 @@
 # Randolph architecture
 
-Status: the desktop UI, local execution runtime, harness adapters, and durable storage are approved component boundaries. The selected main agent supplies task judgment; application code controls authorization and execution. Technologies, schemas, supervision mechanisms, and adapter details below are proposals.
+Status: the desktop UI, local execution runtime, harness adapters, and durable storage are approved component boundaries. The selected main agent supplies task judgment; application code controls authorization and execution. The initial Electron/React/TypeScript, SQLite, and native Codex product implementation is recorded in the [desktop slice decision](decisions/desktop-first-slice.md). Remaining schemas, supervision mechanisms, and adapter details below are proposals.
 
-The [product specification](product-spec.md) defines approved behavior; the [user journey](user-journey.md) illustrates it. The [2026-09-11 compatibility experiment](research/harness-compatibility.md) observed subscription paths but did not establish production approval, shutdown, or recovery guarantees. The [first experiment plan](plans/first-controlled-run.md) targets those gaps before full application implementation.
+The [product specification](product-spec.md) defines approved behavior; the [user journey](user-journey.md) illustrates it. The [2026-09-11 compatibility experiment](research/harness-compatibility.md) observed subscription paths but did not establish production approval, shutdown, or recovery guarantees. The [first experiment plan](plans/first-controlled-run.md) recorded bounded proofs. Product implementation now proceeds in normal app/runtime packages with unresolved controls kept explicit.
 
 ## Decision register
 
