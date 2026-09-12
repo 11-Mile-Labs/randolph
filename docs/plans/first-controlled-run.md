@@ -1,6 +1,6 @@
 # First controlled-run experiment plan
 
-Status: execution authorized by the operator. The first bounded experiment ended **unverified** after Task 2 protection checks; Tasks 3–5 execution were not reached. See the [results and limitations](../research/controlled-run-2026-09-12.md). Milestone M1 remains incomplete in the [roadmap](../roadmap.md). The checklist below retains the full acceptance requirements; an unchecked requirement is not claimed complete.
+Status: execution authorized by the operator. The first bounded experiment ended **unverified** after Task 2 protection checks; Tasks 3–5 execution were not reached. See the [results and limitations](../research/controlled-run-2026-09-12.md). The [permission follow-up](../research/permission-followup-2026-09-12.md) subsequently verified the root interpretation and a real declined approval, while standalone Git remains unverified. Milestone M1 remains incomplete in the [roadmap](../roadmap.md). The checklist below retains the full acceptance requirements; an unchecked requirement is not claimed complete.
 
 **Goal:** determine whether one subscription-backed native agent can make a useful change with visible activity while Randolph enforces delivery approval, stops owned execution, and restores a durable checkpoint only on explicit request.
 

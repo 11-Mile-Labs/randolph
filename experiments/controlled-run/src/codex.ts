@@ -57,6 +57,7 @@ export class CodexClient {
   process?: ChildProcessWithoutNullStreams;
   readonly notifications: Json[] = [];
   readonly approvals: string[] = [];
+  readonly instructionInventory: { path: string; digest: string }[] = [];
   readonly pending = new Map<number, Pending>();
   sequence = 0;
   stderrLines = 0;
@@ -66,6 +67,12 @@ export class CodexClient {
 
   async start(): Promise<void> {
     const nativeHome = join(process.env.HOME ?? homedir(), '.codex');
+    for (const name of ['AGENTS.override.md', 'AGENTS.md']) {
+      const path = join(nativeHome, name);
+      if (!existsSync(path)) continue;
+      const content = readFileSync(path, 'utf8');
+      if (content.trim()) { this.instructionInventory.push({ path, digest: hash(content) }); break; }
+    }
     const configPath = join(nativeHome, 'config.toml');
     let config: Record<string, unknown> = {};
     try { config = existsSync(configPath) ? parse(readFileSync(configPath, 'utf8')) : {}; }
@@ -75,6 +82,8 @@ export class CodexClient {
     const ruleFiles = existsSync(rulesPath) ? readdirSync(rulesPath).filter(name => name.endsWith('.rules')).sort() : [];
     const ruleDigest = hash(ruleFiles.map(name => readFileSync(join(rulesPath, name), 'utf8')).join('\n'));
     this.journal.append('native.configuration', 'Native extras disabled; existing rules inventoried', {
+      instructionContentDigests: this.instructionInventory.map(source => source.digest),
+      globalInstructionsPresent: this.instructionInventory.length > 0,
       mcpServersDisabled: servers.length, ruleFileCount: ruleFiles.length, ruleDigest,
       shellEnvironment: 'explicit fixture HOME and runtime PATH',
     });
@@ -115,6 +124,12 @@ export class CodexClient {
       }
       if ('id' in message) {
         this.approvals.push(message.method);
+        this.journal.append('native.approval-decision', 'Controlled test declines native request', {
+          method: message.method, requestDigest: hash(JSON.stringify(message.id)),
+          itemDigest: hash(message.params?.itemId ?? ''),
+          commandDigest: message.params?.command ? hash(message.params.command) : null,
+          decision: message.method === 'item/permissions/requestApproval' ? 'empty-grant' : 'decline',
+        });
         if (message.method === 'item/permissions/requestApproval') {
           this.send({ id: message.id, result: { permissions: {}, scope: 'turn' } });
         } else if (['item/commandExecution/requestApproval', 'item/fileChange/requestApproval'].includes(message.method)) {
@@ -153,7 +168,11 @@ export class CodexClient {
   }
 
   async turn(threadId: string, model: string, effort: string, prompt: string): Promise<Json[]> {
+    for (const source of this.instructionInventory) {
+      if (hash(readFileSync(source.path, 'utf8')) !== source.digest) throw new Error('Global instruction source changed during the experiment');
+    }
     this.journal.reserveTurn();
+    this.journal.append('turn.input', 'Controlled fixture task', { model, effort, prompt });
     const offset = this.notifications.length;
     const started = Date.now();
     const turn = await this.rpc('turn/start', { threadId, model, effort,

@@ -26,6 +26,7 @@ export class Journal {
         if (event.type === 'budget.reserved' && (!Number.isFinite(event.details.milliseconds) || Number(event.details.milliseconds) <= 0)) {
           throw new Error();
         }
+        if (event.type === 'turn.limit' && (!Number.isInteger(event.details.limit) || Number(event.details.limit) < 1 || Number(event.details.limit) > 8)) throw new Error();
         this.records.push(event);
       } catch { throw new Error('Corrupt journal: no automatic repair'); }
     }
@@ -47,8 +48,14 @@ export class Journal {
     return event;
   }
 
+  limitTurns(limit: number): void {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 8) throw new Error('Invalid turn limit');
+    this.append('turn.limit', 'Explicit experiment turn ceiling', { limit });
+  }
+
   reserveTurn(): void {
-    if (this.records.filter(event => event.type === 'turn.reserved').length >= 8) throw new Error('Turn budget exhausted');
+    const limit = Math.min(8, ...this.records.filter(event => event.type === 'turn.limit').map(event => Number(event.details.limit)));
+    if (this.records.filter(event => event.type === 'turn.reserved').length >= limit) throw new Error('Turn budget exhausted');
     this.reserveTime(60_000);
     this.append('turn.reserved', 'One native turn reserved; limit 60 seconds', {});
   }

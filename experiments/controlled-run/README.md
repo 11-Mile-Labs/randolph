@@ -36,7 +36,7 @@ pnpm test:native --run --model gpt-5.6-luna --effort low \
   --fixture-root "$HOME/.randolph/fixtures/your-unique-run-id"
 ```
 
-These examples are manual opt-ins, not instructions to rerun the completed experiment. The hardened effective-policy guard rejects the empty writable-root representation observed in Codex 0.149.0; expect an unverified readiness result until that interpretation is separately proven. No automatic model substitution or inference retry exists.
+These examples are manual opt-ins, not instructions to rerun the completed experiment. The effective-policy guard accepts the version-pinned Codex 0.149.0 empty additional-root representation only when the canonical cwd and runtime roots match the fixture. Known global instructions remain active and are inventoried; unexpected or changed sources are rejected. No automatic model substitution or inference retry exists.
 
 One `--corrected` invocation is permitted only for an inconclusive native protection attempt, reusing its sealed evidence directory and remaining budget with a newly created fixture at the original path. A readiness-only result is not eligible. An unsealed, altered or legacy evidence directory is refused. Eight model turns and 900,000 ms of conservative reservations are the cumulative ceilings; each turn is bounded to 60 seconds. Exhaustion requires a separate decision, not a fresh directory to evade the limit.
 
@@ -47,3 +47,15 @@ One `--corrected` invocation is permitted only for an inconclusive native protec
 Routine completion terminates the App Server process group and removes only the process-owned fixture. No checkpoint or resume is implemented. Process-group cleanup does not prove owner-loss or detached-descendant containment. If the controller is killed, inspect owned process/fixture state manually; do not infer that reopening terminates or resumes anything.
 
 The journal supports single-controller use. Directory ownership checks catch accidental reuse, path substitution and changed evidence; they are not protection against a malicious process with the same OS identity racing filesystem operations. Never run concurrent controllers against one evidence directory.
+
+## Focused permission follow-up
+
+The operator-authorized [follow-up](../../docs/research/permission-followup-2026-09-12.md) used its complete three-turn budget and ended unverified. It has a separate explicit entrypoint:
+
+```sh
+pnpm test:followup --run --model gpt-5.6-luna --effort low \
+  --data-dir "$HOME/.randolph/experiments/your-new-followup-id" \
+  --fixture-root "$HOME/.randolph/fixtures/your-new-followup-id"
+```
+
+Use `--readiness` instead of `--run` for a no-inference preflight. Both require an explicit model/effort and new directories. This runner never reopens an evidence directory or retries a native turn. New directories do not authorize exceeding an agreed experiment budget. The third turn checks work after a denied request; it is not a retry of the unexecuted Git case. Controlled prompts, including private fixture paths, are stored in the private journal for traceability. Review and sanitize retained material before sharing it.

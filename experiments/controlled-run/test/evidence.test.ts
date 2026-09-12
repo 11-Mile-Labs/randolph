@@ -26,3 +26,15 @@ test('partial trailing record requires explicit recovery; interior corruption is
     assert.throws(() => new Journal(dir, true), /Corrupt journal/);
   } finally { rmSync(dir, { recursive: true }); }
 });
+
+test('a bounded follow-up ceiling survives reopen and cannot be raised', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'randolph-budget-'));
+  try {
+    const journal = new Journal(dir);
+    journal.limitTurns(3);
+    for (let index = 0; index < 3; index++) journal.reserveTurn();
+    const reopened = new Journal(dir);
+    reopened.limitTurns(8);
+    assert.throws(() => reopened.reserveTurn(), /Turn budget exhausted/);
+  } finally { rmSync(dir, { recursive: true }); }
+});

@@ -98,7 +98,7 @@ export async function runProbe(options: { dataDir: string; fixtureRoot: string; 
     }
     record('selection', 'passed', { model, effort });
     const thread = await client.startThread(model);
-    const effective = validateEffectivePolicy(thread, fixture.worktree);
+    const effective = validateEffectivePolicy(thread, fixture.worktree, version, client.instructionInventory);
     record('effective-policy', effective.matches ? 'passed' : 'unverified', effective.evidence);
     if (!effective.matches) {
       record('attempt', 'unverified', { reason: 'Effective native configuration boundary is incomplete or unexpected' });
