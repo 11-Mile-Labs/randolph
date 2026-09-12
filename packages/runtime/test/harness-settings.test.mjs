@@ -119,3 +119,13 @@ test('redirecting a saved project root through a symlink cannot read or write an
   assert.throws(() => writeHarnessSettings(redirected, defaults, null));
   assert.equal(await readFile(join(target, 'config.harness.yaml'), 'utf8'), content);
 });
+
+
+test('project CLI selection survives persistence and rejects non-absolute executable paths', async t => {
+  const { root } = await fixture(t);
+  const configured = { ...defaults, executable: '/opt/example/bin/codex' };
+  const saved = writeHarnessSettings(root, configured, null);
+  assert.deepEqual(readHarnessSettings(root).defaults, configured);
+  assert.throws(() => writeHarnessSettings(root, { ...defaults, executable: 'relative/codex' }, saved.revision), /executable|absolute/i);
+  assert.deepEqual(readHarnessSettings(root).defaults, configured);
+});

@@ -134,6 +134,8 @@ function codeFixture(t, policyOverrides = {}) {
 test('code capability is advertised only for authenticated verified native version', async () => {
   for (const [version, accountType, expected] of [
     ['codex-cli 0.149.0', 'chatgpt', ['read-only', 'code']],
+    ['codex-cli 0.154.0', 'chatgpt', ['read-only', 'code']],
+    ['codex-cli 0.154.0-alpha.6.2', 'chatgpt', ['read-only']],
     ['codex-cli 0.150.0', 'chatgpt', ['read-only']],
     ['codex-cli 0.149.0-dev', 'chatgpt', ['read-only']],
     ['codex-cli 0.149.0', 'apiKey', []],
@@ -296,4 +298,37 @@ test('GUI-hosted native execution has explicit installed toolchains while HOME s
   assert.equal(setting('shell_environment_policy.set.VOLTA_HOME'), join(homedir(), '.volta'));
   assert.equal(setting('shell_environment_policy.set.HOME'), '/fixture');
   assert.ok(child.launch.args.includes('shell_environment_policy.inherit="none"'));
+});
+
+
+test('explicit CLI discovery and execution use the selected copy instead of the default', async () => {
+  const launched = [];
+  const adapter = new CodexAdapter({ executable: 'default-codex', execFile: file => file === '/selected/codex' ? 'codex-cli selected' : 'codex-cli default', spawn: file => { launched.push(file); return fakeChild({ modelId: file === '/selected/codex' ? 'selected-model' : 'default-model' }); } });
+  const info = await adapter.discover('/selected/codex');
+  assert.equal(info.executable, '/selected/codex');
+  assert.equal(info.version, 'codex-cli selected');
+  assert.equal(info.models[0].id, 'selected-model');
+  const events = [];
+  await adapter.run({ ...runInput(new AbortController().signal, events), executable: info.executable, executableVersion: info.version });
+  assert.deepEqual(launched, ['/selected/codex', '/selected/codex']);
+  assert.equal(events.find(event => event.type === 'message.delta').data.text, 'selected-model');
+});
+
+test('an executable changed after admission cannot dispatch a run', async () => {
+  let launched = false;
+  const adapter = new CodexAdapter({ executable: '/selected/codex', execFile: () => 'codex-cli changed', spawn: () => { launched = true; return fakeChild(); } });
+  await assert.rejects(adapter.run({ ...runInput(new AbortController().signal), executable: '/selected/codex', executableVersion: 'codex-cli admitted' }), /changed|version/i);
+  assert.equal(launched, false);
+});
+
+
+test('verified 0.154 supports Code and checks with normalized effective writable roots', async t => {
+  const { workspace, policy, threadResponse } = codeFixture(t);
+  const response = { ...threadResponse, sandbox: { ...policy, writableRoots: [] } };
+  const adapter = adapterFor([fakeChild({ threadResponse: response }), fakeChild({ threadResponse: response })], { execFile: () => 'codex-cli 0.154.0' });
+  const result = await adapter.run({ ...runInput(new AbortController().signal), workspace, executionMode: 'code' });
+  assert.equal(result.status, 'completed');
+  const check = await adapter.runCommand({ workspace, command: ['/bin/echo', 'ok'], signal: new AbortController().signal, onOutput() {} });
+  assert.equal(check.exitCode, 0);
+  assert.equal(check.cleanupVerified, true);
 });

@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path';
 import type { RestartCheckpointInput, SaveAppSettingsInput, SaveGlobalMemoryInput, CheckpointInput, ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid settings request.');
@@ -21,7 +22,7 @@ export function parseReviewApproval(value: unknown): ApproveReviewInput {
 export function parseProjectDefaults(value: unknown): SaveProjectDefaultsInput {
   const input = record(value);
   if (input.expectedRevision !== null && (typeof input.expectedRevision !== 'string' || !/^[0-9a-f]{64}$/.test(input.expectedRevision))) throw new Error('Invalid settings revision.');
-  return { projectId: parseId(input.projectId), defaults: parseSelection(input.defaults), expectedRevision: input.expectedRevision };
+  return { projectId: parseId(input.projectId), defaults: { ...parseSelection(input.defaults), ...(record(input.defaults).executable === undefined ? {} : { executable: parseExecutable(record(input.defaults).executable) }) }, expectedRevision: input.expectedRevision };
 }
 export function parseConversationSelection(value: unknown): ConversationSelectionInput {
   const input = record(value);
@@ -72,4 +73,16 @@ export function parseLinkedCheckpoint(value: unknown): RestartCheckpointInput {
   const input = record(value);
   const checkpoint = parseCheckpoint({ runId: input.runId, digest: input.checkpointDigest });
   return { runId: checkpoint.runId, checkpointDigest: checkpoint.digest };
+}
+
+
+function parseExecutable(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== 'string' || !isAbsolute(value) || value.length > 4096 || value.trim() !== value || Array.from(value).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) throw new Error('CLI executable must be a bounded absolute path.');
+  return value;
+}
+export function parseHarnessRequest(value: unknown): { projectId?: string; executable?: string } {
+  if (value === undefined) return {};
+  const input = record(value);
+  return { ...(input.projectId === undefined ? {} : { projectId: parseId(input.projectId) }), ...(input.executable === undefined ? {} : { executable: parseExecutable(input.executable) ?? undefined }) };
 }

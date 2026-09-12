@@ -6,21 +6,21 @@ import { homedir } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parse } from 'smol-toml';
-import type { AdapterRun, HarnessAdapter, HarnessInfo, HarnessModel } from '@randolph/runtime/contracts';
+import type { AdapterCommand, AdapterRun, HarnessAdapter, HarnessInfo, HarnessInstallation, HarnessModel } from '@randolph/runtime/contracts';
 
 type Json = Record<string, unknown>;
 type Exec = (file: string, args: string[], options: { encoding: 'utf8'; timeout: number; env: NodeJS.ProcessEnv }) => string;
 type Spawn = (file: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv; stdio: ['pipe', 'pipe', 'pipe']; detached: boolean }) => ChildProcessWithoutNullStreams;
 type Pending = { resolve: (value: Json) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
 const MAX_LINE = 1_048_576;
-const VERIFIED_CODE_VERSION = /^codex-cli 0\.149\.0$/;
+const VERIFIED_CODE_VERSION = /^codex-cli 0\.(149|154)\.0$/;
 const bounded = (value: unknown, limit = 16_384): string => typeof value === 'string' ? value.slice(0, limit) : '';
 function workspacePolicy(workspace: string): Json {
   return { type: 'workspaceWrite', writableRoots: [workspace], networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true };
 }
 function verifyCodePolicy(thread: Json, workspace: string): void {
   const policy = object(thread.sandbox);
-  // Codex 0.149.0 omits cwd from the additional writable roots in its response.
+  // Verified Codex versions omit cwd from the additional writable roots in its response.
   const roots = policy.writableRoots;
   if (thread.cwd !== workspace || thread.approvalPolicy !== 'never' || policy.type !== 'workspaceWrite'
     || policy.networkAccess !== false || policy.excludeTmpdirEnvVar !== true || policy.excludeSlashTmp !== true
@@ -44,7 +44,7 @@ function environment(): NodeJS.ProcessEnv {
   return Object.fromEntries(['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR'].flatMap(key => process.env[key] ? [[key, process.env[key] as string]] : []));
 }
 function executableCandidates(): string[] {
-  return [...(process.env.PATH ?? '').split(delimiter).filter(Boolean).map(path => join(path, 'codex')), join(homedir(), '.codex/packages/standalone/current/bin/codex'), '/opt/homebrew/bin/codex', join(homedir(), '.volta/bin/codex')].filter(path => {
+  return [...(process.env.PATH ?? '').split(delimiter).filter(Boolean).map(path => join(path, 'codex')), join(homedir(), '.codex/packages/standalone/current/bin/codex'), '/opt/homebrew/bin/codex', join(homedir(), '.volta/bin/codex'), '/Applications/ChatGPT.app/Contents/Resources/codex'].filter(path => {
     try { accessSync(path, constants.X_OK); return true; } catch { return false; }
   });
 }
@@ -173,7 +173,19 @@ export class CodexAdapter implements HarnessAdapter {
     await client.rpc('initialize', { clientInfo: { name: 'randolph', version: '0.1.0' }, capabilities: { experimentalApi: true } });
     client.send({ method: 'initialized', params: {} });
   }
-  async discover(): Promise<HarnessInfo> {
+  async installations(): Promise<HarnessInstallation[]> {
+    const paths = [...new Set([...(this.options.executable ? [this.options.executable] : []), ...executableCandidates()].map(path => { try { return realpathSync(path); } catch { return path; } }))];
+    return paths.map(executable => {
+      try { return { executable, version: this.exec(executable, ['--version'], { encoding: 'utf8', timeout: 5_000, env: environment() }).trim() }; }
+      catch { return { executable, reason: 'This CLI could not be started.' }; }
+    });
+  }
+  async discover(executable?: string): Promise<HarnessInfo> {
+    if (executable) return new CodexAdapter({ ...this.options, executable }).discover();
+    let selected: string;
+    try { selected = this.executablePath(); } catch { return { available: false, authenticated: false, models: [], reason: 'Codex CLI was not found. Install it and sign in with ChatGPT.' }; }
+    const resolved = existsSync(selected) ? realpathSync(selected) : selected;
+    if (resolved !== selected) return new CodexAdapter({ ...this.options, executable: resolved }).discover();
     let version: string;
     try { version = this.exec(this.executablePath(), ['--version'], { encoding: 'utf8', timeout: 5_000, env: environment() }).trim(); }
     catch { return { available: false, authenticated: false, models: [], reason: 'Codex CLI could not be started. Install it and sign in with ChatGPT.' }; }
@@ -183,7 +195,7 @@ export class CodexAdapter implements HarnessAdapter {
       child = this.launch(homedir()); client = new RpcClient(child, this.timeout, () => {});
       await this.initialize(client);
       const account = object((await client.rpc('account/read', { refreshToken: false })).account);
-      if (account.type !== 'chatgpt') return { available: true, authenticated: false, version, models: [], reason: 'Sign into the Codex CLI with ChatGPT. API-key authentication is not supported.' };
+      if (account.type !== 'chatgpt') return { executable: selected, available: true, authenticated: false, version, models: [], reason: 'Sign into the Codex CLI with ChatGPT. API-key authentication is not supported.' };
       const models: HarnessModel[] = [];
       let cursor: string | undefined;
       const seen = new Set<string>();
@@ -194,15 +206,16 @@ export class CodexAdapter implements HarnessAdapter {
         if (cursor && seen.has(cursor)) throw new Error('Codex model pagination repeated a cursor.');
         if (cursor) seen.add(cursor);
       } while (cursor);
-      return { available: true, authenticated: true, version, models, executionModes: VERIFIED_CODE_VERSION.test(version) ? ['read-only', 'code'] : ['read-only'] };
+      return { executable: selected, available: true, authenticated: true, version, models, executionModes: VERIFIED_CODE_VERSION.test(version) ? ['read-only', 'code'] : ['read-only'] };
     } catch (error) {
-      return { available: true, authenticated: false, version, models: [], reason: error instanceof Error ? error.message : 'Codex discovery failed.' };
+      return { executable: selected, available: true, authenticated: false, version, models: [], reason: error instanceof Error ? error.message : 'Codex discovery failed.' };
     } finally {
       client?.fail(new Error('Discovery ended.'));
       if (child) await terminate(child);
     }
   }
-  async runCommand(input: { workspace: string; command: string[]; signal: AbortSignal; onOutput: (text: string) => void }): Promise<{ exitCode: number | null; output: string; truncated: boolean; cleanupVerified: boolean; error?: string }> {
+  async runCommand(input: AdapterCommand): Promise<{ exitCode: number | null; output: string; truncated: boolean; cleanupVerified: boolean; error?: string }> {
+    if (input.executable) return new CodexAdapter({ ...this.options, executable: input.executable }).runCommand({ ...input, executable: undefined });
     let child: ChildProcessWithoutNullStreams | undefined;
     let client: RpcClient | undefined;
     let output = ''; let truncated = false; let exitCode: number | null = null;
@@ -235,7 +248,8 @@ export class CodexAdapter implements HarnessAdapter {
       if (!Array.isArray(input.command) || !input.command.length || input.command.length > 100 || !input.command[0]
         || input.command.some(value => typeof value !== 'string' || value.includes(String.fromCharCode(0))) || input.command.join('').length > 65_536) throw new Error('Verification requires a bounded command argument vector.');
       const version = this.exec(this.executablePath(), ['--version'], { encoding: 'utf8', timeout: 5_000, env: environment() }).trim();
-      if (!VERIFIED_CODE_VERSION.test(version)) throw new Error('Native verification requires the verified Codex CLI 0.149.0 version.');
+      if (input.executableVersion && version !== input.executableVersion) throw new Error('The selected CLI version changed after this run. Start fresh work before verification.');
+      if (!VERIFIED_CODE_VERSION.test(version)) throw new Error('Native verification requires the verified Codex CLI 0.149.0 or 0.154.0 version.');
       if (realpathSync(input.workspace) !== input.workspace || !statSync(input.workspace).isDirectory()) throw new Error('Verification requires a canonical conversation workspace.');
       child = this.launch(input.workspace, true);
       client = new RpcClient(child, this.timeout, message => {
@@ -275,11 +289,16 @@ export class CodexAdapter implements HarnessAdapter {
   }
   async run(input: AdapterRun): Promise<{ status: 'completed' | 'interrupted' | 'stop-unconfirmed' }> {
     if (input.signal.aborted) return { status: 'interrupted' };
+    if (input.executable) return new CodexAdapter({ ...this.options, executable: input.executable }).run({ ...input, executable: undefined });
+    if (input.executableVersion) {
+      const version = this.exec(this.executablePath(), ['--version'], { encoding: 'utf8', timeout: 5_000, env: environment() }).trim();
+      if (version !== input.executableVersion) throw new Error('The selected CLI version changed before dispatch. Refresh harness discovery and try again.');
+    }
     const code = input.executionMode === 'code';
     if (input.executionMode !== undefined && input.executionMode !== 'read-only' && !code) throw new Error('Unsupported execution mode.');
     if (code) {
       const version = this.exec(this.executablePath(), ['--version'], { encoding: 'utf8', timeout: 5_000, env: environment() }).trim();
-      if (!VERIFIED_CODE_VERSION.test(version)) throw new Error('Code execution requires the verified Codex CLI 0.149.0 version.');
+      if (!VERIFIED_CODE_VERSION.test(version)) throw new Error('Code execution requires the verified Codex CLI 0.149.0 or 0.154.0 version.');
       if (realpathSync(input.workspace) !== input.workspace || !statSync(input.workspace).isDirectory()) throw new Error('Code execution requires a canonical conversation workspace.');
     }
     const child = this.launch(input.workspace, code);

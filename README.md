@@ -26,7 +26,7 @@ The opening **Workspace** screen lists projects and their controls. **Settings**
 
 Choose **Add project**, select a local folder, choose a Codex model and effort, and send a message. The right panel shows native activity and the location of retained run logs. Multiple conversations can run independently. Reopening a conversation displays its history; it never sends a new turn automatically.
 
-Open **Project settings** to save model/effort defaults in the project's `config.harness.yaml`. Changing a composer picker saves a conversation override immediately; **Use project default** restores inheritance. Active runs retain their starting settings. Invalid or unavailable saved choices are shown explicitly and block new sends until corrected. See [project harness defaults](docs/decisions/project-harness-defaults.md) for external editing and compatibility behavior.
+Open **Project settings** to choose an installed Codex CLI and save model/effort defaults in the project's `config.harness.yaml`. Changing a composer picker saves a conversation override immediately; **Use project default** restores inheritance. Active runs retain their starting settings. Invalid or unavailable saved choices are shown explicitly and block new sends until corrected. See [project harness defaults](docs/decisions/project-harness-defaults.md) for external editing and compatibility behavior.
 
 Choose **Code** to edit an isolated worktree with a verified native CLI. Open **Review changes**, run the detected project checks, inspect the diff, and approve the exact result for local delivery. Changing the worktree or parent invalidates approval. See [controlled coding and delivery](docs/decisions/controlled-coding.md) for supported boundaries and recovery.
 
@@ -49,7 +49,7 @@ The default tests use temporary fixtures and no model inference. The desktop tes
 - Workspace and persistent application navigation, native macOS menus, app artwork, and a local macOS bundle.
 - Application preferences, optional background execution with menu-bar controls, and opt-in notifications.
 - Projects, conversations, native model/effort discovery, streamed chat and conversation-scoped drafts.
-- Editable project model/effort defaults, persisted conversation overrides, and run configuration provenance.
+- Discovered CLI paths/versions, project-specific executable and model/effort defaults, conversation overrides, and retained run configuration.
 - Visible activity, unread indicators, Stop requests, exact log locations, and history reopening.
 - SQLite-backed run/message/event state, frozen run model/effort, derived JSONL/readable logs, and per-conversation worktrees.
 - Code mode, retained file/command evidence, complete review trees, visible checks, and explicit local delivery with interruption recovery.

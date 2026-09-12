@@ -4,7 +4,7 @@ Status: implemented developer capability under the [working application plan](..
 
 ## Execution
 
-Conversations explicitly select Read-only or Code; each run retains its starting mode. Code requires an app-managed Git worktree and an authenticated, compatible installed Codex CLI. Compatibility currently identifies CLI 0.149.0. There is no API fallback. Unknown versions fail capability checks before a coding turn.
+Conversations explicitly select Read-only or Code; each run retains its starting mode. Code requires an app-managed Git worktree and an authenticated, compatible installed Codex CLI. Compatibility currently identifies exactly CLI 0.149.0 and 0.154.0; prereleases and other versions remain unverified. See [0.154 compatibility evidence](../research/codex-0154-compatibility.md), including its failed-command event gap. There is no API fallback. Unknown versions fail capability checks before a coding turn.
 
 Native thread and turn requests use workspace-write permissions restricted to the canonical conversation worktree, without network access, extra writable temporary roots, or approval-based elevation. The adapter verifies the effective native thread policy before dispatch. Ordinary file changes and command evidence are retained separately from assistant messages. Project checks use the same native command boundary without starting an inference turn or falling back to a host shell.
 

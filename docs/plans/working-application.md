@@ -44,6 +44,8 @@ Status: active implementation toward the complete [approved v1 scope](../product
 
 ## 3. Harnesses and project context
 
+- [x] Discover installed Codex copies, expose path/version, persist per-project CLI selection, and retain run/check/recovery executable identity.
+
 - [ ] Add native Claude and Grok subscription adapters with capability/authentication evidence.
 - [ ] Implement discovery/setup, project harness enablement, shared context/instructions/skills/hooks, file/skill selectors and previews.
 - [ ] Add context preparation, pinned material, provenance, budget indicators, and safe transcript management.

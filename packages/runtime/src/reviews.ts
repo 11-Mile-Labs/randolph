@@ -108,10 +108,12 @@ export class Reviews {
     try {
       review.status = 'checking'; review.error = undefined;
       this.save(review, 'verification.started', 'Running project checks through the native permission boundary.');
+      const run = this.store.runs().find(candidate => candidate.id === review.runId);
+      if (!run) throw new Error('The reviewed run no longer exists.');
       const commands = await detectVerificationCommands(review.basis.workspace);
       review.verification = await runVerification(review.basis.workspace, commands, {
         signal: controller.signal,
-        executor: async (workspace, command, options) => this.adapter.runCommand!({ workspace, command: [command.command, ...command.args], signal: options.signal, onOutput: options.onOutput }),
+        executor: async (workspace, command, options) => this.adapter.runCommand!({ executable: run.executable, executableVersion: run.executableVersion, workspace, command: [command.command, ...command.args], signal: options.signal, onOutput: options.onOutput }),
         onEvent: event => {
           if (event.type === 'check-started') review.progress = { checkId: event.checkId, startedAt: now(), output: '' };
           if (event.type === 'check-output') {

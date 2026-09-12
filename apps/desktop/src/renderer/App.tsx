@@ -479,7 +479,8 @@ function MessageBubble({ message }: { message: Message }) {
 
 export default function App() {
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>(EMPTY_SNAPSHOT);
-  const [harness, setHarness] = useState<HarnessInfo>();
+  const [defaultHarness, setDefaultHarness] = useState<HarnessInfo>();
+  const [projectHarness, setProjectHarness] = useState<HarnessInfo>();
   const [appSettings, setAppSettings] = useState<AppSettingsSnapshot>();
   const [selectedConversationId, setSelectedConversationId] = useState<string>();
   const [screen, setScreen] = useState<'workspace' | 'chat' | 'settings'>('workspace');
@@ -529,7 +530,7 @@ export default function App() {
     const loadHarness = async (): Promise<void> => {
       try {
         const info = await window.randolph.harness();
-        if (!disposed) setHarness(info);
+        if (!disposed) setDefaultHarness(info);
       } catch (harnessError) {
         if (!disposed) setError(`Could not inspect the native harness: ${displayError(harnessError)}`);
       }
@@ -561,6 +562,17 @@ export default function App() {
   const selectedProject = selectedConversation
     ? snapshot.projects.find((item) => item.id === selectedConversation.projectId)
     : undefined;
+
+  const harness = selectedProject ? projectHarness : defaultHarness;
+  useEffect(() => {
+    let disposed = false;
+    setProjectHarness(undefined);
+    if (selectedProject) void (async () => {
+      try { const info = await window.randolph.harness(selectedProject.id); if (!disposed) setProjectHarness(info); }
+      catch (cause) { if (!disposed) setError(`Could not inspect this project's CLI: ${displayError(cause)}`); }
+    })();
+    return () => { disposed = true; };
+  }, [selectedProject?.id, selectedProject?.harnessSettings?.revision]);
 
   const conversationEvents = useMemo(
     () =>
@@ -773,7 +785,7 @@ export default function App() {
       />
 
       <main className="workspace">
-        {screen === 'settings' ? <AppSettings settings={appSettings} harness={harness} snapshot={snapshot} onReload={reloadAppSettings} onSaved={next => { setAppSettings(next); applyTheme(next.value.theme); }} /> : screen === 'workspace' ? <WorkspaceHome
+        {screen === 'settings' ? <AppSettings settings={appSettings} harness={defaultHarness} snapshot={snapshot} onReload={reloadAppSettings} onSaved={next => { setAppSettings(next); applyTheme(next.value.theme); }} /> : screen === 'workspace' ? <WorkspaceHome
           projects={snapshot.projects}
           conversations={snapshot.conversations}
           runs={snapshot.runs}
@@ -907,7 +919,7 @@ export default function App() {
         onStop={(runId) => void stopRun(runId)}
       /> : null}
 
-      {settingsProject ? <ProjectSettings key={settingsProject.id} project={settingsProject} harness={harness} onClose={() => setSettingsProjectId(undefined)} onChanged={reloadSnapshot} /> : null}
+      {settingsProject ? <ProjectSettings key={settingsProject.id} project={settingsProject} onClose={() => setSettingsProjectId(undefined)} onChanged={reloadSnapshot} /> : null}
       {historyProjectId ? <HistoryPanel key={historyProjectId} runs={historyRuns} messages={historyMessages} events={snapshot.events} reviews={snapshot.reviews} onRecovered={async id => { await reloadSnapshot(); setHistoryProjectId(undefined); selectConversation(id); }} onClose={() => setHistoryProjectId(undefined)} /> : null}
       {memoryProjectId ? <MemoryPanel projectId={memoryProjectId} onClose={() => setMemoryProjectId(undefined)} /> : null}
       {selectedReview ? <ReviewPanel key={selectedReview.id} review={selectedReview} onClose={() => setSelectedReviewId(undefined)} onChanged={reloadSnapshot} onRefresh={() => openReview(true)} /> : null}

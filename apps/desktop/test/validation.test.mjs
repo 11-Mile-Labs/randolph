@@ -33,3 +33,11 @@ test('coding IPC accepts only explicit execution modes and review-scoped approva
   for (const input of [{ conversationId: id, executionMode: 'yolo' }, { conversationId: '/tmp/repo', executionMode: 'code' }]) assert.throws(() => validation.parseMode(input));
   for (const input of [{ reviewId: id, message: '' }, { reviewId: id, message: 'x'.repeat(16001) }, { reviewId: id, message: 'nul\0byte' }, { reviewId: '../review', message: 'message' }]) assert.throws(() => validation.parseReviewApproval(input));
 });
+
+
+test('project CLI IPC preserves explicit choices and rejects relative paths', () => {
+  const input = { projectId: '10000000-0000-0000-0000-000000000001', defaults: { harness: 'codex', model: 'm', effort: 'low', executable: '/opt/example/codex' }, expectedRevision: null };
+  assert.deepEqual(validation.parseProjectDefaults(input), input);
+  assert.throws(() => validation.parseProjectDefaults({ ...input, defaults: { ...input.defaults, executable: 'relative/codex' } }));
+  assert.deepEqual(validation.parseProjectDefaults({ ...input, defaults: { ...input.defaults, executable: null } }).defaults.executable, null);
+});

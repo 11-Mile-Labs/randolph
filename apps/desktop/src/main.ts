@@ -1,6 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { parseLinkedCheckpoint, parseAppSettings, parseGlobalMemory, parseCheckpoint, parsePushApproval } from './validation.js';
+import { parseHarnessRequest, parseLinkedCheckpoint, parseAppSettings, parseGlobalMemory, parseCheckpoint, parsePushApproval } from './validation.js';
 import { parseMemoryCommand, parseLessonRef } from './memory-validation.js';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, net, protocol, session, Tray, type IpcMainInvokeEvent } from 'electron';
 import { homedir } from 'node:os';
@@ -156,7 +156,8 @@ else {
         if (!input || typeof input !== 'object' || !('projectId' in input) || !('reference' in input)) throw new Error('Invalid memory history request.');
         return runtime!.memoryHistory(parseId(input.projectId), parseLessonRef(input.reference));
       });
-      command('randolph:harness', () => runtime!.harness());
+      command('randolph:harness-installations', () => runtime!.harnessInstallations());
+      command('randolph:harness', input => { const request = parseHarnessRequest(input); return runtime!.harness(request.projectId, request.executable); });
       command('randolph:add-project', async () => {
         const choice = await dialog.showOpenDialog(window!, { title: 'Choose a project folder', properties: ['openDirectory'] });
         if (choice.canceled || !choice.filePaths[0]) return null;

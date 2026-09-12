@@ -46,7 +46,9 @@ createInterface({input:process.stdin}).on('line',line=>{
 `, { mode: 0o700 });
   const env = { ...process.env, HOME: home, PATH: bin + ':' + process.env.PATH, RANDOLPH_DATA_DIR: join(root, 'data') };
   delete env.ELECTRON_RUN_AS_NODE;
-  let app = await electron.launch({ args: [resolve('.')], env });
+  const launch = () => electron.launch({ executablePath: process.env.RANDOLPH_TEST_EXECUTABLE, args: process.env.RANDOLPH_TEST_EXECUTABLE ? [] : [resolve('.')], env });
+  let app = await launch();
+  if (process.env.RANDOLPH_TEST_EXECUTABLE) expect(await app.evaluate(({ app }) => app.getPath('exe'))).toBe(process.env.RANDOLPH_TEST_EXECUTABLE);
   try {
     let page = await app.firstWindow();
     await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, project);
@@ -95,7 +97,7 @@ createInterface({input:process.stdin}).on('line',line=>{
     expect(git('rev-parse', 'HEAD')).toBe(base);
     expect(readFileSync(join(project, 'value.txt'), 'utf8')).toBe('before\n');
     await app.close();
-    app = await electron.launch({ args: [resolve('.')], env });
+    app = await launch();
     page = await app.firstWindow();
     await expect(page.getByRole('heading', { name: 'Your projects, in one place.' })).toBeVisible();
     expect(readFileSync(turns, 'utf8')).toBe('turn\nturn\nturn\n');

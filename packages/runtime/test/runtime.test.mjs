@@ -329,3 +329,34 @@ test('invalid project config and unavailable saved models block dispatch without
   assert.equal(runtime.snapshot().runs.length, 0);
   await runtime.close();
 });
+
+
+test('project executable choice binds new runs and later setting changes cannot redirect their checks', async t => {
+  const { projectRoot, dataRoot } = await fixture(t);
+  await writeFile(join(projectRoot, 'package.json'), JSON.stringify({ scripts: { test: 'echo ok' } }));
+  git(projectRoot, ['add', 'package.json']); git(projectRoot, ['commit', '-m', 'checks']);
+  const inputs = [], commands = [];
+  const adapter = {
+    async installations() { return [{ executable: '/cli/one' }, { executable: '/cli/two' }]; },
+    async discover(executable) { return { ...harnessInfo, executable: executable ?? '/cli/default', executionModes: ['read-only', 'code'] }; },
+    async run(input) { inputs.push(input); await writeFile(join(input.workspace, 'README.md'), 'changed'); return { status: 'completed' }; },
+    async runCommand(input) { commands.push(input); return { exitCode: 0, output: 'passed', truncated: false, cleanupVerified: true }; },
+  };
+  const runtime = new Runtime(adapter, dataRoot); t.after(() => runtime.close());
+  const project = runtime.addProject(projectRoot);
+  const settings = await runtime.saveProjectDefaults({ projectId: project.id, defaults: { harness: 'codex', model: 'model-a', effort: 'low', executable: '/cli/one' }, expectedRevision: null });
+  const conversation = runtime.createConversation(project.id);
+  await runtime.setExecutionMode({ conversationId: conversation.id, executionMode: 'code' });
+  const run = await runtime.send(sendInput(conversation.id));
+  await waitFor(() => runtime.snapshot().runs[0].status === 'completed');
+  assert.equal(inputs[0].executable, '/cli/one');
+  assert.equal(runtime.snapshot().runs[0].executable, '/cli/one');
+  assert.equal(runtime.snapshot().runs[0].executableVersion, 'test-version');
+  await runtime.saveProjectDefaults({ projectId: project.id, defaults: { harness: 'codex', model: 'model-a', effort: 'low', executable: '/cli/two' }, expectedRevision: settings.revision });
+  const review = runtime.prepareReview(conversation.id);
+  await runtime.verifyReview(review.id);
+  assert.ok(commands.length > 0);
+  assert.ok(commands.every(command => command.executable === '/cli/one' && command.executableVersion === 'test-version'));
+  assert.equal(run.executable, '/cli/one');
+  assert.equal((await runtime.harness(project.id)).executable, '/cli/two');
+});

@@ -56,7 +56,7 @@ export default function HistoryPanel({ runs, messages, events, reviews, onRecove
         </section> : null}
         {error ? <p role="alert">{error}</p> : null}
         {restored ? <p role="status">Restored to <code>{restored}</code>. Original history is unchanged.</p> : null}
-        <details><summary>Saved configuration and supplied lessons</summary><pre>{JSON.stringify({ model: run.model, effort: run.effort, executionMode: run.executionMode ?? 'read-only', settingsSource: run.settingsSource, projectSettingsRevision: run.projectSettingsRevision, memory: run.memory }, null, 2)}</pre></details>
+        <details><summary>Saved configuration and supplied lessons</summary><pre>{JSON.stringify({ executable: run.executable, executableVersion: run.executableVersion, model: run.model, effort: run.effort, executionMode: run.executionMode ?? 'read-only', settingsSource: run.settingsSource, projectSettingsRevision: run.projectSettingsRevision, memory: run.memory }, null, 2)}</pre></details>
         <section aria-label="Recorded delivery" className="history-delivery">
           <h3>Recorded delivery</h3>
           <p>These are saved outcomes from the original run. Opening history does not repeat them.</p>
