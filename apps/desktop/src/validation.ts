@@ -1,5 +1,5 @@
 import { isAbsolute } from 'node:path';
-import type { RestartCheckpointInput, SaveAppSettingsInput, SaveGlobalMemoryInput, CheckpointInput, ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
+import type { ChatEventsInput, RestartCheckpointInput, SaveAppSettingsInput, SaveGlobalMemoryInput, CheckpointInput, ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid settings request.');
   return value as Record<string, unknown>;
@@ -40,6 +40,11 @@ export function parseSend(value: unknown): SendInput {
   if (input.model === undefined && input.effort === undefined) return message;
   const selection = parseSelection({ harness: 'codex', model: input.model, effort: input.effort });
   return { ...message, model: selection.model, effort: selection.effort };
+}
+export function parseChatEvents(value: unknown): ChatEventsInput {
+  const input = record(value);
+  if (!Number.isSafeInteger(input.afterSequence) || Number(input.afterSequence) < 0) throw new Error('Invalid event cursor.');
+  return { conversationId: parseId(input.conversationId), runId: parseId(input.runId), afterSequence: Number(input.afterSequence) };
 }
 
 export function parsePushApproval(value: unknown): ApprovePushInput {

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { DesktopBridge } from '@randolph/runtime/contracts';
 const bridge: DesktopBridge = {
   snapshot: async () => ipcRenderer.invoke('randolph:snapshot'),
+  chatEvents: async input => ipcRenderer.invoke('randolph:chat-events', input),
   appSettings: async () => ipcRenderer.invoke('randolph:app-settings'),
   saveAppSettings: async input => ipcRenderer.invoke('randolph:save-app-settings', input),
   saveGlobalMemory: async input => ipcRenderer.invoke('randolph:save-global-memory', input),

@@ -8,7 +8,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Runtime, type AppPreferences, type AppSettingsSnapshot } from '@randolph/runtime';
 import { CodexAdapter } from '@randolph/harness-codex';
-import { parseSend, parseId, parseProjectDefaults, parseConversationSelection, parseMode, parseReviewApproval } from './validation.js';
+import { parseChatEvents, parseSend, parseId, parseProjectDefaults, parseConversationSelection, parseMode, parseReviewApproval } from './validation.js';
 
 const dataRoot = process.env.RANDOLPH_DATA_DIR ? resolve(process.env.RANDOLPH_DATA_DIR) : join(homedir(), '.randolph');
 app.setName('Randolph');
@@ -137,6 +137,7 @@ else {
         updateTray(); notifyChanges();
       });
       command('randolph:snapshot', () => runtime!.snapshot());
+      command('randolph:chat-events', input => runtime!.chatEvents(parseChatEvents(input)));
       command('randolph:initial-navigation', () => pendingNavigation ?? null);
       command('randolph:ack-navigation', sequence => { if (typeof sequence === 'number' && pendingNavigation?.sequence === sequence) pendingNavigation = undefined; });
       command('randolph:app-settings', () => { const settings = runtime!.appSettings(); applySettings(settings); return settings; });

@@ -1,6 +1,6 @@
 # First desktop product slice
 
-Status: implemented developer slice; full v1 acceptance remains open.
+Status: implemented developer slice; full v1 acceptance remains open. The subsequent [AI SDK transport integration](ai-sdk-chat-transport.md) replaces the original direct chat presentation described below; native execution and durable authority are preserved.
 
 The subsequent [project harness defaults slice](project-harness-defaults.md) adds editable project settings and persisted conversation overrides. Statements below describe the original desktop boundary except where that follow-up or [controlled coding and delivery](controlled-coding.md) extends it.
 

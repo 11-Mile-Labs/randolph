@@ -13,7 +13,7 @@ import { Pushes, type ApprovePushInput } from './pushes.js';
 import type { PushOptions } from './push.js';
 import { Reviews } from './reviews.js';
 import { Checkpoints, type CheckpointInput, type CheckpointRestore } from './checkpoints.js';
-import type { AdapterEvent, ApproveReviewInput, Conversation, ConversationModeInput, ConversationSelectionInput, HarnessAdapter, HarnessInfo, HarnessSelection, LinkedRunResult, Project, ProjectHarnessSettings, RerunCheckpointInput, RestartCheckpointInput, ReviewRecord, Run, SaveProjectDefaultsInput, SendInput, WorkspaceSnapshot } from './contracts.js';
+import type { AdapterEvent, ApproveReviewInput, ChatEventsInput, ChatEventsResult, Conversation, ConversationModeInput, ConversationSelectionInput, HarnessAdapter, HarnessInfo, HarnessSelection, LinkedRunResult, Project, ProjectHarnessSettings, RerunCheckpointInput, RestartCheckpointInput, ReviewRecord, Run, SaveProjectDefaultsInput, SendInput, WorkspaceSnapshot } from './contracts.js';
 export type * from './contracts.js';
 export { Store } from './store.js';
 const activeStatuses = new Set(['starting', 'running', 'stopping', 'stop-unconfirmed']);
@@ -120,6 +120,10 @@ export class Runtime {
   snapshot(): WorkspaceSnapshot {
     const snapshot = this.store.snapshot();
     return { ...snapshot, projects: snapshot.projects.map(project => ({ ...project, harnessSettings: readHarnessSettings(project.root) })) };
+  }
+  chatEvents(input: ChatEventsInput): ChatEventsResult {
+    if (!Number.isSafeInteger(input.afterSequence) || input.afterSequence < 0) throw new Error('Invalid event cursor.');
+    return this.store.chatEvents(input.conversationId, input.runId, input.afterSequence);
   }
   restoreCheckpoint(input: CheckpointInput, destination: string): CheckpointRestore {
     if (!this.accepting) throw new Error('Application is closing.');

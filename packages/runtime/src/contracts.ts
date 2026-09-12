@@ -28,6 +28,8 @@ export type Conversation = { id: string; projectId: string; sourceConversationId
 export type Run = { executable?: string; executableVersion?: string; id: string; projectId: string; conversationId: string; sourceRunId?: string; sourceCheckpointDigest?: string; recoveryKind?: 'restart' | 'rerun'; recoveryMessages?: Array<{ role: 'user' | 'assistant'; text: string }>; status: RunStatus; cleanupUnconfirmed?: boolean; checkpoints?: CheckpointRecord[]; checkpointError?: string; memory?: PreparedMemory; integration?: IntegrationState; model: string; effort: string; executionMode?: ExecutionMode; settingsSource?: 'project' | 'conversation' | 'native'; projectSettingsRevision?: string | null; workspace: string; logsPath?: string; createdAt: string; updatedAt: string; lastActivityAt: string; error?: string };
 export type Message = { id: string; conversationId: string; runId: string; role: 'user' | 'assistant'; text: string; createdAt: string };
 export type RunEvent = { sequence: number; runId: string; projectId: string; conversationId: string; at: string; type: string; summary: string; data: Record<string, unknown> };
+export type ChatEventsInput = { conversationId: string; runId: string; afterSequence: number };
+export type ChatEventsResult = { run: Run; events: RunEvent[] };
 export type WorkspaceSnapshot = { projects: Project[]; conversations: Conversation[]; runs: Run[]; messages: Message[]; events: RunEvent[]; reviews: ReviewRecord[]; dataRoot: string };
 export type HarnessModel = { id: string; name: string; efforts: string[]; defaultEffort: string };
 export type HarnessInstallation = { executable: string; version?: string; reason?: string };
@@ -48,6 +50,7 @@ export type RerunCheckpointInput = { runId: string; checkpointDigest: string };
 export type LinkedRunResult = { conversation: Conversation; run: Run };
 export interface DesktopBridge {
   snapshot(): Promise<WorkspaceSnapshot>;
+  chatEvents(input: ChatEventsInput): Promise<ChatEventsResult>;
   appSettings(): Promise<AppSettingsSnapshot>;
   saveAppSettings(input: SaveAppSettingsInput): Promise<AppSettingsSnapshot>;
   saveGlobalMemory(input: SaveGlobalMemoryInput): Promise<AppSettingsSnapshot>;

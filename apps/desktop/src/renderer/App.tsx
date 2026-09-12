@@ -1,3 +1,6 @@
+import { useChat } from '@ai-sdk/react';
+import { NativeChatSession } from './chat-transport';
+import type { NativeChatMessage } from './chat-transport';
 import HistoryPanel from './HistoryPanel';
 import MemoryPanel from './MemoryPanel';
 import WorkspaceHome from './WorkspaceHome';
@@ -11,7 +14,6 @@ import type {
   HarnessInfo,
   HarnessModel,
   HarnessSelection,
-  Message,
   Project,
   Run,
   RunEvent,
@@ -460,7 +462,7 @@ function Composer({
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({ message }: { message: NativeChatMessage }) {
   return (
     <article className={`message ${message.role}`}>
       <div className="message-avatar" aria-hidden="true">
@@ -469,9 +471,9 @@ function MessageBubble({ message }: { message: Message }) {
       <div>
         <header>
           <strong>{message.role === 'assistant' ? 'Randolph' : 'You'}</strong>
-          <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
+          {message.metadata?.createdAt ? <time dateTime={message.metadata.createdAt}>{formatTime(message.metadata.createdAt)}</time> : null}
         </header>
-        <p>{message.text}</p>
+        {message.parts.map((part, index) => part.type === 'text' ? <p key={index}>{part.text}</p> : null)}
       </div>
     </article>
   );
@@ -559,6 +561,11 @@ export default function App() {
   }, []);
 
   const selectedConversation = snapshot.conversations.find((item) => item.id === selectedConversationId);
+  const chatSession = useMemo(() => new NativeChatSession(window.randolph, selectedConversationId ?? '', snapshot), [selectedConversationId]);
+  const { messages: chatMessages, error: chatError, status: chatStatus } = useChat({ chat: chatSession.chat });
+  useEffect(() => chatSession.attach(), [chatSession]);
+  useEffect(() => { chatSession.sync(snapshot); }, [chatSession, snapshot, chatStatus]);
+
   const selectedProject = selectedConversation
     ? snapshot.projects.find((item) => item.id === selectedConversation.projectId)
     : undefined;
@@ -611,8 +618,8 @@ export default function App() {
   const currentReview = snapshot.reviews.findLast(item => item.conversationId === selectedConversationId);
   const selectedReview = snapshot.reviews.find(item => item.id === selectedReviewId);
   const checking = currentReview?.status === 'checking';
-  const lastMessage = messages.at(-1);
-  const lastMessageKey = lastMessage ? `${lastMessage.id}:${lastMessage.text.length}` : selectedConversationId;
+  const lastMessage = chatMessages.at(-1);
+  const lastMessageKey = lastMessage ? `${lastMessage.id}:${JSON.stringify(lastMessage.parts)}` : selectedConversationId;
 
   useEffect(() => {
     if (!nearMessageEnd.current) return;
@@ -690,7 +697,7 @@ export default function App() {
     setAction('send');
     setError(undefined);
     try {
-      await window.randolph.send({ conversationId, text });
+      await chatSession.send(text);
       setDrafts((current) =>
         current[conversationId]?.trim() === text ? { ...current, [conversationId]: '' } : current,
       );
@@ -837,7 +844,7 @@ export default function App() {
                 nearMessageEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
               }}
             >
-              {messages.length === 0 ? (
+              {chatMessages.length === 0 ? (
                 <div className="conversation-empty">
                   <LogoMark />
                   <h2>{selectedConversation.executionMode === 'code' ? 'What should Randolph build?' : 'What should Randolph inspect?'}</h2>
@@ -845,7 +852,7 @@ export default function App() {
                 </div>
               ) : (
                 <div className="message-column">
-                  {messages.map((message) => (
+                  {chatMessages.filter(message => message.parts.some(part => part.type === 'text' && part.text)).map((message) => (
                     <MessageBubble message={message} key={message.id} />
                   ))}
                 </div>
@@ -870,6 +877,7 @@ export default function App() {
                   </button>
                 </div>
               ) : null}
+              {chatError ? <div className="composer-error" role="alert"><span>Chat stream: {chatError.message}</span><button type="button" onClick={() => { chatSession.chat.clearError(); void chatSession.connect(); }}>Reconnect chat</button></div> : null}
               {harnessReason ? <p className="harness-warning">Native harness unavailable: {harnessReason}</p> : null}
               {settingsError ? <p className="harness-warning" role="alert">{settingsError} Open Project settings to reload after correcting the file.</p> : null}
               {!settingsError && harness?.available && !selectionAvailable ? <p className="harness-warning" role="alert">The saved model or effort is unavailable. Choose a replacement or update the project default before sending.</p> : null}

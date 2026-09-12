@@ -1,13 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as validation from '../dist/validation.js';
-const { parseSend, parseId } = validation;
+const { parseSend, parseId, parseChatEvents } = validation;
 test('IPC accepts only scoped message commands, never arbitrary paths or oversized payloads', () => {
   const conversationId = '10000000-0000-0000-0000-000000000001';
   const message = { conversationId, text: 'Review this project', model: 'model', effort: 'low' };
   assert.deepEqual(parseSend(message), message);
   for (const value of [null, [], { ...message, conversationId: '../other' }, { ...message, text: 'x'.repeat(64001) }, { ...message, model: {} }]) assert.throws(() => parseSend(value));
   assert.throws(() => parseId('/tmp/repo'));
+});
+
+test('chat event IPC validates scoped IDs and nonnegative integer cursors', () => {
+  const conversationId = '10000000-0000-0000-0000-000000000001';
+  const runId = '10000000-0000-0000-0000-000000000002';
+  assert.deepEqual(parseChatEvents({ conversationId, runId, afterSequence: 12 }), { conversationId, runId, afterSequence: 12 });
+  for (const value of [null, { conversationId, runId, afterSequence: -1 }, { conversationId, runId, afterSequence: 1.5 }, { conversationId, runId, afterSequence: '12' }, { conversationId: '/tmp/run', runId, afterSequence: 0 }]) assert.throws(() => parseChatEvents(value));
 });
 
 test('settings IPC validates scoped identities, paired selections and expected revisions', () => {

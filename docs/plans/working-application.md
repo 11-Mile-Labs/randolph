@@ -44,6 +44,8 @@ Status: active implementation toward the complete [approved v1 scope](../product
 
 ## 3. Harnesses and project context
 
+- [x] Integrate AI SDK UI through an application-owned IPC chat transport with retained-event replay and no API execution path.
+
 - [x] Discover installed Codex copies, expose path/version, persist per-project CLI selection, and retain run/check/recovery executable identity.
 
 - [ ] Add native Claude and Grok subscription adapters with capability/authentication evidence.

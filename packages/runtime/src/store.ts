@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Conversation, Message, Project, ReviewRecord, Run, RunEvent, WorkspaceSnapshot } from './contracts.js';
+import type { ChatEventsResult, Conversation, Message, Project, ReviewRecord, Run, RunEvent, WorkspaceSnapshot } from './contracts.js';
 
 type Row = Record<string, string | number | null>;
 export class Store {
@@ -59,6 +59,15 @@ export class Store {
       ? this.db.prepare('SELECT sequence, document FROM events WHERE run_id=? ORDER BY sequence').all(runId)
       : this.db.prepare('SELECT sequence, document FROM (SELECT sequence, document FROM events ORDER BY sequence DESC LIMIT 2000) ORDER BY sequence').all()) as Row[];
     return rows.map(row => ({ ...JSON.parse(String(row.document)), sequence: Number(row.sequence) }) as RunEvent);
+  }
+  chatEvents(conversationId: string, runId: string, afterSequence: number): ChatEventsResult {
+    const runRow = this.db.prepare('SELECT conversation_id, document FROM runs WHERE id=?').get(runId) as (Row & { conversation_id?: string }) | undefined;
+    if (!runRow) throw new Error('Run does not exist.');
+    if (String(runRow.conversation_id) !== conversationId) throw new Error('Run does not belong to this conversation.');
+    const run = JSON.parse(String(runRow.document)) as Run;
+    const rows = this.db.prepare('SELECT sequence, document FROM events WHERE run_id=? AND sequence>? ORDER BY sequence').all(runId, afterSequence) as Row[];
+    const events = rows.map(row => ({ ...JSON.parse(String(row.document)), sequence: Number(row.sequence) }) as RunEvent);
+    return { run, events };
   }
   append(run: Run, type: string, summary: string, data: Record<string, unknown> = {}): void {
     const event = { runId: run.id, projectId: run.projectId, conversationId: run.conversationId, at: new Date().toISOString(), type, summary, data };

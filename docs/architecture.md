@@ -11,7 +11,7 @@ The [product specification](product-spec.md) defines approved behavior; the [use
 | D01 | Separate desktop interaction, execution runtime, adapters, and durable storage | Accepted boundaries; implementations can change independently |
 | D02 | Selected main agent supplies task judgment; application code owns authority | Accepted; model output cannot authorize its own delivery or raise execution limits |
 | D03 | Use installed subscription-backed harnesses, with ACP or native protocols as appropriate | Accepted direction; capability verification is required per route, with no API fallback |
-| D04 | Use AI SDK UI with an application-owned transport | Accepted integration direction; Electron transport behavior remains unproven |
+| D04 | Use AI SDK UI with an application-owned transport | [Implemented over typed Electron IPC](decisions/ai-sdk-chat-transport.md); runtime records remain authoritative |
 | D05 | Electron/React/TypeScript, runtime hosted in Electron main, SQLite with derived JSONL | Implemented for the [first desktop slice](decisions/desktop-first-slice.md); independent runtime supervision remains unfinished |
 | D06 | Enforce final approval and stop on owner loss through verified native boundaries/supervision | Required behavior; mechanism unresolved and tested first |
 
@@ -25,7 +25,7 @@ Build one macOS application with a separately testable local runtime. Keep the r
 | UI wrapping CLIs directly | Small initial prototype | Approval, persistence, and lifecycle behavior become coupled to views |
 | Independent always-running daemon and desktop client | Can later serve multiple clients | Adds installation and lifecycle complexity; conflicts with expected stop-on-quit behavior unless carefully constrained |
 
-Electron, React, TypeScript, and SQLite are selected for the first desktop slice. AI SDK UI transport remains future integration work. Electron supports separate renderer and utility processes; the slice uses a narrow preload bridge to the runtime in Electron main. [Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model).
+Electron, React, TypeScript, and SQLite are selected for the first desktop slice. AI SDK UI uses the application-owned IPC transport. Electron supports separate renderer and utility processes; the slice uses a narrow preload bridge to the runtime in Electron main. [Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model).
 
 ## 1. Boundaries and ownership
 
@@ -73,7 +73,7 @@ The initial scheduler supports app-wide and per-harness limits, per-checkout wri
 
 ## 3. UI transport and agent communication
 
-Use AI SDK UI as the chat presentation layer, with a custom transport over the application's private IPC bridge. The runtime owns the conversation/event record; AI SDK state is its presentation. Its transport interface supports custom backends, so this does not require AI Gateway or a model API. This is an architectural inference from the documented transport boundary, not a tested Electron integration. [AI SDK transport](https://ai-sdk.dev/docs/ai-sdk-ui/transport).
+Use AI SDK UI as the chat presentation layer, with a custom transport over the application's private IPC bridge. The runtime owns the conversation/event record; AI SDK state is its presentation. Its transport interface supports custom backends, so this does not require AI Gateway or a model API. The [desktop integration](decisions/ai-sdk-chat-transport.md) implements this boundary with retained-event replay and separate native activity. [AI SDK transport](https://ai-sdk.dev/docs/ai-sdk-ui/transport).
 
 Use scoped application tools for delegation, retrieving task results, and proposing plan revisions. MCP is a suitable adapter for exposing those tools to supported harnesses. Each tool call carries a runtime-established run/session identity; a caller cannot claim another project's identity in ordinary arguments.
 

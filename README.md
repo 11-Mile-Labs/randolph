@@ -48,7 +48,7 @@ The default tests use temporary fixtures and no model inference. The desktop tes
 
 - Workspace and persistent application navigation, native macOS menus, app artwork, and a local macOS bundle.
 - Application preferences, optional background execution with menu-bar controls, and opt-in notifications.
-- Projects, conversations, native model/effort discovery, streamed chat and conversation-scoped drafts.
+- Projects, conversations, native model/effort discovery, [AI SDK streaming chat over private IPC](docs/decisions/ai-sdk-chat-transport.md), and conversation-scoped drafts.
 - Discovered CLI paths/versions, project-specific executable and model/effort defaults, conversation overrides, and retained run configuration.
 - Visible activity, unread indicators, Stop requests, exact log locations, and history reopening.
 - SQLite-backed run/message/event state, frozen run model/effort, derived JSONL/readable logs, and per-conversation worktrees.
@@ -59,7 +59,7 @@ The default tests use temporary fixtures and no model inference. The desktop tes
 - Confirmed Restart in the same conversation and Rerun in a linked conversation, with retained context and fresh approvals while the original Git repository remains available.
 - A narrow Electron preload/IPC boundary with an isolated renderer and locally bundled assets.
 
-Original-repository-loss execution recovery, Claude/Grok adapters, workflow/backlog interfaces, broader project configuration, Pause/Resume and AI SDK UI transport integration are not implemented in this slice. Process-group cleanup does not prove termination of detached descendants; hard owner-loss shutdown remains a release blocker. **Stop** requests native interruption and process-group termination, and reports uncertainty when that cleanup cannot be confirmed. Unconfirmed cleanup blocks further work in that conversation across reopening. There is no claim of application-level sandboxing; safety sandbox work is deferred until v2 at the earliest.
+Original-repository-loss execution recovery, Claude/Grok adapters, workflow/backlog interfaces, broader project configuration, and Pause/Resume are not implemented in this slice. Process-group cleanup does not prove termination of detached descendants; hard owner-loss shutdown remains a release blocker. **Stop** requests native interruption and process-group termination, and reports uncertainty when that cleanup cannot be confirmed. Unconfirmed cleanup blocks further work in that conversation across reopening. There is no claim of application-level sandboxing; safety sandbox work is deferred until v2 at the earliest.
 
 ## What we are building
 

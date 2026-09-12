@@ -9,3 +9,4 @@ await bundle({ entryPoints: ['src/preload.ts'], outfile: 'dist/preload.cjs', bun
 await bundle({ entryPoints: ['src/validation.ts'], outfile: 'dist/validation.js', bundle: true, platform: 'node', format: 'esm', target: 'node24' });
 
 await bundle({ entryPoints: ['src/memory-validation.ts'], outfile: 'dist/memory-validation.js', bundle: true, platform: 'node', format: 'esm', target: 'node24' });
+await bundle({ entryPoints: ['src/renderer/chat-transport.ts'], outfile: 'dist/chat-transport.js', bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external' });
