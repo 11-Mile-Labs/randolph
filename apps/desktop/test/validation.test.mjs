@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as validation from '../dist/validation.js';
-const { parseSend, parseId, parseChatEvents } = validation;
+const { parseSend, parseId, parseChatEvents, parseSetupApproval } = validation;
 test('IPC accepts only scoped message commands, never arbitrary paths or oversized payloads', () => {
   const conversationId = '10000000-0000-0000-0000-000000000001';
   const message = { conversationId, text: 'Review this project', model: 'model', effort: 'low' };
@@ -15,6 +15,19 @@ test('chat event IPC validates scoped IDs and nonnegative integer cursors', () =
   const runId = '10000000-0000-0000-0000-000000000002';
   assert.deepEqual(parseChatEvents({ conversationId, runId, afterSequence: 12 }), { conversationId, runId, afterSequence: 12 });
   for (const value of [null, { conversationId, runId, afterSequence: -1 }, { conversationId, runId, afterSequence: 1.5 }, { conversationId, runId, afterSequence: '12' }, { conversationId: '/tmp/run', runId, afterSequence: 0 }]) assert.throws(() => parseChatEvents(value));
+});
+
+test('project setup approval IPC validates a complete context without loading YAML persistence', () => {
+  const id = '10000000-0000-0000-0000-000000000001';
+  const revision = 'a'.repeat(64);
+  const input = {
+    projectId: id,
+    runId: '10000000-0000-0000-0000-000000000002',
+    proposalRevision: revision,
+    expectedContextRevision: null,
+    value: { purpose: 'Keep project evidence local.', instructions: 'Inspect before writing.', documents: [{ path: 'docs/spec.md', description: 'Product specification' }] },
+  };
+  assert.deepEqual(parseSetupApproval(input), input);
 });
 
 test('settings IPC validates scoped identities, paired selections and expected revisions', () => {

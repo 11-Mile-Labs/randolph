@@ -2,9 +2,10 @@ import { _electron as electron, expect, test } from '@playwright/test';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import type { DesktopBridge } from '@randolph/runtime/contracts';
 
-test('project setup requires inspection and explicit approval, preserves edits, and stops without configuring the project',async()=>{
+test('project setup requires inspection and explicit approval, preserves edits, and stops without configuring the project',async({browserName:_browserName},testInfo)=>{
  const root=mkdtempSync(join(tmpdir(),'randolph-setup-e2e-'));const home=join(root,'home'),project=join(root,'project'),bin=join(root,'bin');
  for(const path of [home,project,bin])mkdirSync(path,{recursive:true});
  writeFileSync(join(project,'README.md'),'Uncommitted project idea\n');const calls=join(root,'calls.jsonl');writeFileSync(calls,'');
@@ -21,19 +22,49 @@ createInterface({input:process.stdin}).on('line',l=>{const m=JSON.parse(l);appen
   await page.getByRole('button',{name:'Add your first project'}).click();
   await page.getByRole('navigation',{name:'Project conversations',exact:true}).getByRole('button',{name:'Project setup',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'Project setup',exact:true});
-  await expect(dialog.getByText('No approved purpose yet.',{exact:true})).toBeVisible();
+  await expect(dialog.locator('.setup-approved p').filter({hasText:'No approved purpose yet.'})).toContainText('No approved purpose yet.');
   await expect(dialog.getByRole('button',{name:'Inspect project',exact:true})).toBeEnabled();
   expect(readFileSync(calls,'utf8')).not.toContain('turn/start');
   await dialog.getByRole('textbox',{name:'Setup idea or corrections',exact:true}).fill('Inspect this project.');
   await dialog.getByRole('button',{name:'Inspect project',exact:true}).click();
   await expect(dialog.getByRole('textbox',{name:'Proposed purpose',exact:true})).toHaveValue('Inspected project purpose');
+  const documentPath=dialog.getByRole('textbox',{name:'Document 1 path',exact:true});
+  await documentPath.fill('docs/project-overview.md');
+  await expect(documentPath).toBeFocused();
   expect(existsSync(join(project,'config.project.yaml'))).toBe(false);
+  await dialog.getByRole('textbox',{name:'Proposed instructions',exact:true}).fill('User correction\nKeep it small.');
+  await dialog.getByRole('button',{name:'Inspect project',exact:true}).click();
+  await expect(dialog.getByText('A newer proposal is available. Reload before approving it.',{exact:true})).toBeVisible();
+  await expect(dialog.getByRole('textbox',{name:'Proposed instructions',exact:true})).toHaveValue('User correction\nKeep it small.');
+  await expect(dialog.getByRole('button',{name:'Approve project context',exact:true})).toBeDisabled();
+  await dialog.getByRole('button',{name:'Reload',exact:true}).click();
+  await expect(dialog.getByRole('textbox',{name:'Proposed instructions',exact:true})).toHaveValue('Proposed guidance');
   await dialog.getByRole('textbox',{name:'Proposed instructions',exact:true}).fill('User correction\nKeep it small.');
   await page.evaluate(async()=>{const bridge=(window as unknown as {randolph:DesktopBridge}).randolph;const snapshot=await bridge.snapshot();await bridge.createConversation(snapshot.projects[0]!.id);});
   await expect(dialog.getByRole('textbox',{name:'Proposed instructions',exact:true})).toHaveValue('User correction\nKeep it small.');
+  const databasePath=join(root,'data','app.sqlite');const receiptTrigger=new DatabaseSync(databasePath);
+  receiptTrigger.exec("CREATE TRIGGER fixture_receipt_failure BEFORE INSERT ON events WHEN json_extract(NEW.document, '$.type') = 'project-context.approved' BEGIN SELECT RAISE(FAIL, 'fixture receipt failure'); END");receiptTrigger.close();
+  try {
+   const turnsBeforeApproval=readFileSync(calls,'utf8').split('\n').filter(line=>line.includes('turn/start')).length;
+   await dialog.getByRole('button',{name:'Approve project context',exact:true}).click();
+   await expect.poll(()=>existsSync(join(project,'config.project.yaml'))).toBe(true);
+   expect(readFileSync(join(project,'config.project.yaml'),'utf8')).toContain('User correction');
+   await expect(dialog.getByText('The approval write has no confirmed receipt. Review the current approved context above, then inspect again before approving further changes.',{exact:true})).toBeVisible();
+   await expect(dialog.locator('.setup-approved p').filter({hasText:'Inspected project purpose'})).toContainText('Inspected project purpose');
+   await expect(dialog.getByRole('button',{name:'Approve project context',exact:true})).toBeDisabled();
+   expect(readFileSync(calls,'utf8').split('\n').filter(line=>line.includes('turn/start'))).toHaveLength(turnsBeforeApproval);
+   await dialog.evaluate(element=>element.scrollTo({top:0}));const screenshotPath=testInfo.outputPath('project-setup-receipt-failure-top.png');await page.screenshot({path:screenshotPath,fullPage:true});await testInfo.attach('project-setup-receipt-failure-top',{path:screenshotPath,contentType:'image/png'});console.log(`Project Setup screenshot: ${screenshotPath}`);await dialog.evaluate(element=>element.scrollTo({top:element.scrollHeight}));const lowerScreenshotPath=testInfo.outputPath('project-setup-receipt-failure-lower.png');await page.screenshot({path:lowerScreenshotPath,fullPage:true});await testInfo.attach('project-setup-receipt-failure-lower',{path:lowerScreenshotPath,contentType:'image/png'});console.log(`Project Setup screenshot: ${lowerScreenshotPath}`);
+  } finally { const cleanup=new DatabaseSync(databasePath);cleanup.exec('DROP TRIGGER IF EXISTS fixture_receipt_failure');cleanup.close(); }
+  await dialog.getByRole('button',{name:'Inspect project',exact:true}).click();
+  await expect(dialog.getByText('A newer proposal is available. Reload before approving it.',{exact:true})).toBeVisible();
+  await dialog.getByRole('button',{name:'Reload',exact:true}).click();
+  await expect(dialog.getByRole('button',{name:'Approve project context',exact:true})).toBeEnabled();
+  await dialog.getByRole('textbox',{name:'Proposed instructions',exact:true}).fill('Confirmed user correction.');
   await dialog.getByRole('button',{name:'Approve project context',exact:true}).click();
-  await expect.poll(()=>existsSync(join(project,'config.project.yaml'))).toBe(true);
-  expect(readFileSync(join(project,'config.project.yaml'),'utf8')).toContain('User correction');
+  await expect.poll(()=>readFileSync(join(project,'config.project.yaml'),'utf8')).toContain('Confirmed user correction.');
+  await expect(dialog.getByText('Approved',{exact:true})).toBeVisible();
+  await expect(dialog.locator('.setup-approved p').filter({hasText:'Confirmed user correction.'})).toContainText('Confirmed user correction.');
+  await expect(dialog.getByRole('button',{name:'Approve project context',exact:true})).toBeDisabled();
   expect(readFileSync(join(project,'README.md'),'utf8')).toBe('Uncommitted project idea\n');
   await expect(dialog.getByRole('button',{name:'Approve project context',exact:true})).toBeDisabled();
   await dialog.getByRole('button',{name:'Close project setup',exact:true}).click();

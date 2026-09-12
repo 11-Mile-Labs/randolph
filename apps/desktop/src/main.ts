@@ -159,6 +159,7 @@ else {
         return runtime!.memoryHistory(parseId(input.projectId), parseLessonRef(input.reference));
       });
       command('randolph:project-setup', id => runtime!.projectSetup(parseId(id)));
+      command('randolph:reconcile-setup-cleanup', id => runtime!.reconcileProjectSetupCleanup(parseId(id)));
       command('randolph:inspect-project', input => runtime!.inspectProject(parseInspectProject(input)));
       command('randolph:approve-project-setup', input => runtime!.approveProjectSetup(parseSetupApproval(input)));
       command('randolph:harness-installations', input => runtime!.harnessInstallations(parseHarnessRequest(input).harness));

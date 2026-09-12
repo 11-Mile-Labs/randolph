@@ -116,7 +116,10 @@ createInterface({ input: process.stdin }).on('line', line => {
     page = await app.firstWindow();
     page.on('pageerror', error => pageErrors.push(error.message));
     await expect(page.getByRole('heading', { name: 'Your projects, in one place.' })).toBeVisible();
-    await page.getByRole('button', { name: 'First question', exact: true }).click();
+    const retainedConversation = page.getByRole('button', { name: 'First question', exact: true });
+    await retainedConversation.focus();
+    await expect(retainedConversation).toBeFocused();
+    await retainedConversation.press('Enter');
     await expect(page.getByText('First stream: completed.', { exact: true })).toBeVisible();
     expect(readFileSync(turns, 'utf8')).toBe('1\n2\n3\n');
     expect(pageErrors).toEqual([]);

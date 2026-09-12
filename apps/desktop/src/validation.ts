@@ -1,4 +1,4 @@
-import { parseProjectContext } from '@randolph/runtime/project-context';
+import { parseProjectContext } from '@randolph/runtime/project-context-validation';
 import { isAbsolute } from 'node:path';
 import type { ApproveProjectSetupInput, InspectProjectInput, ChatEventsInput, RestartCheckpointInput, SaveAppSettingsInput, SaveGlobalMemoryInput, CheckpointInput, ApproveReviewInput, ApprovePushInput, ConversationModeInput, ConversationSelectionInput, HarnessId, HarnessSelection, SaveProjectDefaultsInput, SendInput } from '@randolph/runtime/contracts';
 function record(value: unknown): Record<string, unknown> {

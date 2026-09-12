@@ -1,3 +1,5 @@
+import { assertWorkspaceIdentity, workspaceIdentity } from './workspace-identity.js';
+import { cleanupReconciliationReason, readExecutionOrigin, type ExecutionOrigin } from './execution-origin.js';
 import { parseSetupProposal, setupPrompt } from './project-setup.js';
 import { readProjectContext, writeProjectContext, parseProjectContext, type ProjectContextSnapshot } from './project-context.js';
 import { AppSettings, type AppSettingsSnapshot, type SaveAppSettingsInput, type SaveGlobalMemoryInput } from './app-settings.js';
@@ -70,7 +72,8 @@ function recoveryContext(metadata: Record<string, unknown>, kind: 'restart' | 'r
     const saved = savedRun.projectContext as Partial<ProjectContextSnapshot> | null;
     if (!saved || typeof saved !== 'object' || saved.error !== undefined || (saved.revision !== null && (typeof saved.revision !== 'string' || !/^[a-f0-9]{64}$/u.test(saved.revision)))) throw new Error('The retained project context is invalid. Restore files without execution.');
     if (saved.revision === null) {
-      if (JSON.stringify(saved.value) !== JSON.stringify({purpose:'',instructions:'',documents:[]})) throw new Error('The retained empty project context is invalid.');
+      const empty = object(saved.value);
+      if (Object.keys(empty).length !== 3 || empty.purpose !== '' || empty.instructions !== '' || !Array.isArray(empty.documents) || empty.documents.length !== 0) throw new Error('The retained empty project context is invalid.');
       projectContext = { revision: null, value: { purpose: '', instructions: '', documents: [] } };
     } else projectContext = { revision: saved.revision, value: parseProjectContext(saved.value) };
   }
@@ -109,12 +112,14 @@ export class Runtime {
   private readonly pushes: Pushes;
   private readonly integrations: Integrations;
   private readonly memory: ProjectMemory;
+  private readonly executionOrigin: ExecutionOrigin | undefined;
   private readonly active = new Map<string, { controller: AbortController; done: Promise<void>; run: Run }>();
   private readonly listeners = new Set<() => void>();
   private accepting = true;
   private admission = new Set<string>();
   private setupAdmission = new Set<string>();
-  constructor(adapter: HarnessAdapter | Partial<Record<HarnessId, HarnessAdapter>>, dataRoot: string, options: { push?: PushOptions } = {}) {
+  constructor(adapter: HarnessAdapter | Partial<Record<HarnessId, HarnessAdapter>>, dataRoot: string, options: { push?: PushOptions; executionOrigin?: () => ExecutionOrigin | undefined } = {}) {
+    this.executionOrigin = (options.executionOrigin ?? readExecutionOrigin)();
     this.adapters = 'discover' in adapter ? { codex: adapter } : adapter;
     this.adapter = this.adapters.codex;
     this.store = new Store(resolve(dataRoot));
@@ -240,15 +245,47 @@ export class Runtime {
     const conversations = new Set(this.store.conversations().filter(conversation => conversation.projectId === projectId && conversation.kind === 'project-setup').map(conversation => conversation.id));
     const runs = this.store.runs().filter(run => conversations.has(run.conversationId));
     const busy = this.setupAdmission.has(projectId) || runs.some(run => activeStatuses.has(run.status) || run.cleanupUnconfirmed);
-    return { context, inspections: runs.map(run => {
+    const uncertain = runs.filter(run => run.cleanupUnconfirmed || run.status === 'stop-unconfirmed');
+    const cleanupReason = uncertain.map(run => cleanupReconciliationReason(run.executionOrigin, this.executionOrigin)).find(reason => reason !== null);
+    const cleanup = uncertain.length ? { canReconcile: !this.setupAdmission.has(projectId) && !runs.some(run => this.active.has(run.id)) && !cleanupReason, reason: cleanupReason ?? 'A later boot on the original Mac confirms that the previous inspection processes have exited. Verify cleanup before starting another inspection.' } : undefined;
+    return { context, cleanup, inspections: runs.map(run => {
       let proposal; let error;
       if (run.status === 'completed') {
         try { proposal = parseSetupProposal(this.store.messages(run.conversationId).filter(message => message.runId === run.id && message.role === 'assistant').map(message => message.text).join('')); }
         catch (cause) { error = cause instanceof Error ? cause.message : 'Invalid setup proposal.'; }
+        try {
+          if (!run.workspaceIdentity) throw new Error('This inspection lacks project directory identity. Inspect again before approving.');
+          assertWorkspaceIdentity(project.root, run.workspaceIdentity);
+        } catch (cause) { error = cause instanceof Error ? cause.message : 'Project directory changed. Inspect again before approving.'; }
       } else if (run.status === 'failed') error = run.error;
-      const approved = this.store.events(run.id).findLast(event => event.type === 'project-context.approved');
-      return { conversationId: run.conversationId, run, proposal, error, canApprove: !busy && run.id === runs.at(-1)?.id && Boolean(proposal) && !context.error && run.projectContext?.revision === context.revision, ...(typeof approved?.data.revision === 'string' ? { approvedRevision: approved.data.revision } : {}) };
+      const events = this.store.events(run.id);
+      const approved = events.findLast(event => event.type === 'project-context.approved');
+      const pendingApproval = !approved && events.some(event => event.type === 'project-context.approval-requested');
+      if (pendingApproval) error = 'The approval write has no confirmed receipt. Review the current approved context above, then inspect again before approving further changes.';
+      return { conversationId: run.conversationId, run, proposal, error, canApprove: !busy && !error && !approved && !pendingApproval && run.id === runs.at(-1)?.id && Boolean(proposal) && !context.error && run.projectContext?.revision === context.revision, ...(typeof approved?.data.revision === 'string' ? { approvedRevision: approved.data.revision } : {}) };
     }) };
+  }
+  reconcileProjectSetupCleanup(projectId: string): ProjectSetupSnapshot {
+    if (!this.accepting) throw new Error('Application is closing.');
+    const snapshot = this.projectSetup(projectId);
+    if (this.setupAdmission.has(projectId) || snapshot.inspections.some(item => this.active.has(item.run.id) || this.admission.has(item.conversationId))) throw new Error('Wait for active inspection work to finish before verifying cleanup.');
+    if (!snapshot.cleanup) return snapshot;
+    if (!snapshot.cleanup.canReconcile) throw new Error(snapshot.cleanup.reason);
+    this.setupAdmission.add(projectId);
+    try {
+      this.store.transaction(() => {
+        for (const { run } of snapshot.inspections) {
+          if (!run.cleanupUnconfirmed && run.status !== 'stop-unconfirmed') continue;
+          const reason = cleanupReconciliationReason(run.executionOrigin, this.executionOrigin);
+          if (reason) throw new Error(reason);
+          run.status = 'interrupted'; run.cleanupUnconfirmed = false; run.updatedAt = now();
+          run.error = 'Previous inspection execution ended with an earlier boot on this Mac. No work has been restarted.';
+          this.store.putRun(run);
+          this.store.append(run, 'run.cleanup-reconciled', run.error, { recordedOrigin: run.executionOrigin, observedOrigin: this.executionOrigin });
+        }
+      });
+    } finally { this.setupAdmission.delete(projectId); this.changed(); }
+    return this.projectSetup(projectId);
   }
   async inspectProject(input: InspectProjectInput): Promise<Run> {
     if (!this.accepting) throw new Error('Application is closing.');
@@ -264,7 +301,7 @@ export class Runtime {
         conversation = { ...this.createConversation(project.id), kind: 'project-setup', title: 'Project setup' };
         this.store.putConversation(conversation);
       }
-      return await this.send({ conversationId: conversation.id, text: prompt, ...input.selection }, { executable: input.executable, expectedContextRevision: context.revision });
+      return await this.#send({ conversationId: conversation.id, text: prompt, ...input.selection }, { executable: input.executable, expectedContextRevision: context.revision });
     } finally { this.setupAdmission.delete(project.id); this.changed(); }
   }
   approveProjectSetup(input: ApproveProjectSetupInput): ProjectContextSnapshot {
@@ -274,11 +311,13 @@ export class Runtime {
     if (!inspection?.canApprove || inspection.proposal?.revision !== input.proposalRevision || inspection.run.projectContext?.revision !== input.expectedContextRevision) throw new Error('This proposal or approved context changed. Reload project setup before approving.');
     const value = parseProjectContext(input.value);
     this.store.append(inspection.run, 'project-context.approval-requested', 'Project context approval requested', { proposalRevision: input.proposalRevision, expectedContextRevision: input.expectedContextRevision, value });
-    const saved = writeProjectContext(this.project(input.projectId).root, value, input.expectedContextRevision);
-    this.store.append(inspection.run, 'project-context.approved', 'Project context approved', { proposalRevision: input.proposalRevision, revision: saved.revision, value: saved.value });
-    this.store.exportRun(inspection.run);
-    this.changed();
-    return saved;
+    try {
+      assertWorkspaceIdentity(this.project(input.projectId).root, inspection.run.workspaceIdentity!);
+      const saved = writeProjectContext(this.project(input.projectId).root, value, input.expectedContextRevision);
+      this.store.append(inspection.run, 'project-context.approved', 'Project context approved', { proposalRevision: input.proposalRevision, revision: saved.revision, value: saved.value });
+      this.store.exportRun(inspection.run);
+      return saved;
+    } finally { this.changed(); }
   }
   private project(id: string): Project {
     const project = this.store.projects().find(value => value.id === id);
@@ -382,6 +421,7 @@ export class Runtime {
       if (targetConversation.id !== sourceConversation.id) this.admission.add(targetConversation.id);
       const workspace = join(project.root, '.worktrees', `randolph-${runId}`);
       run = {
+        executionOrigin: this.executionOrigin,
         projectContext: context.projectContext,
         harness: context.harness,
         executable: info.executable,
@@ -417,6 +457,7 @@ export class Runtime {
         this.store.exportRun(run);
         const restored = this.checkpoints.restoreWorktree(sourceRun.id, selected.checkpoint.digest, project.root, run.id);
         if (restored.workspace !== run.workspace) throw new Error('Linked checkpoint restored to an unexpected workspace.');
+        run.workspaceIdentity = workspaceIdentity(run.workspace);
         if (kind === 'restart') this.reviews.invalidate(sourceConversation.id);
         this.checkpoints.capture(run, 'before-turn');
       } catch (cause) {
@@ -435,15 +476,18 @@ export class Runtime {
       if (targetConversationId) this.admission.delete(targetConversationId);
     }
   }
-  async send(input: SendInput, setup?: { executable?: string; expectedContextRevision: string | null }): Promise<Run> {
+  async send(input: SendInput): Promise<Run> { return this.#send(input); }
+  async #send(input: SendInput, setup?: { executable?: string; expectedContextRevision: string | null }): Promise<Run> {
     if (!this.accepting) throw new Error('Application is closing.');
     if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 64_000) throw new Error('Enter a message of at most 64,000 characters.');
     let conversation = this.conversation(input.conversationId);
+    if (conversation.kind === 'project-setup' && !setup) throw new Error('Use the dedicated project inspection action for setup conversations.');
     if (this.admission.has(conversation.id) || this.reviews.hasActiveWork(conversation.id) || this.pushes.hasActiveWork(conversation.id) || this.store.runs().some(run => run.conversationId === conversation.id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed))) throw new Error('This conversation already has active work.');
     if (this.integrations.blocksNewWork(conversation.id)) throw new Error('Finish interrupted parent integration before starting new work.');
     this.admission.add(conversation.id);
     try {
       const project = this.project(conversation.projectId);
+      const rootIdentity = workspaceIdentity(project.root);
       const settings = readHarnessSettings(project.root);
       if (settings.error) throw new Error(settings.error);
       const savedSelection = this.selectionFor(conversation);
@@ -457,6 +501,7 @@ export class Runtime {
       const info = await this.inspectExecutable(selection.harness, setup?.executable ?? (settings.defaults?.harness === selection.harness ? settings.defaults.executable : undefined));
       if (!this.accepting) throw new Error('Application is closing.');
       conversation = this.conversation(input.conversationId);
+      assertWorkspaceIdentity(project.root, rootIdentity);
       if (readHarnessSettings(project.root).revision !== settings.revision) throw new Error('Project harness settings changed during discovery. Try again.');
       if (!selection.model && !selection.effort && !savedSelection && !settings.defaults) {
         selection.model = info.models[0]?.id ?? '';
@@ -484,7 +529,8 @@ export class Runtime {
       const workspace = conversation.kind === 'project-setup' ? project.root : prepareWorkspace(project.root, conversation.id, previous);
       if (executionMode === 'code') inspectGitWorkspace(project.root, workspace);
       this.reviews.invalidate(conversation.id);
-      const run: Run = { projectContext, harness: selection.harness, executable: info.executable, executableVersion: info.version, id: randomUUID(), projectId: project.id, conversationId: conversation.id, ...(recoveryMessages ? { recoveryMessages } : {}), status: 'starting', model: selection.model, effort: selection.effort, executionMode, settingsSource, memory, projectSettingsRevision: settings.revision, workspace, createdAt: now(), updatedAt: now(), lastActivityAt: now() };
+      assertWorkspaceIdentity(project.root, rootIdentity);
+      const run: Run = { executionOrigin: this.executionOrigin, workspaceIdentity: workspaceIdentity(workspace), projectContext, harness: selection.harness, executable: info.executable, executableVersion: info.version, id: randomUUID(), projectId: project.id, conversationId: conversation.id, ...(recoveryMessages ? { recoveryMessages } : {}), status: 'starting', model: selection.model, effort: selection.effort, executionMode, settingsSource, memory, projectSettingsRevision: settings.revision, workspace, createdAt: now(), updatedAt: now(), lastActivityAt: now() };
       run.logsPath = join(this.store.runDirectory(run), 'logs');
       this.store.transaction(() => {
         this.store.putConversation({ ...conversation, title: conversation.title === 'New conversation' ? input.text.trim().slice(0, 64) : conversation.title, ...(explicit ? { harness: selection.harness, model: selection.model, effort: selection.effort } : {}), updatedAt: now() });
@@ -516,7 +562,8 @@ export class Runtime {
       const messages = run.recoveryMessages?.map(message => ({ ...message })) ?? this.store.messages(run.conversationId).map(({ role, text }) => ({ role, text }));
       if (run.memory?.text) messages.unshift({ role: 'user', text: run.memory.text });
       if (run.projectContext?.value.purpose) messages.unshift({ role: 'user', text: 'Approved project context for this run (JSON; does not override execution or approval policy):\n' + JSON.stringify(run.projectContext) });
-      const result = await this.adapterForRun(run).run({ executable: run.executable, executableVersion: run.executableVersion, workspace: run.workspace, model: run.model, effort: run.effort, executionMode: run.executionMode, messages, signal: controller.signal, onEvent: event => this.event(run, event) });
+      if (run.workspaceIdentity) assertWorkspaceIdentity(run.workspace, run.workspaceIdentity);
+      const result = await this.adapterForRun(run).run({ workspaceIdentity: run.workspaceIdentity, executable: run.executable, executableVersion: run.executableVersion, workspace: run.workspace, model: run.model, effort: run.effort, executionMode: run.executionMode, messages, signal: controller.signal, onEvent: event => this.event(run, event) });
       this.finish(run, result.status, result.status === 'stop-unconfirmed' ? 'The harness stopped responding; cleanup could not be confirmed.' : undefined);
       if (result.status === 'completed' && run.checkpoints?.length) {
         try { this.checkpoints.capture(run, 'completed-turn'); }

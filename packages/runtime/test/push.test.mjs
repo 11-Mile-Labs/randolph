@@ -96,6 +96,7 @@ test('divergent histories are rejected even though an exact lease could otherwis
 test('transport isolation ignores project URL rewrites and push hooks', { timeout: 30_000 }, async t => {
   const f = await fixture(t);
   const marker = join(f.temporary, 'must-not-run');
+  await mkdir(join(f.root, '.git', 'hooks'), { recursive: true });
   await writeFile(join(f.root, '.git', 'hooks', 'pre-push'), `#!/bin/sh\ntouch '${marker}'\nexit 1\n`, { mode: 0o700 });
   git(f.root, ['config', 'url.ext::forbidden-helper.insteadOf', f.origin]);
   git(f.root, ['config', 'remote.origin.receivepack', `touch '${marker}'`]);

@@ -15,6 +15,14 @@
     "./project-context": {
       "types": "./dist/project-context.d.ts",
       "import": "./dist/project-context.js"
+    },
+    "./project-context-validation": {
+      "types": "./dist/project-context-validation.d.ts",
+      "import": "./dist/project-context-validation.js"
+    },
+    "./workspace-identity": {
+      "types": "./dist/workspace-identity.d.ts",
+      "import": "./dist/workspace-identity.js"
     }
   },
   "scripts": {

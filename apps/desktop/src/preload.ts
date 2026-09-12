@@ -4,6 +4,7 @@ const bridge: DesktopBridge = {
   snapshot: async () => ipcRenderer.invoke('randolph:snapshot'),
   chatEvents: async input => ipcRenderer.invoke('randolph:chat-events', input),
   projectSetup: async id => ipcRenderer.invoke('randolph:project-setup', id),
+  reconcileProjectSetupCleanup: async id => ipcRenderer.invoke('randolph:reconcile-setup-cleanup', id),
   inspectProject: async input => ipcRenderer.invoke('randolph:inspect-project', input),
   approveProjectSetup: async input => ipcRenderer.invoke('randolph:approve-project-setup', input),
   appSettings: async () => ipcRenderer.invoke('randolph:app-settings'),

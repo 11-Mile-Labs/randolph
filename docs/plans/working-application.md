@@ -51,6 +51,7 @@ Status: active implementation toward the complete [approved v1 scope](../product
 - [x] Add shared harness routing with frozen run/check/recovery identity and legacy Codex compatibility.
 - [x] Add Grok native subscription discovery and visible capability gating; execution remains disabled after the [failed native filesystem boundary probe](../research/grok-adapter-2026-09-12.md).
 - [ ] Complete native Claude and Grok subscription execution adapters with passing capability/authentication evidence.
+- [x] Add explicit Codex project inspection, editable proposals, approval receipts, and revision-pinned project context; see [project setup](project-setup.md) for recovery limits.
 - [ ] Implement discovery/setup, project harness enablement, shared context/instructions/skills/hooks, file/skill selectors and previews.
 - [ ] Add context preparation, pinned material, provenance, budget indicators, and safe transcript management.
 - [ ] Implement editable delegation proposals, saved presets, version-specific approval, concurrency and visible worker activity.

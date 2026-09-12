@@ -1,3 +1,4 @@
+import { assertWorkspaceIdentity, workspaceIdentity } from '@randolph/runtime/workspace-identity';
 import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -299,8 +300,9 @@ export class CodexAdapter implements HarnessAdapter {
     if (code) {
       const version = this.exec(this.executablePath(), ['--version'], { encoding: 'utf8', timeout: 5_000, env: environment() }).trim();
       if (!VERIFIED_CODE_VERSION.test(version)) throw new Error('Code execution requires the verified Codex CLI 0.149.0 or 0.154.0 version.');
-      if (realpathSync(input.workspace) !== input.workspace || !statSync(input.workspace).isDirectory()) throw new Error('Code execution requires a canonical conversation workspace.');
     }
+    const identity = input.workspaceIdentity ?? workspaceIdentity(input.workspace);
+    assertWorkspaceIdentity(input.workspace, identity);
     const child = this.launch(input.workspace, code);
     let threadId = ''; let turnId = ''; let outcome: string | undefined;
     let stop: Promise<void> | undefined;
@@ -331,7 +333,7 @@ export class CodexAdapter implements HarnessAdapter {
     };
     input.signal.addEventListener('abort', onAbort, { once: true });
     if (input.signal.aborted) onAbort();
-    const checkDispatch = (): void => { if (input.signal.aborted) throw new Error('Run interrupted.'); if (client.error) throw client.error; };
+    const checkDispatch = (): void => { if (input.signal.aborted) throw new Error('Run interrupted.'); if (client.error) throw client.error; assertWorkspaceIdentity(input.workspace, identity); };
     let status: 'completed' | 'interrupted' | 'stop-unconfirmed' = 'completed';
     let failure: unknown;
     try {
@@ -349,6 +351,7 @@ export class CodexAdapter implements HarnessAdapter {
       checkDispatch();
       input.onEvent({ type: 'session.started', summary: 'Connected to Codex', data: { threadId, model: input.model, effort: input.effort, executionMode: code ? 'code' : 'read-only', ...(code ? { sandboxPolicy: workspacePolicy(input.workspace) } : {}) } });
       const text = 'Conversation history (JSON; roles identify the original speakers):\n' + JSON.stringify(input.messages) + '\nRespond to the final user message.';
+      checkDispatch();
       const turn = await client.rpc('turn/start', { threadId, model: input.model, effort: input.effort, approvalPolicy: 'never', sandboxPolicy: code ? workspacePolicy(input.workspace) : { type: 'readOnly' }, input: [{ type: 'text', text }] });
       turnId = String(object(turn.turn).id ?? '');
       if (!turnId) throw new Error('Codex returned no turn identity.');

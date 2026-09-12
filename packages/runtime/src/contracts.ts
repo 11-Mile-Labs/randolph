@@ -1,3 +1,4 @@
+import type { ExecutionOrigin } from './execution-origin.js';
 import type { ParsedSetupProposal } from './project-setup.js';
 import type { ProjectContext, ProjectContextSnapshot } from './project-context.js';
 export type { ProjectContext, ProjectContextSnapshot } from './project-context.js';
@@ -17,6 +18,7 @@ import type { GitDeliveryPlan, GitReview } from './git-review.js';
 import type { VerificationResult } from './verification.js';
 
 export type RunStatus = 'starting' | 'running' | 'stopping' | 'completed' | 'failed' | 'interrupted' | 'stop-unconfirmed';
+export type WorkspaceIdentity = { device: number; inode: number };
 export type ExecutionMode = 'read-only' | 'code';
 export type HarnessId = 'codex' | 'grok';
 export type HarnessSelection = { harness: HarnessId; model: string; effort: string };
@@ -29,7 +31,7 @@ export type ApproveReviewInput = { reviewId: string; message: string };
 export type ReviewRecord = { id: string; projectId: string; conversationId: string; runId: string; createdAt: string; updatedAt: string; status: 'pending' | 'checking' | 'stale' | 'delivering' | 'interrupted' | 'delivered' | 'failed' | 'stop-unconfirmed'; basis: GitReview; push?: PushRecord; originOperation?: 'active' | 'cleanup-unconfirmed'; progress?: { checkId: string; startedAt: string; output: string }; verification?: VerificationResult; deliveryPlan?: GitDeliveryPlan; commitOid?: string; merged?: boolean; cleaned?: boolean; error?: string };
 export type Project = { id: string; name: string; root: string; createdAt: string; harnessSettings?: ProjectHarnessSettings };
 export type Conversation = { kind?: 'project-setup'; id: string; projectId: string; sourceConversationId?: string; title: string; harness?: HarnessId; model: string; effort: string; executionMode?: ExecutionMode; createdAt: string; updatedAt: string; lastReadSequence: number };
-export type Run = { projectContext?: ProjectContextSnapshot; harness?: HarnessId; executable?: string; executableVersion?: string; id: string; projectId: string; conversationId: string; sourceRunId?: string; sourceCheckpointDigest?: string; recoveryKind?: 'restart' | 'rerun'; recoveryMessages?: Array<{ role: 'user' | 'assistant'; text: string }>; status: RunStatus; cleanupUnconfirmed?: boolean; checkpoints?: CheckpointRecord[]; checkpointError?: string; memory?: PreparedMemory; integration?: IntegrationState; model: string; effort: string; executionMode?: ExecutionMode; settingsSource?: 'project' | 'conversation' | 'native'; projectSettingsRevision?: string | null; workspace: string; logsPath?: string; createdAt: string; updatedAt: string; lastActivityAt: string; error?: string };
+export type Run = { executionOrigin?: ExecutionOrigin; workspaceIdentity?: WorkspaceIdentity; projectContext?: ProjectContextSnapshot; harness?: HarnessId; executable?: string; executableVersion?: string; id: string; projectId: string; conversationId: string; sourceRunId?: string; sourceCheckpointDigest?: string; recoveryKind?: 'restart' | 'rerun'; recoveryMessages?: Array<{ role: 'user' | 'assistant'; text: string }>; status: RunStatus; cleanupUnconfirmed?: boolean; checkpoints?: CheckpointRecord[]; checkpointError?: string; memory?: PreparedMemory; integration?: IntegrationState; model: string; effort: string; executionMode?: ExecutionMode; settingsSource?: 'project' | 'conversation' | 'native'; projectSettingsRevision?: string | null; workspace: string; logsPath?: string; createdAt: string; updatedAt: string; lastActivityAt: string; error?: string };
 export type Message = { id: string; conversationId: string; runId: string; role: 'user' | 'assistant'; text: string; createdAt: string };
 export type RunEvent = { sequence: number; runId: string; projectId: string; conversationId: string; at: string; type: string; summary: string; data: Record<string, unknown> };
 export type ChatEventsInput = { conversationId: string; runId: string; afterSequence: number };
@@ -39,7 +41,7 @@ export type HarnessModel = { id: string; name: string; efforts: string[]; defaul
 export type HarnessInstallation = { harness?: HarnessId; executable: string; version?: string; reason?: string };
 export type HarnessInfo = { harness?: HarnessId; executable?: string; available: boolean; authenticated: boolean; version?: string; models: HarnessModel[]; executionModes?: ExecutionMode[]; reason?: string };
 export type AdapterEvent = { type: string; summary: string; data?: Record<string, unknown> };
-export type AdapterRun = { executable?: string; executableVersion?: string; workspace: string; model: string; effort: string; executionMode?: ExecutionMode; messages: Pick<Message, 'role' | 'text'>[]; signal: AbortSignal; onEvent: (event: AdapterEvent) => void };
+export type AdapterRun = { workspaceIdentity?: WorkspaceIdentity; executable?: string; executableVersion?: string; workspace: string; model: string; effort: string; executionMode?: ExecutionMode; messages: Pick<Message, 'role' | 'text'>[]; signal: AbortSignal; onEvent: (event: AdapterEvent) => void };
 export type AdapterCommand = { executable?: string; executableVersion?: string; workspace: string; command: string[]; signal: AbortSignal; onOutput: (text: string) => void };
 export type AdapterCommandResult = { exitCode: number | null; output: string; truncated: boolean; cleanupVerified: boolean; error?: string };
 export interface HarnessAdapter {
@@ -49,7 +51,7 @@ export interface HarnessAdapter {
   runCommand?(input: AdapterCommand): Promise<AdapterCommandResult>;
 }
 export type ProjectInspection = { conversationId: string; run: Run; proposal?: ParsedSetupProposal; error?: string; canApprove: boolean; approvedRevision?: string };
-export type ProjectSetupSnapshot = { context: ProjectContextSnapshot; inspections: ProjectInspection[] };
+export type ProjectSetupSnapshot = { cleanup?: { canReconcile: boolean; reason: string }; context: ProjectContextSnapshot; inspections: ProjectInspection[] };
 export type InspectProjectInput = { projectId: string; selection: HarnessSelection; executable?: string; brief: string };
 export type ApproveProjectSetupInput = { projectId: string; runId: string; proposalRevision: string; expectedContextRevision: string | null; value: ProjectContext };
 export type SendInput = { conversationId: string; text: string; harness?: HarnessId; model?: string; effort?: string };
@@ -59,6 +61,7 @@ export type LinkedRunResult = { conversation: Conversation; run: Run };
 export interface DesktopBridge {
   snapshot(): Promise<WorkspaceSnapshot>;
   projectSetup(projectId: string): Promise<ProjectSetupSnapshot>;
+  reconcileProjectSetupCleanup(projectId: string): Promise<ProjectSetupSnapshot>;
   inspectProject(input: InspectProjectInput): Promise<Run>;
   approveProjectSetup(input: ApproveProjectSetupInput): Promise<ProjectContextSnapshot>;
   chatEvents(input: ChatEventsInput): Promise<ChatEventsResult>;

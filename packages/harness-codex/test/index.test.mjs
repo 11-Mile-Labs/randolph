@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import { existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import { homedir } from 'node:os';
 import { CodexAdapter } from '../dist/index.js';
 
-function fakeChild({ accountType = 'chatgpt', modelId = 'gpt-test', delayInitialize = 0, turnStatus = 'completed', invalid = false, threadResponse, notifications = [], commandResult = { exitCode: 0, stdout: '', stderr: '' }, commandOutput = 'checks passed\n', commandDelay = 0 } = {}) {
+function fakeChild({ accountType = 'chatgpt', modelId = 'gpt-test', delayInitialize = 0, turnStatus = 'completed', invalid = false, threadResponse, notifications = [], commandResult = { exitCode: 0, stdout: '', stderr: '' }, commandOutput = 'checks passed\n', commandDelay = 0, beforeResponse = () => {} } = {}) {
   const child = new EventEmitter();
   child.pid = undefined;
   child.exitCode = null;
@@ -28,6 +28,7 @@ function fakeChild({ accountType = 'chatgpt', modelId = 'gpt-test', delayInitial
     child.methods.push(request.method);
     child.requests.push(request);
     const respond = () => {
+      beforeResponse(request.method);
       if (invalid) { child.stdout.write('{not-json}\n'); return; }
       if (request.method === 'account/read') send({ id: request.id, result: { account: { type: accountType } } });
       else if (request.method === 'model/list') send({ id: request.id, result: { data: [{ model: modelId, displayName: 'Test Model', supportedReasoningEfforts: [{ reasoningEffort: 'low' }] }] } });
@@ -61,7 +62,7 @@ function adapterFor(children, extra = {}) {
   }, ...extra });
 }
 
-const runInput = (signal, events = [], model = 'gpt-test') => ({ workspace: '/fixture', model, effort: 'low', messages: [{ role: 'user', text: 'hello' }, { role: 'assistant', text: 'prior answer' }], signal, onEvent: (event) => events.push(event) });
+const runInput = (signal, events = [], model = 'gpt-test') => ({ workspace: realpathSync(process.cwd()), model, effort: 'low', messages: [{ role: 'user', text: 'hello' }, { role: 'assistant', text: 'prior answer' }], signal, onEvent: (event) => events.push(event) });
 
 test('discover uses native account and model RPCs and rejects API-key accounts', async () => {
   const child = fakeChild({ accountType: 'apiKey' });
@@ -129,6 +130,29 @@ function codeFixture(t, policyOverrides = {}) {
   t.after(() => { rmSync(workspace, { recursive: true, force: true }); });
   const policy = { type: 'workspaceWrite', writableRoots: [workspace], networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true, ...policyOverrides };
   return { workspace, policy, threadResponse: { cwd: workspace, approvalPolicy: 'never', sandbox: policy } };
+}
+
+test('read-only execution rejects redirected workspaces before native launch', async t => {
+  const { workspace } = codeFixture(t);
+  const link = join(workspace, 'redirected');
+  symlinkSync(workspace, link);
+  const child = fakeChild();
+  await assert.rejects(adapterFor([child]).run({ ...runInput(new AbortController().signal), workspace: link }), /canonical|workspace/);
+  assert.equal(child.launch, undefined);
+});
+
+for (const boundary of ['account/read', 'thread/start']) {
+  test(`read-only execution rejects directory replacement during ${boundary}`, async t => {
+    const { workspace } = codeFixture(t);
+    const project = join(workspace, 'project');
+    mkdirSync(project);
+    const child = fakeChild({ beforeResponse(method) {
+      if (method === boundary) { renameSync(project, join(workspace, 'original')); mkdirSync(project); }
+    } });
+    await assert.rejects(adapterFor([child]).run({ ...runInput(new AbortController().signal), workspace: project }), /workspace.*changed/);
+    assert.equal(child.methods.includes('turn/start'), false);
+    assert.equal(child.exitCode, 0);
+  });
 }
 
 test('code capability is advertised only for authenticated verified native version', async () => {
@@ -296,7 +320,7 @@ test('GUI-hosted native execution has explicit installed toolchains while HOME s
   assert.equal(paths.includes(''), false);
   assert.equal(paths.includes('.'), false);
   assert.equal(setting('shell_environment_policy.set.VOLTA_HOME'), join(homedir(), '.volta'));
-  assert.equal(setting('shell_environment_policy.set.HOME'), '/fixture');
+  assert.equal(setting('shell_environment_policy.set.HOME'), realpathSync(process.cwd()));
   assert.ok(child.launch.args.includes('shell_environment_policy.inherit="none"'));
 });
 
