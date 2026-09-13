@@ -1,0 +1,42 @@
+{
+  "name": "@randolph/runtime",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./delegation-plan": {
+      "types": "./dist/delegation-plan.d.ts",
+      "default": "./dist/delegation-plan.js"
+    },
+    "./project-context": {
+      "types": "./dist/project-context.d.ts",
+      "import": "./dist/project-context.js"
+    },
+    "./project-context-validation": {
+      "types": "./dist/project-context-validation.d.ts",
+      "import": "./dist/project-context-validation.js"
+    },
+    "./workspace-identity": {
+      "types": "./dist/workspace-identity.d.ts",
+      "import": "./dist/workspace-identity.js"
+    }
+  },
+  "scripts": {
+    "lint": "oxlint --deny-warnings src test",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "yaml": "2.9.0"
+  }
+}

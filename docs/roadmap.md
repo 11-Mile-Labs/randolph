@@ -1,6 +1,18 @@
 # Randolph v1 roadmap
 
-Status: proposed implementation sequence for the [approved product scope](product-spec.md). Milestones are outcome boundaries, not promised dates or authorization to execute every stage. The current deliverable is documentation and the [first controlled-run experiment plan](plans/first-controlled-run.md).
+Status: proposed implementation sequence for the [approved product scope](product-spec.md). Milestones are outcome boundaries, not promised dates or authorization to execute every stage. The current implementation extends the [first desktop product slice](decisions/desktop-first-slice.md) with [controlled coding and delivery](decisions/controlled-coding.md): native Codex conversations and worktree editing, visible checks, explicit local delivery, and durable history in normal app/runtime packages. M1 is not fully passed; its detached-process lifecycle failure remains open.
+
+The [project harness defaults follow-up](decisions/project-harness-defaults.md) adds editable model/effort defaults, saved conversation overrides, and immutable run settings. The [working application plan](plans/working-application.md) tracks ongoing implementation across milestones. These slices cover parts of M2/M3; full configuration management and additional harnesses remain unfinished.
+
+## Current implementation order
+
+1. Complete the delegation coordinator: connect proposals and presets to the full authorized task graph, shared main/worker admission, visible queues and controls, immutable sources, explicit Code integration/check phases, and main synthesis. The graph driver now has complete scripted Code-path and Pause/Resume proofs; a native Codex Code graph also completed writing, integration, content checks, review, and synthesis with confirmed cleanup. Ordinary discovery, main/setup turns, and review checks now share durable app-wide admission and restart quarantine. Delegated discovery, model turns, and project checks now use that same service with separate admissions, charged source validation, and final source rechecks. A durable workspace ownership service and coordinator proofs preserve planned writers, terminal evidence, and runtime-only quarantine. Ordinary runs and linked recovery, setup, checkpoint export, checks, delivery, integration, and push now use the same durable workspace authority. Original unfinished writers are retained on reopen, including missing paths. Run activity now reads queued/native operations and retained cleanup directly without discovery, including workspace-only and legacy cleanup. Separate decision revisions preserve queued work during priority and budget changes. Visible control commands, preset selection, repair generations, explicit recovery for the remaining uncertain operation types, and production scheduler enablement remain pending.
+2. Complete native harness coverage. Grok writing and project checks must use a verified Grok-only boundary; authentication alone does not establish it. Complete Claude support and cross-harness acceptance using existing subscriptions. Native compatibility work can proceed alongside coordinator work, while unavailable routes remain disabled.
+3. Complete all fourteen workflows, guided setup, local and Linear backlogs, outcome-driven advancement, and the attention inbox.
+4. Complete context/skill/hook selection and inspection, shared configuration, worktree/branch choices, optional external memory contracts, history, import/export, retention, and the remaining recovery paths.
+5. Finish macOS release acceptance: close owner-loss and detached-process failures, test accessibility and fresh installation/upgrades, and complete license, signing/notarization, packaging, and update delivery. Lifecycle defects remain active work throughout implementation, not postponed investigation.
+
+The coverage map below remains the complete v1 scope. This order groups implementation dependencies; it does not reduce the product to the currently verified slices.
 
 ## Milestones
 
@@ -13,7 +25,7 @@ Status: proposed implementation sequence for the [approved product scope](produc
 | M4 — Complete project workflows | Workflow engine/catalog, guided creation, local+Linear backlog, built-in memory, configuration UI, attention and history | Approved workflow outcomes and status mappings work; repeatable setup preserves customization; memory/context provenance and project boundaries verified |
 | M5 — macOS release | Installation/package, recovery hardening, accessibility, documentation, license, and OSS release preparation | Full v1 acceptance matrix passes; fresh-machine installation and upgrade/recovery exercised; public artifacts checked |
 
-M1 narrows the experiment, not the product. Passing one adapter does not reduce v1's three-harness target. M2 can be designed while bounded compatibility work continues, but must not present unverified execution guarantees as working.
+M1 narrows the experiment, not the product. Passing one adapter does not reduce v1's three-harness target. M2 implementation now proceeds as bounded usable product slices while remaining control gaps stay explicit. This does not waive M1 requirements or imply unverified execution guarantees.
 
 ## M0 checklist
 
@@ -29,7 +41,7 @@ One synthetic repository, one conversation, one main agent, and one worktree ins
 
 Codex App Server is the first route because the initial probe already exposed model discovery, streamed activity, and concrete permission/lifecycle questions to isolate. This is a proposal for experiment order, not a preferred or mandatory default main agent for users.
 
-Run permission and lifecycle proofs before building a larger runtime. If these cannot satisfy the approved behavior, end with an incompatibility report and a concrete design decision. Do not silently replace hard controls with prompt instructions, bring micro-VMs into v1, or fall back to API billing.
+Permission and lifecycle experiments have produced bounded passes and an explicit detached-process failure. Continue product implementation in apps and packages; retain the failure as a release blocker instead of extending the experiment indefinitely. Do not silently replace hard controls with prompt instructions, bring micro-VMs into v1, or fall back to API billing.
 
 ## V1 coverage map
 
@@ -70,7 +82,7 @@ Decisions should record the problem, considered alternatives, chosen behavior, e
 
 ## Deferred beyond v1
 
-Sandbox/micro-VM execution, guided follow-up suggestions across conversations, multiple repositories per project, direct API billing, other desktop platforms and trackers, team collaboration, and broader marketing/business automation remain deferred as specified in the product document. No plugin marketplace is included in this roadmap.
+Safety sandbox/micro-VM work is deferred until v2 minimum, solely for safety isolation. Guided follow-up suggestions across conversations, multiple repositories per project, direct API billing, other desktop platforms and trackers, team collaboration, and broader marketing/business automation remain deferred as specified in the product document. No plugin marketplace is included in this roadmap.
 
 ## Release interpretation
 

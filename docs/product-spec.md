@@ -18,7 +18,7 @@ The primary v1 audience is individual developers managing multiple projects and 
 - macOS only for v1. A DMG is preferred; manual installation is acceptable for early builds.
 - No account for this application and no required cloud backend.
 - Configuration, conversations, lessons, and retained run material are local. Harnesses and enabled integrations connect to their own services.
-- The whole application and execution engine are intended to be open source. License selection and distribution details remain open.
+- The whole application and execution engine are open source under the [MIT License](../LICENSE). Distribution details remain open.
 
 ## Projects and conversations
 
@@ -198,7 +198,7 @@ Each workflow still needs its own inputs, completion criteria, default limits, a
 
 ## Deferred scope
 
-- Sandbox execution, preferably with a worktree inside the sandbox: v1.5/v2 consideration. Micro-VM technology is not selected.
+- Safety sandbox execution, preferably with a worktree inside the sandbox: v2 minimum. Micro-VM technology is not selected and is not an execution or lifecycle requirement.
 - Guided follow-up work suggestions and cross-conversation creation/context handoff: v1.5/v2.
 - Multi-repository projects, API connections/billing, additional desktop platforms, and additional issue trackers.
 - Team collaboration.

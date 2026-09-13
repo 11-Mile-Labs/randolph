@@ -1,0 +1,12 @@
+.run-activity { display: grid; gap: 8px; margin-bottom: 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); font-size: 12px; }
+.run-activity header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.run-activity h3 { margin: 0; font-family: Georgia, 'Times New Roman', serif; font-size: 16px; }
+.run-activity p { margin: 0; line-height: 1.5; }
+.run-activity-status { text-transform: capitalize; font-weight: 700; }
+.run-capacity { display: flex; flex-wrap: wrap; gap: 12px; }
+.run-activity-note, .run-activity li > span { color: var(--muted); }
+.run-activity ul { display: grid; gap: 8px; padding: 0; margin: 4px 0; list-style: none; }
+.run-activity li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.run-activity li p { grid-column: 1 / -1; color: var(--muted); }
+.run-activity summary { cursor: pointer; font-weight: 700; }
+@media (max-width: 700px) { .run-activity li { grid-template-columns: minmax(0, 1fr); } }

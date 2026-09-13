@@ -1,6 +1,9 @@
 # First controlled-run experiment plan
 
-Status: proposed experiment implementation plan. The current authorization covers preparing and reviewing this document; it does not start implementation or inference. This is milestone M1 in the [roadmap](../roadmap.md).
+Status: execution authorized by the operator. [Git enforcement](../research/scripted-git-2026-09-12.md) and [checkpoint/restart](../research/checkpoint-restart-2026-09-12.md) have passing bounded proofs. The [completed lifecycle experiment](../research/lifecycle-completion-2026-09-12.md) passed Stop and controller/harness death but failed detached-child containment. Final local delivery remains unimplemented. M1 is incomplete; [sandbox research](../research/sandbox-direction-2026-09-12.md) explores the containment blocker. Earlier observations are preserved in their dated reports. The checklist retains the full acceptance requirements; report-specific scope and limitations govern each proof.
+
+**Approved acceptance amendment:** after the live model did not execute the requested standalone Git diagnostic, the operator approved deterministic model-response fixtures through the real installed App Server. For the standalone Git enforcement case, real tool execution, denial, unchanged refs and a permitted positive control now satisfy the criterion without live model selection. This is not a fake harness adapter: only the upstream model response is scripted. See the [passing proof](../research/scripted-git-2026-09-12.md). Prior live observations remain unchanged. Lifecycle, recovery and delivery requirements are not waived.
+
 
 **Goal:** determine whether one subscription-backed native agent can make a useful change with visible activity while Randolph enforces delivery approval, stops owned execution, and restores a durable checkpoint only on explicit request.
 
@@ -34,7 +37,7 @@ Reserve turns as follows: one useful bugfix turn; two protected-operation turns 
 
 ## Proposed file map
 
-All paths below are files to create during later implementation, not files claimed to exist now.
+This is the approved target file map. Fixture, adapter, evidence, approval predicates, lifecycle research, checkpoint capture/restore and explicit restart now exist. The lifecycle candidate failed containment; final delivery remains deferred.
 
 | Path | Responsibility |
 | --- | --- |
@@ -111,6 +114,10 @@ For this spike, use one append-only event journal as the state authority and der
 
 ## Task 3 — Prove stop and owner-loss cleanup
 
+**Completed research outcome:** all four native cases executed in the [completion report](../research/lifecycle-completion-2026-09-12.md). Stop, controller death and harness death passed. The detached child escaped; Task 3's product acceptance criterion failed. Independent checkpoint research may continue, but the supervisor cannot be promoted as a verified containment boundary.
+
+**Bounded execution amendment:** the operator approved proceeding with the lifecycle experiment after the deterministic Git proof. Reuse scripted local responses to launch real native tools without model inference. The candidate is a per-run supervisor with controller IPC-disconnect detection and retained process-tree observations, not a installed service. Test explicit Stop, controller death, harness death and rapid detached-child reparenting separately. Polling may miss reparenting between snapshots; such an escape fails this candidate even if the test observer later rescues it. Supervisor death, arbitrary unobserved descendants, OS failure and later Electron host behavior remain outside any passing claim. Journals have one writer per stream; replay/reopen is read-only. Process identity checks immediately before signals reduce PID-reuse risk but do not make separate lookup/signal syscalls atomic.
+
 **Files:** `lifecycle.ts`, `control.ts`, `cli.ts`, `test/lifecycle.test.ts`, and `test/native.test.ts`.
 
 **Inputs:** tracked controller, harness, and child identities. **Outputs:** exit observations and separate verdicts for explicit Stop, controller death, harness death, and detached descendants.
@@ -124,6 +131,8 @@ For this spike, use one append-only event journal as the state authority and der
 **Done when:** mandatory cases meet the bounded shutdown target without reopening and without killing unrelated processes. Desktop renderer/main-process failures still need later Electron tests. If the candidate cannot cover its claimed ownership boundary, end with that limitation instead of adding an unplanned daemon or sandbox platform.
 
 ## Task 4 — Restore a durable checkpoint and restart explicitly
+
+**Bounded proof passed:** the [checkpoint/restart report](../research/checkpoint-restart-2026-09-12.md) records restore after complete source-repository deletion, read-only reopen, a new linked run and a fresh subscription-backed native test/decision verification. This independent result does not waive Task 3's containment failure or implement Task 5 delivery.
 
 **Files:** `checkpoint.ts`, `control.ts`, `evidence.ts`, `test/checkpoint.test.ts`, and `test/restart.test.ts`.
 
