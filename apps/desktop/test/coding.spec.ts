@@ -105,5 +105,13 @@ createInterface({input:process.stdin}).on('line',line=>{
     await expect(page.getByText('Updated value.txt. Ready for review.', { exact: true })).toBeVisible();
     expect(git('rev-list', '--count', 'HEAD')).toBe('2');
     expect(readFileSync(turns, 'utf8')).toBe('turn\n');
-  } finally { await app.close(); rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    // A failed assertion can leave fixture work active. Accept shutdown so its
+    // native confirmation does not hide the assertion behind a teardown timeout.
+    await app.evaluate(({ dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
+    });
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
