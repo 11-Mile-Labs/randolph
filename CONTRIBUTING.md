@@ -12,10 +12,10 @@ Search existing [issues](https://github.com/11-Mile-Labs/randolph/issues) before
 
 Use macOS, Git, Node 24.18, and pnpm 11.8.0. The manifests pin these development versions. An installed Codex CLI signed into ChatGPT is needed for live conversations; automated tests use fixtures and do not require a subscription or API key.
 
-Development currently lives on `feature/controlled-run`. Base your branch and pull request on that branch until development moves to `main`.
+Base your branch and pull request on `main`.
 
 ```sh
-git clone --branch feature/controlled-run https://github.com/11-Mile-Labs/randolph.git
+git clone https://github.com/11-Mile-Labs/randolph.git
 cd randolph
 pnpm install --frozen-lockfile
 git switch -c feature/your-change
@@ -23,7 +23,7 @@ pnpm build
 pnpm desktop
 ```
 
-For contributions, push to your fork and open a pull request against the development branch. Keep test projects separate from important working repositories. To use disposable application state, launch with `RANDOLPH_DATA_DIR` pointing to a new directory outside your checkout. See [security and trust limits](SECURITY.md) before using live agents.
+For contributions, push to your fork and open a pull request against `main`. Keep test projects separate from important working repositories. To use disposable application state, launch with `RANDOLPH_DATA_DIR` pointing to a new directory outside your checkout. See [security and trust limits](SECURITY.md) before using live agents.
 
 ## Find the code
 
@@ -50,6 +50,8 @@ pnpm test
 ```
 
 After building, run `pnpm test:desktop` for UI or IPC changes on macOS. Exercise affected workflows manually when that reveals something automated tests cannot. Documentation-only changes need accurate instructions, valid links, and clean formatting rather than a new test suite.
+
+GitHub Actions runs these checks, desktop acceptance tests, and the isolated experiment's lint, typecheck, and fixture tests on a standard macOS runner. It uses a read-only token and does not upload artifacts or caches. Workflows from outside contributors require maintainer approval. Dependabot opens weekly dependency update pull requests; updates still need passing checks and maintainer review.
 
 Tests should verify meaningful behavior, especially stale approvals, cancellation, recovery, and permission boundaries. Native compatibility claims require evidence from the actual pinned CLI; a scripted adapter passing a test does not establish native enforcement. Do not run live model, fault-injection, or experiment commands against someone else's projects or credentials.
 
