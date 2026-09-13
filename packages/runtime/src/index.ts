@@ -19,6 +19,7 @@ import { Reviews } from './reviews.js';
 import { Checkpoints, type CheckpointInput, type CheckpointRestore } from './checkpoints.js';
 import { DelegationCommands } from './delegation-commands.js';
 import { DelegationControls } from './delegation-control.js';
+import { DelegationTasks } from './delegation-tasks.js';
 import { assertDelegationBasis } from './delegation-basis.js';
 import type { DelegationAvailability } from './delegation-plan.js';
 import type { DelegationSnapshot, DelegationRevisionInput, ReviseDelegationInput, SaveDelegationPresetInput } from './delegation-contracts.js';
@@ -161,6 +162,7 @@ export class Runtime {
     this.delegation.records.reconcileUnfinishedSessions();
     this.delegationControls = new DelegationControls(this.store);
     this.delegationControls.reconcileOnReopen();
+    new DelegationTasks(this.store).reconcileOnReopen();
     for (const run of this.store.runs()) {
       if (activeStatuses.has(run.status) || (!run.cleanupUnconfirmed && (this.delegation.records.sessions(run.id).some(session => session.state === 'cleanup-unconfirmed') || this.delegationControls.read(run.id)?.activities.some(activity => activity.state === 'cleanup-unconfirmed')))) {
         this.store.transaction(() => {
@@ -168,6 +170,12 @@ export class Runtime {
           run.error = 'The application ended during this run. It has not been restarted; previous process cleanup could not be verified.';
           this.store.putRun(run);
           this.store.append(run, 'run.interrupted', run.error);
+        });
+      } else if (this.delegation.records.tasks(run.id).some(task => task.attempts.some(attempt => attempt.runtimeRecoveryRequired)) && run.status !== 'interrupted') {
+        this.store.transaction(() => {
+          run.status = 'interrupted'; run.updatedAt = now();
+          run.error = 'Native cleanup completed, but delegated task processing was unfinished when the application ended. Explicit recovery is required; no task has been restarted.';
+          this.store.putRun(run); this.store.append(run, 'run.interrupted', run.error, { nativeCleanupConfirmed: true, taskRecoveryRequired: true });
         });
       }
       this.store.exportRun(run);

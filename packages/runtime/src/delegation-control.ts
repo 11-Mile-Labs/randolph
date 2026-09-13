@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { DelegationRecords } from './delegation-records.js';
 import { Store } from './store.js';
 
-export type ExecutionStage = 'native-session' | 'source-preparation' | 'checkpoint' | 'integration-preparation' | 'verification';
+export type ExecutionStage = 'discovery' | 'native-session' | 'source-preparation' | 'checkpoint' | 'integration-preparation' | 'verification';
 export type ExecutionActivity = { token: string; id: string; stage: ExecutionStage; generation: number; startedAt: number; elapsedMs: number; state: 'active' | 'settled' | 'cleanup-unconfirmed'; cleanupEvidence?: Record<string, unknown> };
 export type DelegationControl = { runId: string; authorizationId: string; generation: number; desired: 'running' | 'paused' | 'stopped'; priority: number; budgetMs: number; spentMs: number; accountedAt?: number; recoveryRequired: boolean; activities: ExecutionActivity[] };
 export type ControlStatus = 'running' | 'pausing' | 'paused' | 'stopping' | 'stopped' | 'interrupted';
@@ -105,7 +105,7 @@ export class DelegationControls {
     return this.store.transaction(() => {
       const value = this.required(runId); this.generation(value, expectedGeneration); this.authority(value);
       if (value.desired !== 'running' || value.recoveryRequired || value.activities.some(activity => activity.state === 'cleanup-unconfirmed')) throw new Error('Execution admission is closed.');
-      if (typeof id !== 'string' || !/^[a-zA-Z0-9:_-]{1,200}$/u.test(id) || !['native-session', 'source-preparation', 'checkpoint', 'integration-preparation', 'verification'].includes(stage) || value.activities.some(activity => activity.id === id) || value.activities.length >= 10_000) throw new Error('Execution activity identity or stage is invalid or already used.');
+      if (typeof id !== 'string' || !/^[a-zA-Z0-9:_-]{1,200}$/u.test(id) || !['discovery', 'native-session', 'source-preparation', 'checkpoint', 'integration-preparation', 'verification'].includes(stage) || value.activities.some(activity => activity.id === id) || value.activities.length >= 10_000) throw new Error('Execution activity identity or stage is invalid or already used.');
       const at = this.time(); this.charge(value, at);
       if (value.desired !== 'running' || value.recoveryRequired) throw new Error('Execution admission expired.');
       const activity: ExecutionActivity = { token: randomUUID(), id, stage, generation: value.generation, startedAt: at, elapsedMs: 0, state: 'active' };

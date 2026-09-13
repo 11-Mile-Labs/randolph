@@ -90,7 +90,34 @@ test('discover returns native model efforts for ChatGPT account', async () => {
   const adapter = adapterFor([child], { execFile: () => 'codex-cli 0.149.0' });
   const info = await adapter.discover();
   assert.equal(info.authenticated, true);
+  assert.equal(info.cleanupVerified, true);
   assert.deepEqual(info.models, [{ id: 'gpt-test', name: 'Test Model', efforts: ['low'], defaultEffort: 'low' }]);
+});
+
+test('discovery cannot advertise an executable route when native cleanup is unconfirmed', async () => {
+  const child = fakeChild(); child.kill = () => false;
+  const info = await adapterFor([child]).discover();
+  assert.equal(info.cleanupVerified, false); assert.equal(info.authenticated, false);
+  assert.deepEqual(info.models, []); assert.deepEqual(info.executionModes, []);
+  assert.match(info.reason, /cleanup could not be confirmed/);
+});
+
+test('explicit discovery cancellation settles native cleanup without creating a model turn', async () => {
+  const child = fakeChild({ delayInitialize: 40 }), controller = new AbortController();
+  const adapter = adapterFor([child]);
+  const pending = adapter.discover('/selected/codex', controller.signal);
+  controller.abort();
+  const info = await pending;
+  assert.equal(info.cleanupVerified, true); assert.equal(info.authenticated, false);
+  assert.match(info.reason, /cancelled/); assert.equal(child.methods.includes('turn/start'), false);
+  assert.equal(child.methods.includes('model/list'), false);
+});
+
+test('discovery cancellation before dispatch starts no process or version probe', async () => {
+  const controller = new AbortController(); controller.abort();
+  const adapter = adapterFor([], { execFile: () => { throw new Error('unexpected version probe'); } });
+  const info = await adapter.discover('/selected/codex', controller.signal);
+  assert.equal(info.cleanupVerified, true); assert.equal(info.available, false);
 });
 
 test('run emits only agent-message deltas and keeps each concurrent client isolated', async () => {

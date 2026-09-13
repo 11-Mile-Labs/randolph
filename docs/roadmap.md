@@ -4,6 +4,16 @@ Status: proposed implementation sequence for the [approved product scope](produc
 
 The [project harness defaults follow-up](decisions/project-harness-defaults.md) adds editable model/effort defaults, saved conversation overrides, and immutable run settings. The [working application plan](plans/working-application.md) tracks ongoing implementation across milestones. These slices cover parts of M2/M3; full configuration management and additional harnesses remain unfinished.
 
+## Current implementation order
+
+1. Complete the delegation coordinator: connect proposals and presets to the full authorized task graph, shared main/worker admission, visible queues and controls, immutable sources, explicit Code integration/check phases, and main synthesis. The prepared-task executor has a native read-only worker/synthesis proof; production scheduler enablement remains pending.
+2. Complete native harness coverage. Grok writing and project checks must use a verified Grok-only boundary; authentication alone does not establish it. Complete Claude support and cross-harness acceptance using existing subscriptions. Native compatibility work can proceed alongside coordinator work, while unavailable routes remain disabled.
+3. Complete all fourteen workflows, guided setup, local and Linear backlogs, outcome-driven advancement, and the attention inbox.
+4. Complete context/skill/hook selection and inspection, shared configuration, worktree/branch choices, optional external memory contracts, history, import/export, retention, and the remaining recovery paths.
+5. Finish macOS release acceptance: close owner-loss and detached-process failures, test accessibility and fresh installation/upgrades, and complete license, signing/notarization, packaging, and update delivery. Lifecycle defects remain active work throughout implementation, not postponed investigation.
+
+The coverage map below remains the complete v1 scope. This order groups implementation dependencies; it does not reduce the product to the currently verified slices.
+
 ## Milestones
 
 | Milestone | Deliverable | Exit evidence |
