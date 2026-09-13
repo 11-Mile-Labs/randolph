@@ -168,3 +168,56 @@ test('durable legacy check quarantine survives a newer queued check and another 
   first.reconcileLegacyCleanup(); assert.equal(first.snapshot().capacity.occupied, 1); await first.close();
   const second = new NativeAdmission(store, {}); assert.equal(second.snapshot().capacity.occupied, 1); await second.close();
 });
+
+test('operation admission callbacks start only after capacity and durable intent, with frozen context', async t => {
+  const { service } = fixture(t); let finish, admitted = 0, invoked = 0;
+  const blocker = service.adapter('codex', { discover: async () => { await new Promise(resolve => { finish = resolve; }); return info; } }, context).discover();
+  await turn();
+  const owned = { owner: { kind: 'app-discovery', id: 'frozen' }, onAdmitted: () => { admitted++; assert.equal(service.records.list().at(-1).state, 'admitted'); } };
+  const work = service.perform('codex', owned, 'command', '/fixture/codex', undefined, async () => { invoked++; return true; }, () => ({ status: 'completed', confirmed: true, evidence: { exited: true } }));
+  owned.owner.id = 'changed'; owned.onAdmitted = () => { throw new Error('mutated callback'); };
+  await turn(); assert.equal(admitted, 0); assert.equal(invoked, 0);
+  finish(); await blocker; await work;
+  assert.equal(admitted, 1); assert.equal(invoked, 1); assert.equal(service.records.list().at(-1).owner.id, 'frozen');
+});
+
+test('throwing or asynchronous admission callbacks never invoke the adapter', async t => {
+  const { service } = fixture(t); let invoked = 0;
+  for (const onAdmitted of [() => { throw new Error('budget exhausted'); }, async () => { throw new Error('asynchronous'); }]) {
+    await assert.rejects(service.perform('codex', { ...context, onAdmitted }, 'command', undefined, undefined, async () => { invoked++; return true; }, () => ({ status: 'completed', confirmed: true, evidence: { exited: true } })), /budget exhausted|must be synchronous/);
+  }
+  await turn(); assert.equal(invoked, 0); assert.equal(service.snapshot().capacity.occupied, 0);
+  assert.ok(service.records.list().every(item => item.cleanupConfirmed && item.cleanupEvidence.dispatch === 'not-invoked'));
+});
+
+test('deadline quarantine is final even when the raw adapter later resolves cleanly and emits callbacks', async t => {
+  const { service } = fixture(t); let late, raw, outputs = 0, callbacks = 0;
+  const adapter = service.adapter('codex', { runCommand: async input => { raw = input; input.onDispatch({ processId: 'first' }); return await new Promise(resolve => { late = resolve; }); } }, { ...context, timeoutMs: 10, cleanupTimeoutMs: 10 });
+  await assert.rejects(adapter.runCommand({ command: ['true'], signal: new AbortController().signal, onDispatch: () => { callbacks++; }, onOutput: () => { outputs++; } }), /did not confirm cleanup/);
+  const before = service.records.list(); assert.equal(before[0].state, 'quarantined'); assert.equal(raw.signal.aborted, true);
+  raw.onOutput('late output'); assert.throws(() => raw.onDispatch({ processId: 'late' }), /after cancellation or settlement/);
+  late({ exitCode: 0, output: 'late', cleanupVerified: true, truncated: false }); await turn();
+  assert.deepEqual(service.records.list(), before); assert.equal(service.snapshot().capacity.occupied, 1); assert.equal(outputs, 0); assert.equal(callbacks, 1);
+});
+
+test('cancellation with eventual known cleanup settles once; queued wait does not consume execution deadline', async t => {
+  const { service } = fixture(t); let finish;
+  const blocker = service.adapter('codex', { discover: async () => { await new Promise(resolve => { finish = resolve; }); return info; } }, context).discover(); await turn();
+  let invoked = 0;
+  const pending = service.perform('codex', { ...context, timeoutMs: 10, cleanupTimeoutMs: 50 }, 'command', undefined, undefined, async signal => {
+    invoked++;
+    await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+    return true;
+  }, () => ({ status: 'completed', confirmed: true, evidence: { exited: true } }));
+  const rejected = assert.rejects(pending, /exceeded its execution deadline/);
+  await new Promise(resolve => setTimeout(resolve, 30)); assert.equal(invoked, 0);
+  finish(); await blocker; await rejected;
+  assert.equal(invoked, 1); assert.equal(service.snapshot().capacity.occupied, 0); assert.equal(service.records.list().at(-1).terminalStatus, 'interrupted');
+});
+
+test('command wrapper rejects asynchronous dispatch authority before literal execution', async t => {
+  const { service } = fixture(t); let dispatched = false;
+  const adapter = service.adapter('codex', { runCommand: async input => { input.onDispatch({ processId: 'candidate' }); dispatched = true; return { exitCode: 0, cleanupVerified: true }; } }, context);
+  await assert.rejects(adapter.runCommand({ command: ['true'], signal: new AbortController().signal, onOutput: () => {}, onDispatch: async () => { throw new Error('late denied'); } }), /must be synchronous/);
+  await turn(); assert.equal(dispatched, false);
+});

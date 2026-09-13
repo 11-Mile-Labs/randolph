@@ -50,6 +50,8 @@ export type VerificationExecutor = (
 ) => Promise<VerificationExecutionResult>;
 export interface VerificationOptions {
   executor: VerificationExecutor;
+  /** The shared native owner enforces dispatch deadlines and irrevocable cleanup settlement. */
+  executorOwnsDeadlines?: boolean;
   signal?: AbortSignal;
   onEvent?: (event: VerificationEvent) => void;
 }
@@ -173,9 +175,9 @@ async function runCheck(workspace: string, command: CheckCommand, options: Verif
   const cancel = (): void => {
     if (controller.signal.aborted) return;
     controller.abort();
-    cleanupTimer = setTimeout(() => abortFallback({ exitCode: null, output: streamed, truncated: streamedTruncated, cleanupVerified: false, error: 'Verification executor did not confirm cleanup after cancellation.' }), CLEANUP_TIMEOUT_MS);
+    if (!options.executorOwnsDeadlines) cleanupTimer = setTimeout(() => abortFallback({ exitCode: null, output: streamed, truncated: streamedTruncated, cleanupVerified: false, error: 'Verification executor did not confirm cleanup after cancellation.' }), CLEANUP_TIMEOUT_MS);
   };
-  const timer = setTimeout(() => { timedOut = true; cancel(); }, COMMAND_TIMEOUT_MS);
+  const timer = options.executorOwnsDeadlines ? undefined : setTimeout(() => { timedOut = true; cancel(); }, COMMAND_TIMEOUT_MS);
   options.signal?.addEventListener('abort', cancel, { once: true });
   try {
     const execution = (async () => await options.executor(workspace, command, {
@@ -189,7 +191,7 @@ async function runCheck(workspace: string, command: CheckCommand, options: Verif
         if (kept.output) emit(options, { type: 'check-output', checkId: command.id, output: kept.output });
       },
     }))();
-    const result = await Promise.race([execution, abandoned]);
+    const result = options.executorOwnsDeadlines ? await execution : await Promise.race([execution, abandoned]);
     const output = cappedOutput(result.output || streamed);
     return {
       ...base, ...result, output: output.output, truncated: output.truncated || result.truncated || streamedTruncated,

@@ -14,8 +14,7 @@ import { DelegationVerificationExecutor } from '../dist/delegation-verification.
 import { DelegationChecks } from '../dist/delegation-checks.js';
 import { workspaceIdentity } from '../dist/workspace-identity.js';
 import { WorkspaceLeases } from '../dist/workspace-leases.js';
-import { SessionCapacity } from '../dist/session-capacity.js';
-import { NativeAdmissionQueue } from '../dist/native-admission-queue.js';
+import { NativeAdmission } from '../dist/native-admission.js';
 import { prepareWorkspace } from '../dist/workspace.js';
 
 const selection = { harness: 'codex', executable: '/fixture-codex', executableVersion: 'fixture-1', model: 'fixture', effort: 'low' };
@@ -41,16 +40,16 @@ function fixture(t, clock) {
   tasks.beginAttempt({ ...input, authorizationId: auth.id, session: { ...selection, id: sessionId, role: 'verification', allowedTools: [], origin: { fixture: true } } });
   const prepared = { workspace, workspaceIdentity: workspaceIdentity(workspace), source };
   tasks.bindPreparedAttempt({ ...input, source: prepared.source, workspace: { path: prepared.workspace, identity: prepared.workspaceIdentity }, contextArtifacts: [] });
-  const capacity = new SessionCapacity(), queue = new NativeAdmissionQueue(capacity), leases = new WorkspaceLeases();
+  const admission = new NativeAdmission(store, { fixture: true }), queue = admission.queue, capacity = queue.capacity, leases = new WorkspaceLeases();
   const ownership = leases.acquire({ reservationId: attemptId, runId: run.id, workspace: prepared.workspace });
   input.workspaceLease = { reservationId: attemptId, generation: ownership.lease.generation };
   t.after(() => { try { store.close(); } catch {} rmSync(root, { recursive: true, force: true }); });
-  return { store, records, controls, tasks, input, prepared, capacity, queue, leases, run, auth, checks: new DelegationChecks(store) };
+  return { store, records, controls, tasks, input, prepared, admission, capacity, queue, leases, run, auth, checks: new DelegationChecks(store) };
 }
 function adapter(overrides = {}) {
   return { async discover() { return info; }, async run() { throw new Error('Checks cannot invoke a model turn.'); }, async runCommand(input) { input.onDispatch({ processId: randomUUID() }); input.onOutput('check output'); return { exitCode: 0, output: 'check output', cleanupVerified: true, truncated: false }; }, ...overrides };
 }
-const executor = (f, value) => new DelegationVerificationExecutor(f.store, f.controls, f.queue, f.leases, () => value ?? adapter());
+const executor = (f, value) => new DelegationVerificationExecutor(f.store, f.controls, f.admission, f.leases, () => value ?? adapter());
 
 test('native verification runs one exact command per admission, retains all identities, and completes only after all checks', async t => {
   const f = fixture(t), seen = [];
@@ -121,4 +120,21 @@ test('Stop invalidates a command during native startup before its dispatch callb
   const f = fixture(t); let dispatched = false;
   const result = await executor(f, adapter({ async runCommand(input) { f.controls.command('run', 1, 'stop'); try { input.onDispatch({ processId: 'must-not-dispatch' }); dispatched = true; } catch { return { exitCode: null, output: '', truncated: false, cleanupVerified: true, error: 'stopped before command' }; } } })).runNext(f.input);
   assert.equal(result.status, 'failed'); assert.equal(dispatched, false); assert.equal(f.capacity.snapshot().occupied, 0);
+});
+
+test('shared deadline prevents command binding during cleanup grace and late results cannot clear quarantine', async t => {
+  const f = fixture(t); let raw, late, graceRejected = false;
+  const perform = f.admission.perform.bind(f.admission);
+  f.admission.perform = (harness, context, purpose, ...args) => perform(harness, { ...context, ...(purpose === 'command' ? { timeoutMs: 10, cleanupTimeoutMs: 10 } : {}) }, purpose, ...args);
+  const result = await executor(f, adapter({ async runCommand(input) {
+    raw = input;
+    input.signal.addEventListener('abort', () => { assert.throws(() => input.onDispatch({ processId: 'after-deadline' }), /late or duplicated/); graceRejected = true; }, { once: true });
+    return await new Promise(resolve => { late = resolve; });
+  } })).runNext(f.input);
+  assert.equal(graceRejected, true); assert.equal(result.cleanupConfirmed, false);
+  const operations = f.admission.records.list(), checks = f.checks.snapshot(f.input);
+  assert.equal(operations.at(-1).state, 'quarantined'); assert.equal(checks.checks[0].commandId, undefined);
+  assert.throws(() => raw.onDispatch({ processId: 'late' }), /late or duplicated/); raw.onOutput('late output');
+  late({ exitCode: 0, output: 'late pass', cleanupVerified: true, truncated: false }); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.admission.records.list(), operations); assert.deepEqual(f.checks.snapshot(f.input), checks); assert.equal(f.capacity.snapshot().occupied, 1);
 });

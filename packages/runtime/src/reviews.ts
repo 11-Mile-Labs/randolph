@@ -16,7 +16,7 @@ export class Reviews {
   private readonly busy = new Set<string>();
   private accepting = true;
 
-  constructor(private readonly store: Store, private readonly adapterFor: (run: Run, review: ReviewRecord, check?: { id: string; assertCurrent: () => void }) => HarnessAdapter, private readonly canWork: (conversationId: string) => boolean, private readonly changed: () => void) {
+  constructor(private readonly store: Store, private readonly adapterFor: (run: Run, review: ReviewRecord, check?: { id: string; assertCurrent: () => void }) => HarnessAdapter, private readonly canWork: (conversationId: string) => boolean, private readonly changed: () => void, private readonly executorOwnsDeadlines = false) {
     for (const review of store.reviews()) {
       if (review.status === 'checking' || review.status === 'delivering') {
         review.status = review.status === 'checking' ? 'stop-unconfirmed' : 'interrupted';
@@ -117,7 +117,7 @@ export class Reviews {
       const assertCurrent = () => { assertWorkspaceIdentity(review.basis.workspace, identity); this.assertCurrent(review); };
       const commands = await detectVerificationCommands(review.basis.workspace);
       review.verification = await runVerification(review.basis.workspace, commands, {
-        signal: controller.signal,
+        signal: controller.signal, executorOwnsDeadlines: this.executorOwnsDeadlines,
         executor: async (workspace, command, options) => this.adapterFor(run, review, { id: command.id, assertCurrent }).runCommand!({ executable: run.executable, executableVersion: run.executableVersion, workspace, workspaceIdentity: identity, command: [command.command, ...command.args], signal: options.signal, onOutput: options.onOutput, onDispatch: assertCurrent }),
         onEvent: event => {
           if (event.type === 'check-started') review.progress = { checkId: event.checkId, startedAt: now(), output: '' };

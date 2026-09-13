@@ -1,11 +1,13 @@
 import { lstatSync, realpathSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
 export type WorkspaceIdentity = { device: number; inode: number };
 export type WorkspaceLeaseState = 'active' | 'cleanup-unconfirmed';
-export type WorkspaceLease = { reservationId: string; runId: string; workspace: string; identity?: WorkspaceIdentity; generation: number; state: WorkspaceLeaseState; cleanupEvidence?: Record<string, unknown> };
+export type WorkspaceLease = { reservationId: string; runId?: string; ownerId?: string; workspace: string; identity?: WorkspaceIdentity; generation: number; state: WorkspaceLeaseState; cleanupEvidence?: Record<string, unknown> };
+export type WorkspaceLeasePort = Pick<WorkspaceLeases, 'snapshot' | 'acquire' | 'bind' | 'release'>;
 export type WorkspaceLeaseAcquire = { status: 'acquired'; lease: WorkspaceLease; replayed: boolean } | { status: 'blocked'; reason: { kind: 'workspace-lease' | 'cleanup-unconfirmed'; workspace: string; reservationId: string } };
-export type WorkspaceLeaseRelease = { status: 'released' | 'cleanup-unconfirmed'; lease: WorkspaceLease };
+export type WorkspaceLeaseRelease = { status: 'released' | 'cleanup-unconfirmed'; lease: WorkspaceLease | (Omit<WorkspaceLease, 'state'> & { state: 'released' }) };
 
 const text = (value: unknown, label: string, maximum = 1_000): string => {
   if (typeof value !== 'string' || !value || value.length > maximum || value.trim() !== value || Array.from(value).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) throw new Error(`${label} must be bounded nonempty text.`);
@@ -25,6 +27,7 @@ function evidence(value: unknown): Record<string, unknown> {
   try { cloned = structuredClone(value as Record<string, unknown>); } catch { throw new Error('Workspace cleanup evidence must be cloneable.'); }
   let encoded: string;
   try { encoded = JSON.stringify(cloned); } catch { throw new Error('Workspace cleanup evidence must be serializable.'); }
+  if (!isDeepStrictEqual(cloned, JSON.parse(encoded)) || !Object.keys(JSON.parse(encoded)).length) throw new Error('Workspace cleanup evidence must be losslessly serializable.');
   if (Buffer.byteLength(encoded, 'utf8') > 16 * 1024) throw new Error('Workspace cleanup evidence exceeds 16 KiB.');
   return cloned;
 }
@@ -105,3 +108,5 @@ export class WorkspaceLeases {
     this.leases.delete(reservationId); return { status: 'released', lease: copy({ ...lease, cleanupEvidence }) };
   }
 }
+
+export const workspaceLeaseValidation = { text, identity, evidence, plannedWorkspace, retainedWorkspace, sameIdentity };

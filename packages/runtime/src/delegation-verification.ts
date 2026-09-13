@@ -6,12 +6,11 @@ import { DelegationControls, type ExecutionActivity } from './delegation-control
 import { DelegationRecords } from './delegation-records.js';
 import { DelegationTasks } from './delegation-tasks.js';
 import { captureGitTree } from './git-review.js';
-import { NativeAdmissionQueue } from './native-admission-queue.js';
-import type { CapacityLease } from './session-capacity.js';
+import { NativeAdmission, type NativeAdmissionContext } from './native-admission.js';
 import { Store } from './store.js';
 import { detectVerificationCommands } from './verification.js';
 import { assertWorkspaceIdentity } from './workspace-identity.js';
-import { WorkspaceLeases } from './workspace-leases.js';
+import type { WorkspaceLeasePort } from './workspace-leases.js';
 
 export type DelegationVerificationInput = {
   runId: string; taskId: string; attemptId: string; expectedGeneration: number;
@@ -28,7 +27,7 @@ export class DelegationVerificationExecutor {
   private readonly records: DelegationRecords;
   private readonly tasks: DelegationTasks;
   private readonly checks: DelegationChecks;
-  constructor(private readonly store: Store, private readonly controls: DelegationControls, private readonly queue: NativeAdmissionQueue, private readonly workspaceLeases: WorkspaceLeases, private readonly adapterFor: (harness: 'codex' | 'grok') => HarnessAdapter) {
+  constructor(private readonly store: Store, private readonly controls: DelegationControls, private readonly admission: NativeAdmission, private readonly workspaceLeases: WorkspaceLeasePort, private readonly adapterFor: (harness: 'codex' | 'grok') => HarnessAdapter) {
     this.records = new DelegationRecords(store); this.tasks = new DelegationTasks(store); this.checks = new DelegationChecks(store);
   }
 
@@ -49,12 +48,7 @@ export class DelegationVerificationExecutor {
     };
     const exactTree = (): string => { ownership(); return captureGitTree(workspace.path, this.store.runDirectory(run)); };
     const controller = new AbortController();
-    let cancelDeadline: ReturnType<typeof setTimeout> | undefined;
-    let cancelFallback: (() => void) | undefined;
-    const cancel = (): void => {
-      controller.abort(); this.queue.drain();
-      if (cancelFallback && !cancelDeadline) cancelDeadline = setTimeout(() => cancelFallback?.(), 5_000);
-    };
+    const cancel = (): void => { controller.abort(); this.admission.queue.drain(); };
     const guard = (): void => {
       if (controller.signal.aborted) throw new Error('Verification admission was cancelled.');
       this.tasks.assertRuntimeStage(input); ownership();
@@ -63,7 +57,6 @@ export class DelegationVerificationExecutor {
     if (input.signal.aborted) cancel();
     let activity: ExecutionActivity | undefined;
     let cleanupConfirmed = true, cleanupEvidence: Record<string, unknown> = { dispatch: 'not-invoked' };
-    let capacity: CapacityLease | undefined;
     let claimed: ReturnType<DelegationChecks['claimNext']> | undefined;
     let dispatched = false, accepting = false, nativeInvoked = false;
     let status: DelegationVerificationResult['status'] = 'failed';
@@ -79,9 +72,8 @@ export class DelegationVerificationExecutor {
         const auth = this.records.authorizations(run.id).find(value => value.id === task.authorizationId);
         if (control.desired === 'stopped' || control.recoveryRequired || !auth || auth.revokedAt || auth.planId !== this.records.plans(run.id).at(-1)?.id) cancel();
       } catch { cancel(); }
-      this.queue.drain();
+      this.admission.queue.drain();
     }, 1000);
-    let commandTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       guard();
       activity = this.controls.begin(run.id, input.expectedGeneration, `${attempt.id}:check-source:${randomUUID()}`, 'verification');
@@ -101,34 +93,33 @@ export class DelegationVerificationExecutor {
       // This transaction is the ownership claim. A concurrent executor cannot settle or launch it.
       claimed = this.checks.claimNext({ ...input, sessionId: randomUUID() });
       const sessionId = claimed.session.id, checkId = claimed.check.id;
-      capacity = await this.queue.acquire({ reservation: { reservationId: sessionId, runId: run.id, harness: assignment.harness, role: 'runtime-verification' }, priority: () => this.controls.read(run.id)?.priority ?? 0, assertCurrent: guard, queued: reason => audit('delegation.check-queued', 'Native project check is waiting for capacity.', { sessionId, checkId, reason }) });
-      guard();
-      activity = this.controls.begin(run.id, input.expectedGeneration, `${attempt.id}:check-discovery:${randomUUID()}`, 'discovery');
+      const context: NativeAdmissionContext = { owner: { kind: 'delegation', id: attempt.id }, runId: run.id, sessionId, checkId, generation: input.expectedGeneration, role: 'runtime-verification', priority: () => this.controls.read(run.id)?.priority ?? 0, assertCurrent: guard, queued: reason => audit('delegation.check-queued', 'Native project check is waiting for capacity.', { sessionId, checkId, reason }) };
       const adapter = this.adapterFor(assignment.harness);
-      nativeInvoked = true; cleanupConfirmed = false;
-      const abandoned = new Promise<never>((_resolve, reject) => { cancelFallback = () => reject(new Error('Native check did not confirm cleanup after cancellation.')); });
-      commandTimer = setTimeout(cancel, 600_000);
-      const info = await Promise.race([adapter.discover(assignment.executable, controller.signal), abandoned]);
+      const info = await this.admission.perform(assignment.harness, { ...context, onAdmitted: () => { activity = this.controls.begin(run.id, input.expectedGeneration, `${attempt.id}:check-discovery:${randomUUID()}`, 'discovery'); } }, 'discovery', assignment.executable, controller.signal,
+        signal => { nativeInvoked = true; cleanupConfirmed = false; return adapter.discover(assignment.executable, signal); },
+        value => ({ status: value.available ? 'completed' : 'failed', confirmed: value.cleanupVerified === true, evidence: { discoveryCleanupVerified: value.cleanupVerified === true }, ...(value.executable && value.version ? { identity: { executable: value.executable, version: value.version } } : {}) }));
       cleanupConfirmed = info.cleanupVerified === true; cleanupEvidence = { discoveryCleanupVerified: cleanupConfirmed };
       settle();
       if (!cleanupConfirmed) throw new Error('Native check discovery cleanup could not be confirmed.');
       guard();
       if (!info.available || !info.authenticated || info.executable !== assignment.executable || info.version !== assignment.executableVersion || !info.commandLifecycle || !info.executionModes?.includes('code') || !info.models.some(model => model.id === assignment.model && model.efforts.includes(assignment.effort)) || !adapter.runCommand) { status = 'unavailable'; throw new Error('The authorized harness has no verified native command lifecycle.'); }
-      activity = this.controls.begin(run.id, input.expectedGeneration, `${attempt.id}:check:${checkId}:${randomUUID()}`, 'verification');
-      if (exactTree() !== attempt.source.treeOid) throw new Error('Verification source changed while command admission was pending.');
-      this.controls.tick(run.id); guard();
-      cleanupConfirmed = false; accepting = true;
-      const execution = adapter.runCommand({ executable: assignment.executable, executableVersion: assignment.executableVersion, workspace: workspace.path, workspaceIdentity: workspace.identity, command: [...claimed.check.argv], signal: controller.signal,
-        onDispatch: value => {
-          if (!accepting || dispatched) throw new Error('Native command dispatch callback is late or duplicated.');
-          this.controls.tick(run.id); guard();
-          if (exactTree() !== attempt.source!.treeOid) throw new Error('Verification source changed before native command dispatch.');
-          this.controls.tick(run.id); guard();
-          this.checks.bindCommand({ ...input, sessionId, checkId, commandId: value.processId }); dispatched = true;
-        },
-        onOutput: value => { if (accepting && typeof value === 'string') { truncated ||= Buffer.byteLength(output) + Buffer.byteLength(value) > 16_384; output = bounded(output + bounded(value)); } },
-      });
-      const result = await Promise.race([execution, abandoned]);
+      const result = await this.admission.perform(assignment.harness, { ...context, onAdmitted: () => {
+        activity = this.controls.begin(run.id, input.expectedGeneration, `${attempt.id}:check:${checkId}:${randomUUID()}`, 'verification');
+        if (exactTree() !== attempt.source!.treeOid) throw new Error('Verification source changed while command admission was pending.');
+        this.controls.tick(run.id); guard();
+      } }, 'command', assignment.executable, controller.signal, signal => {
+        nativeInvoked = true; cleanupConfirmed = false; accepting = true;
+        return adapter.runCommand!({ executable: assignment.executable, executableVersion: assignment.executableVersion, workspace: workspace.path, workspaceIdentity: workspace.identity, command: [...claimed!.check.argv], signal,
+          onDispatch: value => {
+            if (!accepting || signal.aborted || dispatched) throw new Error('Native command dispatch callback is late or duplicated.');
+            this.controls.tick(run.id); guard();
+            if (exactTree() !== attempt.source!.treeOid) throw new Error('Verification source changed before native command dispatch.');
+            this.controls.tick(run.id); guard();
+            this.checks.bindCommand({ ...input, sessionId, checkId, commandId: value.processId }); dispatched = true;
+          },
+          onOutput: value => { if (accepting && typeof value === 'string') { truncated ||= Buffer.byteLength(output) + Buffer.byteLength(value) > 16_384; output = bounded(output + bounded(value)); } },
+        });
+      }, value => ({ status: value.exitCode === 0 ? 'completed' : 'failed', confirmed: value.cleanupVerified === true, evidence: { commandCleanupVerified: value.cleanupVerified === true, exitCode: value.exitCode } }));
       accepting = false; cleanupConfirmed = result.cleanupVerified === true;
       cleanupEvidence = { commandCleanupVerified: cleanupConfirmed, exitCode: result.exitCode, commandId: dispatched ? this.checks.snapshot(input)?.checks.find(check => check.id === checkId)?.commandId : undefined };
       truncated ||= result.truncated || Buffer.byteLength(result.output || output) > 16_384; output = bounded(result.output || output); exitCode = result.exitCode;
@@ -146,9 +137,8 @@ export class DelegationVerificationExecutor {
       const control = this.controls.read(run.id), auth = this.records.authorizations(run.id).find(value => value.id === task.authorizationId && !value.revokedAt);
       if (!dispatched && cleanupConfirmed && !controller.signal.aborted && auth?.planId === this.records.plans(run.id).at(-1)?.id && control && !control.recoveryRequired && control.desired !== 'stopped' && (control.desired === 'paused' || control.generation !== input.expectedGeneration)) status = 'pending';
     } finally {
-      accepting = false; clearInterval(timer); clearTimeout(commandTimer); clearTimeout(cancelDeadline); input.signal.removeEventListener('abort', cancel);
+      accepting = false; clearInterval(timer); input.signal.removeEventListener('abort', cancel);
       try {
-        settle();
         if (claimed) {
           const identity = { ...input, sessionId: claimed.session.id, checkId: claimed.check.id };
           if (status === 'pending') {
@@ -162,7 +152,7 @@ export class DelegationVerificationExecutor {
             else this.checks.failUndispatchedCheck({ ...identity, status: status === 'unavailable' ? 'unavailable' : status === 'interrupted' ? 'interrupted' : 'failed', error: error ?? 'Native project check was not dispatched.' });
           }
         }
-      } finally { if (capacity) this.queue.release(capacity, cleanupConfirmed); }
+      } finally { settle(); }
     }
     if (status === 'next-check' && this.checks.passed(input)) status = 'passed';
     return { status, cleanupConfirmed, ...(claimed ? { checkId: claimed.check.id } : {}), ...(error ? { error } : {}) };

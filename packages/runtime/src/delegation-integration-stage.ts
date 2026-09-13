@@ -8,7 +8,7 @@ import { DelegationRecords, type DelegationAttempt, type DelegationAuthorization
 import { DelegationTasks } from './delegation-tasks.js';
 import { Store } from './store.js';
 import { assertWorkspaceIdentity, workspaceIdentity } from './workspace-identity.js';
-import type { WorkspaceLeases } from './workspace-leases.js';
+import type { WorkspaceLeasePort } from './workspace-leases.js';
 
 export type IntegrationReceipt = { state: 'intent' | 'prepared' | 'applied'; generation: number; plan?: DelegationIntegrationPlan; createdAt: string; updatedAt: string };
 type Attempt = DelegationAttempt & { integration?: IntegrationReceipt };
@@ -23,7 +23,7 @@ export class DelegationIntegrationStage {
   private readonly tasks: DelegationTasks;
   private readonly controls: DelegationControls;
   private readonly checkpoints: Checkpoints;
-  constructor(private readonly store: Store, private readonly leases: WorkspaceLeases, private readonly integration = new DelegationIntegration(), controls = new DelegationControls(store)) {
+  constructor(private readonly store: Store, private readonly leases: WorkspaceLeasePort, private readonly integration = new DelegationIntegration(), controls = new DelegationControls(store)) {
     this.records = new DelegationRecords(store); this.tasks = new DelegationTasks(store); this.controls = controls; this.checkpoints = new Checkpoints(store);
   }
 

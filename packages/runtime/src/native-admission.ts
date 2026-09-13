@@ -7,8 +7,8 @@ import { NativeOperationRecords, type NativeOperation, type NativeOperationOwner
 import { SessionCapacity, type CapacityLease, type CapacityLimits, type CapacityQueueReason, type NativeSessionRole } from './session-capacity.js';
 import { Store } from './store.js';
 
-type Context = { owner: NativeOperationOwner; runId?: string; sessionId?: string; reviewId?: string; checkId?: string; generation?: number; role?: NativeSessionRole; authorizationId?: string; workerParallelLimit?: number; priority?: () => number; assertCurrent?: () => void };
-type Cleanup = { status: 'completed' | 'failed' | 'interrupted'; confirmed: boolean; evidence: Record<string, unknown>; identity?: { executable: string; version: string } };
+export type NativeAdmissionContext = { owner: NativeOperationOwner; runId?: string; sessionId?: string; reviewId?: string; checkId?: string; generation?: number; role?: NativeSessionRole; authorizationId?: string; workerParallelLimit?: number; priority?: () => number; assertCurrent?: () => void; onAdmitted?: () => void; queued?: (reason: CapacityQueueReason) => void; timeoutMs?: number; cleanupTimeoutMs?: number };
+export type NativeAdmissionCleanup = { status: 'completed' | 'failed' | 'interrupted'; confirmed: boolean; evidence: Record<string, unknown>; identity?: { executable: string; version: string } };
 type Active = { purpose: NativeOperation['purpose']; controller: AbortController; done: Promise<unknown> };
 
 /** One native admission owner. SQLite settlement precedes releasing any process capacity. */
@@ -66,7 +66,7 @@ export class NativeAdmission {
   snapshot() { return { capacity: this.queue.capacity.snapshot(), waiting: [...this.waiting].map(([id, reason]) => ({ id, reason })), operations: this.records.list() }; }
   hasActiveWork(includeDiscovery = true): boolean { return [...this.active.values()].some(item => includeDiscovery || item.purpose !== 'discovery' && item.purpose !== 'installation-discovery'); }
 
-  adapter(harness: HarnessId, adapter: HarnessAdapter, context: Context): HarnessAdapter {
+  adapter(harness: HarnessId, adapter: HarnessAdapter, context: NativeAdmissionContext): HarnessAdapter {
     context = { ...context, owner: structuredClone(context.owner) };
     return {
       // Inventory is filesystem-only. Every native probe must use discover.
@@ -77,22 +77,28 @@ export class NativeAdmission {
           return info.cleanupVerified === true ? info : { ...info, available: false, authenticated: false, models: [], executionModes: [], reason: 'Native discovery cleanup could not be confirmed.' };
         },
         info => ({ status: info.available ? 'completed' : 'failed', confirmed: info.cleanupVerified === true, evidence: { adapterCleanupVerified: info.cleanupVerified === true }, ...(info.executable && info.version ? { identity: { executable: info.executable, version: info.version } } : {}) })),
-      run: value => {
+      run: async value => {
         const input = { ...value, messages: structuredClone(value.messages), workspaceIdentity: value.workspaceIdentity ? structuredClone(value.workspaceIdentity) : undefined, ...(value.applicationTools ? { applicationTools: { definitions: structuredClone(value.applicationTools.definitions), onRequest: value.applicationTools.onRequest } } : {}) };
-        return this.perform(harness, context, 'model-turn', input.executable, input.signal,
-        signal => adapter.run({ ...input, signal }),
-        result => ({ status: result.status === 'stop-unconfirmed' ? 'failed' : result.status, confirmed: result.status !== 'stop-unconfirmed', evidence: { adapterStatus: result.status } }));
+        let accepting = true;
+        try { return await this.perform(harness, context, 'model-turn', input.executable, input.signal,
+          signal => adapter.run({ ...input, signal, onEvent: event => { if (accepting) input.onEvent(event); }, ...(input.applicationTools ? { applicationTools: { ...input.applicationTools, onRequest: request => { if (!accepting || signal.aborted) throw new Error('Native application tool request arrived after cancellation or settlement.'); return input.applicationTools!.onRequest(request); } } } : {}) }),
+          result => ({ status: result.status === 'stop-unconfirmed' ? 'failed' : result.status, confirmed: result.status !== 'stop-unconfirmed', evidence: { adapterStatus: result.status } }));
+        } finally { accepting = false; }
       },
-      ...(adapter.runCommand ? { runCommand: (value: Parameters<NonNullable<HarnessAdapter['runCommand']>>[0]) => {
+      ...(adapter.runCommand ? { runCommand: async (value: Parameters<NonNullable<HarnessAdapter['runCommand']>>[0]) => {
         const input = { ...value, command: [...value.command], workspaceIdentity: value.workspaceIdentity ? structuredClone(value.workspaceIdentity) : undefined };
-        return this.perform(harness, context, 'command', input.executable, input.signal,
-        signal => adapter.runCommand!({ ...input, signal }),
-        result => ({ status: result.exitCode === 0 ? 'completed' : 'failed', confirmed: result.cleanupVerified === true, evidence: { adapterCleanupVerified: result.cleanupVerified === true, exitCode: result.exitCode } }));
+        let accepting = true;
+        try { return await this.perform(harness, context, 'command', input.executable, input.signal,
+          signal => adapter.runCommand!({ ...input, signal, onDispatch: value => { if (!accepting || signal.aborted) throw new Error('Native command dispatch arrived after cancellation or settlement.'); const checked: unknown = input.onDispatch?.(value); if (checked && typeof (checked as { then?: unknown }).then === 'function') { void (async () => { try { await checked; } catch { /* Rejected asynchronous dispatch callbacks remain unauthorized. */ } })(); throw new Error('Native command dispatch callbacks must be synchronous.'); } }, onOutput: value => { if (accepting) input.onOutput(value); } }),
+          result => ({ status: result.exitCode === 0 ? 'completed' : 'failed', confirmed: result.cleanupVerified === true, evidence: { adapterCleanupVerified: result.cleanupVerified === true, exitCode: result.exitCode } }));
+        } finally { accepting = false; }
       } } : {}),
     };
   }
 
-  private perform<T>(harness: HarnessId, context: Context, purpose: NativeOperation['purpose'], executable: string | undefined, signal: AbortSignal | undefined, invoke: (signal: AbortSignal) => Promise<T>, cleanup: (result: T) => Cleanup): Promise<T> {
+  perform<T>(harness: HarnessId, context: NativeAdmissionContext, purpose: NativeOperation['purpose'], executable: string | undefined, signal: AbortSignal | undefined, invoke: (signal: AbortSignal) => Promise<T>, cleanup: (result: T) => NativeAdmissionCleanup): Promise<T> {
+    context = { ...context, owner: structuredClone(context.owner) };
+    for (const value of [context.timeoutMs, context.cleanupTimeoutMs]) if (value !== undefined && (!Number.isSafeInteger(value) || value < 1 || value > 86_400_000)) return Promise.reject(new AdapterRunFailure('Native operation deadline is invalid.', { dispatch: 'not-invoked' }));
     if (!this.accepting) return Promise.reject(new AdapterRunFailure('Native admission is closed.', { dispatch: 'not-invoked' }));
     this.reconcileLegacyCleanup();
     const id = randomUUID(), controller = new AbortController();
@@ -114,7 +120,11 @@ export class NativeAdmission {
     this.active.set(id, active);
     active.done = (async () => {
       let lease: CapacityLease | undefined, invoked = false, admitted = false, settlementAttempted = false, settled = false;
-      const settle = (result: Cleanup) => {
+      let operationTimer: ReturnType<typeof setTimeout> | undefined, cleanupTimer: ReturnType<typeof setTimeout> | undefined, timedOut = false;
+      let abandon: (() => void) | undefined;
+      const cancelled = () => { if (invoked && !cleanupTimer) cleanupTimer = setTimeout(() => abandon?.(), context.cleanupTimeoutMs ?? 5_000); };
+      controller.signal.addEventListener('abort', cancelled, { once: true });
+      const settle = (result: NativeAdmissionCleanup) => {
         settlementAttempted = true;
         if (!admitted) this.records.cancelQueued({ id, expectedGeneration: intent.generation, cleanupEvidence: result.evidence });
         else this.records.settle({ id, expectedGeneration: intent.generation, status: result.status, cleanupConfirmed: result.confirmed, cleanupEvidence: result.evidence });
@@ -122,18 +132,33 @@ export class NativeAdmission {
         if (lease) { this.queue.release(lease, result.confirmed); lease = undefined; }
       };
       try {
-        lease = await this.queue.acquire({ reservation: { reservationId: id, ownerId: context.owner.id, runId: context.runId, harness, ...intent.capacity }, priority: context.priority ?? (() => 0), assertCurrent, queued: reason => { this.waiting.set(id, reason); this.changed(); } });
+        lease = await this.queue.acquire({ reservation: { reservationId: id, ownerId: context.owner.id, runId: context.runId, harness, ...intent.capacity }, priority: context.priority ?? (() => 0), assertCurrent, queued: reason => { this.waiting.set(id, reason); context.queued?.(reason); this.changed(); } });
         this.waiting.delete(id);
         assertCurrent();
         this.records.admit({ id, expectedGeneration: intent.generation });
         admitted = true;
         assertCurrent();
+        const admittedCallback: unknown = context.onAdmitted?.();
+        if (admittedCallback && typeof (admittedCallback as { then?: unknown }).then === 'function') {
+          void (async () => { try { await admittedCallback; } catch { /* Asynchronous admission callbacks cannot authorize dispatch. */ } })();
+          throw new Error('Native admission callbacks must be synchronous.');
+        }
+        assertCurrent();
         invoked = true;
-        const result = await invoke(controller.signal);
+        const abandoned = new Promise<never>((_resolve, reject) => { abandon = () => reject(new Error('Native operation did not confirm cleanup after cancellation.')); });
+        const timeoutMs = context.timeoutMs ?? (purpose === 'command' || purpose === 'discovery' ? 600_000 : undefined);
+        if (timeoutMs !== undefined) operationTimer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+        // Only this continuation can settle the record. Late raw results remain observed by
+        // Promise.race, but cannot resolve identities, publish cleanup, or release quarantine.
+        const result = await Promise.race([invoke(controller.signal), abandoned]);
         const evidence = cleanup(result);
-        if (purpose === 'discovery' && controller.signal.aborted) evidence.status = 'interrupted';
+        if (timedOut || purpose === 'discovery' && controller.signal.aborted) evidence.status = 'interrupted';
         if (evidence.identity) this.records.resolveIdentity({ id, expectedGeneration: intent.generation, resolvedIdentity: evidence.identity });
         settle(evidence);
+        if (timedOut) {
+          if (evidence.confirmed) throw new AdapterRunFailure('Native operation exceeded its execution deadline.', evidence.evidence);
+          throw new Error('Native operation exceeded its execution deadline; cleanup could not be confirmed.');
+        }
         if (purpose === 'discovery' && controller.signal.aborted) {
           if (evidence.confirmed) throw new AdapterRunFailure('Discovery was cancelled.', evidence.evidence);
           throw new Error('Discovery was cancelled; native cleanup could not be confirmed.');
@@ -156,6 +181,7 @@ export class NativeAdmission {
         if (!invoked && !(error instanceof AdapterRunFailure)) throw new AdapterRunFailure(error instanceof Error ? error.message : 'Native admission failed.', { dispatch: 'not-invoked' });
         throw error;
       } finally {
+        clearTimeout(operationTimer); clearTimeout(cleanupTimer); controller.signal.removeEventListener('abort', cancelled);
         signal?.removeEventListener('abort', cancel);
         this.active.delete(id); this.waiting.delete(id); this.changed();
       }

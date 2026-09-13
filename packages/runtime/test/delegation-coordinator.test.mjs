@@ -12,9 +12,8 @@ import { DelegationRecords } from '../dist/delegation-records.js';
 import { DelegationControls } from '../dist/delegation-control.js';
 import { DelegationIntegration } from '../dist/delegation-integration.js';
 import { DelegationCoordinator } from '../dist/delegation-coordinator.js';
-import { WorkspaceLeases } from '../dist/workspace-leases.js';
-import { SessionCapacity } from '../dist/session-capacity.js';
-import { NativeAdmissionQueue } from '../dist/native-admission-queue.js';
+import { WorkspaceOwnership } from '../dist/workspace-ownership.js';
+import { NativeAdmission } from '../dist/native-admission.js';
 import { prepareWorkspace } from '../dist/workspace.js';
 import { workspaceIdentity } from '../dist/workspace-identity.js';
 
@@ -33,9 +32,9 @@ function fixture(t, clock) {
   const plan = records.recordPlan({ runId: run.id, revision: 1, requestId: 'request', source: 'proposal', basis: retainedDelegationBasis(store, store.runs()[0]), plan: { schemaVersion: 1, id: 'plan', revision: 1, limits: { maxWorkers: 3, maxParallel: 2, maxAttempts: 1, activeMinutes: 5 }, assignments: [assignment('writer-a', 'worker', [], 'run-basis', { producesSource: true }), assignment('writer-b', 'worker', [], 'run-basis', { producesSource: true }), assignment('integrate', 'main-integration', ['writer-a', 'writer-b'], 'run-basis', { producesSource: true, integrationInputs: ['writer-a', 'writer-b'] }), assignment('verify', 'runtime-verification', ['integrate'], 'output:integrate', { producesSource: true }), assignment('review', 'review', ['verify'], 'output:verify'), assignment('synthesis', 'main-synthesis', ['verify', 'review'], 'output:verify')] } });
   const revision = { runId: run.id, planId: plan.id, digest: plan.digest, basisDigest: plan.basisDigest }; records.readyPlan(revision);
   const auth = records.authorize({ ...revision, decision: 'user', presetSaved: false }); records.createTasks({ runId: run.id, authorizationId: auth.id }); controls.create(run.id, auth.id);
-  const capacity = new SessionCapacity(), queue = new NativeAdmissionQueue(capacity), leases = new WorkspaceLeases();
+  const admission = new NativeAdmission(store, { fixture: true }), queue = admission.queue, capacity = queue.capacity, leases = new WorkspaceOwnership(store);
   t.after(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
-  return { store, records, controls, capacity, queue, leases, run, projectRoot };
+  return { store, records, controls, admission, capacity, queue, leases, run, projectRoot };
 }
 function adapter(events, override = {}) {
   return { async discover() { return info; }, async run(input) {
@@ -48,7 +47,7 @@ function adapter(events, override = {}) {
     input.onEvent({ type: 'message.delta', summary: 'answer', data: { text: `Completed ${assignment.id}` } }); return { status: 'completed' };
   }, async runCommand(input) { events.push(input.command.at(-1)); input.onDispatch({ processId: randomUUID() }); assert.equal(readFileSync(join(input.workspace, 'integrated.txt'), 'utf8'), 'combined'); return { exitCode: 0, output: 'passed', truncated: false, cleanupVerified: true }; }, ...override };
 }
-const coordinator = (f, value) => new DelegationCoordinator(f.store, f.controls, f.queue, f.leases, () => value);
+const coordinator = (f, value) => new DelegationCoordinator(f.store, f.controls, f.admission, f.leases, () => value);
 
 test('the coordinator drives two writers through conversation integration, all checks, review, and selected-main synthesis', async t => {
   const f = fixture(t), events = [], head = git(f.projectRoot, 'rev-parse', 'HEAD'), index = git(f.projectRoot, 'write-tree');

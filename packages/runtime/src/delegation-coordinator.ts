@@ -10,10 +10,10 @@ import { DelegationRecords, type DelegationAttempt, type DelegationTask } from '
 import { DelegationSources } from './delegation-sources.js';
 import { DelegationTasks } from './delegation-tasks.js';
 import { DelegationVerificationExecutor } from './delegation-verification.js';
-import { NativeAdmissionQueue } from './native-admission-queue.js';
+import { NativeAdmission } from './native-admission.js';
 import { Store } from './store.js';
 import { assertWorkspaceIdentity, workspaceIdentity } from './workspace-identity.js';
-import { WorkspaceLeases, type WorkspaceLease } from './workspace-leases.js';
+import type { WorkspaceLeasePort, WorkspaceLease } from './workspace-leases.js';
 
 class ClosedAdmission extends ExecutionAdmissionClosed {}
 
@@ -29,12 +29,12 @@ export class DelegationCoordinator {
   private readonly integration: DelegationIntegrationStage;
   private readonly native: DelegationNative;
   private readonly verification: DelegationVerificationExecutor;
-  constructor(private readonly store: Store, private readonly controls: DelegationControls, private readonly queue: NativeAdmissionQueue, private readonly leases: WorkspaceLeases, adapterFor: (harness: 'codex' | 'grok') => HarnessAdapter) {
+  constructor(private readonly store: Store, private readonly controls: DelegationControls, private readonly admission: NativeAdmission, private readonly leases: WorkspaceLeasePort, adapterFor: (harness: 'codex' | 'grok') => HarnessAdapter) {
     this.records = new DelegationRecords(store); this.tasks = new DelegationTasks(store);
     this.sources = new DelegationSources(store, input => { const output = this.tasks.completedOutput(input); if (!output) throw new Error('Task source output is unavailable.'); return output; });
     this.integration = new DelegationIntegrationStage(store, leases, undefined, controls);
-    this.native = new DelegationNative(store, controls, queue, leases, adapterFor);
-    this.verification = new DelegationVerificationExecutor(store, controls, queue, leases, adapterFor);
+    this.native = new DelegationNative(store, controls, admission, leases, adapterFor);
+    this.verification = new DelegationVerificationExecutor(store, controls, admission, leases, adapterFor);
   }
   private context(run: Run): Record<string, unknown> {
     const messages = run.recoveryMessages ? [...run.recoveryMessages, ...this.store.messages(run.conversationId).filter(message => message.runId === run.id && message.role === 'assistant' && !message.id.startsWith(`${run.id}:recovery:`)).map(({ role, text }) => ({ role, text }))] : this.store.messages(run.conversationId).map(({ role, text }) => ({ role, text }));
@@ -94,7 +94,7 @@ export class DelegationCoordinator {
         }
         if (!active.size) break;
         await Promise.race([...active.entries()].map(async ([id, promise]) => { await promise; active.delete(id); }));
-        this.queue.drain();
+        this.admission.queue.drain();
       }
       return this.records.tasks(runId);
     } finally {
