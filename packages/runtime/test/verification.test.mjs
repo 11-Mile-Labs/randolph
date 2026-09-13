@@ -4,7 +4,7 @@ import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { detectVerificationCommands, runVerification } from '../src/verification.ts';
+import { detectVerificationCommands, runVerification } from '../dist/verification.js';
 
 async function fixture(t) {
   const path = await mkdtemp(join(tmpdir(), 'randolph-verification-'));

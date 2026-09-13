@@ -12,7 +12,7 @@ export class Store {
     this.db = new DatabaseSync(join(root, 'app.sqlite'));
     chmodSync(join(root, 'app.sqlite'), 0o600);
     const version = Number((this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version);
-    if (version > 4) { this.db.close(); throw new Error('This data directory was created by a newer Randolph version.'); }
+    if (version > 5) { this.db.close(); throw new Error('This data directory was created by a newer Randolph version.'); }
     if (version >= 3 && !this.tableExists('projects')) { this.db.close(); throw new Error('This Randolph database is corrupt.'); }
     this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
     this.db.exec(`
@@ -37,6 +37,15 @@ export class Store {
     if (version < 4) this.db.exec(`BEGIN IMMEDIATE;
       CREATE TABLE IF NOT EXISTS delegation_controls (run_id TEXT PRIMARY KEY REFERENCES runs(id), authorization_id TEXT NOT NULL REFERENCES delegation_authorizations(id), document TEXT NOT NULL);
       PRAGMA user_version=4;
+      COMMIT;`);
+    if (version < 5) this.db.exec(`BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS native_operations (id TEXT PRIMARY KEY, owner_kind TEXT NOT NULL, owner_id TEXT NOT NULL, run_id TEXT REFERENCES runs(id), session_id TEXT, review_id TEXT, check_id TEXT, document TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS native_operation_events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT NOT NULL REFERENCES native_operations(id), document TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS native_legacy_ownership (id TEXT PRIMARY KEY, document TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS workspace_ownership (id TEXT PRIMARY KEY, run_id TEXT REFERENCES runs(id), document TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS native_operations_run ON native_operations(run_id);
+      CREATE INDEX IF NOT EXISTS native_operation_events_operation ON native_operation_events(operation_id, sequence);
+      PRAGMA user_version=5;
       COMMIT;`);
   }
   private tableExists(name: string): boolean { return Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)); }

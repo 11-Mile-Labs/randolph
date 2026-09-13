@@ -27,7 +27,7 @@ function fixture(t, options = {}) {
   const initialHead = git(projectRoot, ['rev-parse', 'HEAD']);
   const calls = [];
   const adapter = {
-    async discover() { return { executable: '/fixture-codex', version: 'fixture-1', available: true, authenticated: true, models: [{ id: 'fixture-model', name: 'Fixture model', efforts: ['low'], defaultEffort: 'low' }], executionModes: options.readOnly ? ['read-only'] : ['read-only', 'code'] }; },
+    async discover() { return { executable: '/fixture-codex', version: 'fixture-1', available: true, authenticated: true, cleanupVerified: true, models: [{ id: 'fixture-model', name: 'Fixture model', efforts: ['low'], defaultEffort: 'low' }], executionModes: options.readOnly ? ['read-only'] : ['read-only', 'code'] }; },
     async run(input) {
       calls.push(input);
       input.onEvent({ type: 'session.turn-started', summary: 'fixture turn established', data: { threadId: 'coding-thread', turnId: `coding-turn-${calls.length}` } });
@@ -99,6 +99,30 @@ test('edits after verification invalidate approval without committing or merging
   writeFileSync(join(run.workspace, 'value.txt'), 'unreviewed change\n');
   await assert.rejects(f.runtime.approveReview({ reviewId: review.id, message: 'Do not commit stale review' }), /changed|stale|match/i);
   assert.equal(git(f.projectRoot, ['rev-parse', 'HEAD']), f.initialHead);
+});
+
+test('a review queued behind native discovery rechecks its workspace before command dispatch', async t => {
+  const f = fixture(t);
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  const run = await f.runtime.send({ conversationId: f.conversation.id, text: 'Update value.' });
+  await settled(f.runtime);
+  const review = f.runtime.prepareReview(f.conversation.id);
+  const gates = [];
+  f.adapter.discover = async () => new Promise(resolve => gates.push(resolve));
+  const probes = [f.runtime.harness(), f.runtime.harness()];
+  for (let i = 0; i < 100 && gates.length !== 2; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(gates.length, 2);
+  const checking = f.runtime.verifyReview(review.id);
+  for (let i = 0; i < 100 && !f.runtime.nativeAdmission.records.list().some(operation => operation.purpose === 'command' && operation.state === 'queued'); i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.ok(f.runtime.nativeAdmission.records.list().some(operation => operation.purpose === 'command' && operation.state === 'queued'));
+  writeFileSync(join(run.workspace, 'value.txt'), 'changed while verification waited\n');
+  assert.equal(review.basis.workspace, run.workspace);
+  assert.match(git(run.workspace, ['status', '--porcelain']), /value\.txt/);
+  for (const release of gates) release({ executable: '/fixture-codex', version: 'fixture-1', available: true, authenticated: true, cleanupVerified: true, models: [{ id: 'fixture-model', name: 'Fixture model', efforts: ['low'], defaultEffort: 'low' }], executionModes: ['read-only', 'code'] });
+  await Promise.all(probes);
+  await assert.rejects(checking, /stale|workspace|changed/i);
+  assert.equal(f.calls.filter(input => Array.isArray(input.command)).length, 0);
+  assert.equal(f.runtime.snapshot().reviews.find(item => item.id === review.id)?.status, 'stale');
 });
 
 test('failed checks block final approval and preserve failure evidence', async t => {

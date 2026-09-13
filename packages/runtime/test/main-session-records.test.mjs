@@ -20,7 +20,7 @@ async function fixture(t, run) {
   await mkdir(projectRoot); git(projectRoot, ['init', '-b', 'main']); await writeFile(join(projectRoot, 'README.md'), 'fixture\n'); git(projectRoot, ['add', 'README.md']); git(projectRoot, ['commit', '-m', 'fixture']);
   const calls = [];
   const adapter = {
-    async discover(executable) { return { executable: executable ?? '/fixture-codex', version: 'fixture-1', available: true, authenticated: true, executionModes: ['read-only'], models: [{ id: 'fixture-model', name: 'Fixture', efforts: ['low'], defaultEffort: 'low' }] }; },
+    async discover(executable) { return { executable: executable ?? '/fixture-codex', version: 'fixture-1', available: true, authenticated: true, cleanupVerified: true, executionModes: ['read-only'], models: [{ id: 'fixture-model', name: 'Fixture', efforts: ['low'], defaultEffort: 'low' }] }; },
     async run(input) { calls.push(input); return run(input); },
   };
   const runtime = new Runtime(adapter, dataRoot, { executionOrigin: () => origin });

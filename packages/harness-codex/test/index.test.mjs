@@ -120,6 +120,15 @@ test('discovery cancellation before dispatch starts no process or version probe'
   assert.equal(info.cleanupVerified, true); assert.equal(info.available, false);
 });
 
+test('installation candidates are filesystem-only and do not launch version probes', async () => {
+  let probes = 0;
+  const adapter = adapterFor([], { execFile: () => { probes++; throw new Error('unexpected process'); } });
+  const installations = await adapter.installations();
+  assert.ok(installations.some(installation => installation.executable === 'fake-codex'));
+  assert.ok(installations.every(installation => installation.version === undefined));
+  assert.equal(probes, 0);
+});
+
 test('run emits only agent-message deltas and keeps each concurrent client isolated', async () => {
   const first = fakeChild({ modelId: 'first' });
   const second = fakeChild({ modelId: 'second' });

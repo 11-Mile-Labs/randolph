@@ -66,3 +66,21 @@ test('reservation validation rejects malformed limits, worker scopes, and noncan
   assert.throws(() => capacity.acquire(reservation('bad-path', { writerLeaseKey: '../workspace' })), /existing canonical/i);
   assert.throws(() => capacity.acquire(reservation('bad-harness', { harness: '__proto__' })), /harness is unsupported/i);
 });
+
+test('restores only quarantined occupancy despite reduced limits or unavailable writer paths', () => {
+  const first = new SessionCapacity({ app: 4, perHarness: 4 }), active = lease(first.acquire(reservation('restore')));
+  const quarantined = first.release({ reservationId: active.reservationId, generation: active.generation, cleanupConfirmed: false }).lease;
+  const restored = new SessionCapacity({ app: 1, perHarness: 1 }); restored.restore([quarantined]);
+  assert.equal(restored.snapshot().occupied, 1);
+  assert.equal(restored.acquire(reservation('later', { runId: 'later', authorizationId: 'later-auth' })).reason.kind, 'app-capacity');
+  assert.throws(() => restored.restore([{ ...quarantined, state: 'active' }]), /quarantined/i);
+});
+
+test('restore rejects malformed reservation shape atomically without filesystem resolution', () => {
+  const capacity = new SessionCapacity(), valid = { reservationId: 'retained', ownerId: 'operation', harness: 'codex', role: 'command', generation: 1, state: 'cleanup-unconfirmed' };
+  assert.throws(() => capacity.restore([valid, { ...valid, reservationId: 'bad', role: 'worker' }]), /worker capacity/i);
+  assert.equal(capacity.snapshot().occupied, 0);
+  assert.throws(() => capacity.restore([{ ...valid, reservationId: '  ' }]), /Reservation ID/i);
+  assert.throws(() => capacity.restore([{ ...valid, reservationId: 'writer', writerLeaseKey: '/missing', writerWorkspaceIdentity: undefined }]), /writer identity/i);
+  assert.equal(capacity.restore([{ ...valid, reservationId: 'missing-path', writerLeaseKey: '/missing', writerWorkspaceIdentity: '1:2' }]).occupied, 1);
+});

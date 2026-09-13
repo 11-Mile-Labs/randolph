@@ -75,6 +75,7 @@ export type AdapterCommand = { executable?: string; executableVersion?: string; 
 export type AdapterCommandResult = { exitCode: number | null; output: string; truncated: boolean; cleanupVerified: boolean; error?: string };
 export interface HarnessAdapter {
   discover(executable?: string, signal?: AbortSignal): Promise<HarnessInfo>;
+  /** Filesystem-only candidate enumeration. Native probes belong to cancellable discover. */
   installations?(): Promise<HarnessInstallation[]>;
   run(input: AdapterRun): Promise<{ status: 'completed' | 'interrupted' | 'stop-unconfirmed' }>;
   runCommand?(input: AdapterCommand): Promise<AdapterCommandResult>;

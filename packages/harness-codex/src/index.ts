@@ -210,10 +210,8 @@ export class CodexAdapter implements HarnessAdapter {
   }
   async installations(): Promise<HarnessInstallation[]> {
     const paths = [...new Set([...(this.options.executable ? [this.options.executable] : []), ...executableCandidates()].map(path => { try { return realpathSync(path); } catch { return path; } }))];
-    return paths.map(executable => {
-      try { return { executable, version: this.exec(executable, ['--version'], { encoding: 'utf8', timeout: 5_000, env: environment() }).trim() }; }
-      catch { return { executable, reason: 'This CLI could not be started.' }; }
-    });
+    // Candidate enumeration must not create a CLI process outside discovery's lifecycle.
+    return paths.map(executable => ({ executable }));
   }
   async discover(executable?: string, signal?: AbortSignal): Promise<HarnessInfo> {
     if (signal?.aborted) return { available: false, authenticated: false, models: [], cleanupVerified: true, reason: 'Discovery was cancelled before dispatch.' };

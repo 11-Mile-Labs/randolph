@@ -1,3 +1,4 @@
+import { AdapterRunFailure } from './contracts.js';
 import { constants } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -198,7 +199,7 @@ async function runCheck(workspace: string, command: CheckCommand, options: Verif
     };
   } catch (error) {
     cancel();
-    return { ...base, status: options.signal?.aborted ? 'cancelled' : 'failed', cleanupVerified: false, output: streamed, truncated: streamedTruncated, elapsedMs: performance.now() - started, error: error instanceof Error ? error.message : String(error) };
+    return { ...base, status: options.signal?.aborted ? 'cancelled' : 'failed', cleanupVerified: error instanceof AdapterRunFailure, output: streamed, truncated: streamedTruncated, elapsedMs: performance.now() - started, error: error instanceof Error ? error.message : String(error) };
   } finally {
     settled = true;
     clearTimeout(timer);

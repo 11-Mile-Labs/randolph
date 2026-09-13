@@ -12,6 +12,7 @@ const harnessInfo = {
   executable: '/fixture-codex',
   available: true,
   authenticated: true,
+  cleanupVerified: true,
   version: 'test-version',
   models: [
     { id: 'model-a', name: 'Model A', efforts: ['low'], defaultEffort: 'low' },
@@ -37,9 +38,9 @@ class FakeHarnessAdapter {
     this.runCalls = [];
   }
 
-  async discover() {
+  async discover(executable, signal) {
     this.discoverCalls += 1;
-    return this.discoverImpl();
+    return this.discoverImpl(executable, signal);
   }
 
   async run(input) {
@@ -131,6 +132,36 @@ test('duplicate send is rejected while the first send awaits discovery', async t
   await waitFor(() => runtime.snapshot().runs[0]?.status === 'completed');
   assert.equal(adapter.runCalls.length, 1);
   await runtime.close();
+});
+
+test('discovery counts as active work and close waits for its aborted transport to settle', async t => {
+  const paths = await fixture(t);
+  let abortObserved = false;
+  let releaseDiscovery;
+  const adapter = new FakeHarnessAdapter({
+    discover: async (_executable, signal) => {
+      await new Promise(resolve => {
+        releaseDiscovery = resolve;
+        if (signal.aborted) { abortObserved = true; return; }
+        signal.addEventListener('abort', () => { abortObserved = true; }, { once: true });
+      });
+      return { available: false, authenticated: false, cleanupVerified: true, models: [], reason: 'Discovery cancelled by close.' };
+    },
+  });
+  const runtime = new Runtime(adapter, paths.dataRoot);
+  const project = runtime.addProject(paths.projectRoot);
+  const conversation = runtime.createConversation(project.id);
+  const sending = runtime.send(sendInput(conversation.id));
+  await waitFor(() => adapter.discoverCalls === 1);
+  assert.equal(runtime.hasActiveWork(), true);
+  let closed = false;
+  assert.equal(runtime.hasActiveWork({ includeDiscovery: false }), true);
+  const closing = (async () => { await runtime.close(); closed = true; })();
+  await waitFor(() => abortObserved, 'close did not abort discovery');
+  assert.equal(closed, false);
+  releaseDiscovery();
+  await closing;
+  await assert.rejects(sending, /cancelled|available|authenticated/i);
 });
 
 test('reopening history never invokes the adapter and marks a prior active run interrupted', async t => {
@@ -364,4 +395,20 @@ test('project executable choice binds new runs and later setting changes cannot 
   assert.ok(commands.every(command => command.executable === '/cli/one' && command.executableVersion === 'test-version'));
   assert.equal(run.executable, '/cli/one');
   assert.equal((await runtime.harness(project.id)).executable, '/cli/two');
+});
+
+
+test('catalog-only discovery is cancellable background work without an active-run quit confirmation', async t => {
+  const paths = await fixture(t);
+  const adapter = new FakeHarnessAdapter({ discover: async (_, signal) => {
+    await new Promise(resolve => { if (signal.aborted) resolve(); else signal.addEventListener('abort', resolve, { once: true }); });
+    return { ...harnessInfo, available: false, authenticated: false };
+  } });
+  const runtime = new Runtime(adapter, paths.dataRoot);
+  const pending = runtime.harness();
+  const rejected = assert.rejects(pending, /cancelled/);
+  await waitFor(() => adapter.discoverCalls === 1);
+  assert.equal(runtime.hasActiveWork(), true);
+  assert.equal(runtime.hasActiveWork({ includeDiscovery: false }), false);
+  await runtime.close(); await rejected;
 });

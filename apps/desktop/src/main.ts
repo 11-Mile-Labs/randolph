@@ -53,7 +53,7 @@ async function shutdown(reason: 'close' | 'quit' = 'quit'): Promise<void> {
   if (confirming || quitting) return;
   confirming = true;
   try {
-    if (runtime?.hasActiveWork()) {
+    if (runtime?.hasActiveWork({ includeDiscovery: false })) {
       const closing = reason === 'close';
       const answer = await dialog.showMessageBox({ type: 'warning', title: closing ? 'Close Randolph?' : 'Quit Randolph?', message: closing ? 'Closing will stop active work.' : 'Quit and stop active conversations?', detail: closing ? 'Enable background execution in Settings to keep work running after closing the window.' : 'Work will not restart automatically when you reopen Randolph.', buttons: closing ? ['Cancel', 'Stop work and close', 'Change settings'] : ['Cancel', 'Stop work and quit'], defaultId: 0, cancelId: 0 });
       if (closing && answer.response === 2) { await showPage('settings'); return; }

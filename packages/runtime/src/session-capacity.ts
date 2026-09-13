@@ -1,11 +1,12 @@
 import { lstatSync, realpathSync } from 'node:fs';
 
 export type CapacityHarness = 'codex' | 'grok';
-export type NativeSessionRole = 'main' | 'worker' | 'main-integration' | 'runtime-verification' | 'review' | 'main-synthesis';
+export type NativeSessionRole = 'main' | 'worker' | 'main-integration' | 'runtime-verification' | 'review' | 'main-synthesis' | 'discovery' | 'installation-discovery' | 'command';
 export type CapacityLimits = { app: number; perHarness: number };
 export type CapacityReservation = {
   reservationId: string;
-  runId: string;
+  runId?: string;
+  ownerId?: string;
   harness: CapacityHarness;
   role: NativeSessionRole;
   authorizationId?: string;
@@ -23,7 +24,7 @@ export type CapacityReleaseResult = { status: 'released'; lease: CapacityLease }
 export type CapacitySnapshot = { limits: CapacityLimits; occupied: number; byHarness: Partial<Record<CapacityHarness, number>>; leases: CapacityLease[] };
 
 export const defaultCapacityLimits: CapacityLimits = { app: 4, perHarness: 2 };
-const roles = new Set<NativeSessionRole>(['main', 'worker', 'main-integration', 'runtime-verification', 'review', 'main-synthesis']);
+const roles = new Set<NativeSessionRole>(['main', 'worker', 'main-integration', 'runtime-verification', 'review', 'main-synthesis', 'discovery', 'installation-discovery', 'command']);
 const workers = new Set<NativeSessionRole>(['worker', 'review']);
 
 function text(value: unknown, label: string, maximum = 160): string {
@@ -36,7 +37,7 @@ function positive(value: unknown, label: string): number {
 }
 function limits(value: CapacityLimits): CapacityLimits { return { app: positive(value.app, 'App capacity'), perHarness: positive(value.perHarness, 'Per-harness capacity') }; }
 function same(left: CapacityReservation, right: CapacityReservation): boolean {
-  return left.reservationId === right.reservationId && left.runId === right.runId && left.harness === right.harness && left.role === right.role && left.authorizationId === right.authorizationId && left.workerParallelLimit === right.workerParallelLimit && left.writerLeaseKey === right.writerLeaseKey;
+  return left.reservationId === right.reservationId && left.runId === right.runId && left.ownerId === right.ownerId && left.harness === right.harness && left.role === right.role && left.authorizationId === right.authorizationId && left.workerParallelLimit === right.workerParallelLimit && left.writerLeaseKey === right.writerLeaseKey;
 }
 function copy(lease: CapacityLease): CapacityLease { return { ...lease }; }
 type ValidatedReservation = CapacityReservation & { writerWorkspaceIdentity?: string };
@@ -54,6 +55,25 @@ export class SessionCapacity {
   private readonly generations = new Map<string, number>();
 
   constructor(initial: CapacityLimits = defaultCapacityLimits) { this.current = limits(initial); }
+
+  restore(entries: CapacityLease[]): CapacitySnapshot {
+    if (!Array.isArray(entries)) throw new Error('Capacity restore requires a list.');
+    const seen = new Set<string>(), restored = entries.map(entry => {
+      if (!entry || entry.state !== 'cleanup-unconfirmed' || !Number.isSafeInteger(entry.generation) || entry.generation < 1 || !roles.has(entry.role) || (entry.harness !== 'codex' && entry.harness !== 'grok') || seen.has(entry.reservationId) || this.active.has(entry.reservationId) || this.generations.has(entry.reservationId)) throw new Error('Restored quarantined capacity lease is invalid or duplicated.');
+      text(entry.reservationId, 'Restored reservation ID');
+      if (entry.runId !== undefined) text(entry.runId, 'Restored run ID');
+      if (entry.ownerId !== undefined) text(entry.ownerId, 'Restored operation owner ID');
+      if (!entry.runId && !entry.ownerId) throw new Error('Restored capacity lease requires a run or operation owner.');
+      seen.add(entry.reservationId);
+      const hasAuthorization = entry.authorizationId !== undefined, hasWorkerLimit = entry.workerParallelLimit !== undefined;
+      if (workers.has(entry.role) !== (hasAuthorization && hasWorkerLimit) || (!workers.has(entry.role) && (hasAuthorization || hasWorkerLimit)) || (hasAuthorization && (!text(entry.authorizationId, 'Restored authorization ID') || !Number.isSafeInteger(entry.workerParallelLimit) || (entry.workerParallelLimit as number) < 1 || (entry.workerParallelLimit as number) > 64))) throw new Error('Restored worker capacity scope is invalid.');
+      const hasWriterKey = entry.writerLeaseKey !== undefined, hasWriterIdentity = entry.writerWorkspaceIdentity !== undefined;
+      if (hasWriterKey !== hasWriterIdentity || (hasWriterKey && (!text(entry.writerLeaseKey, 'Restored writer lease key', 1000) || typeof entry.writerWorkspaceIdentity !== 'string' || !/^\d+:\d+$/.test(entry.writerWorkspaceIdentity)))) throw new Error('Restored writer identity is invalid.');
+      return structuredClone(entry);
+    });
+    for (const copy of restored) { this.active.set(copy.reservationId, copy); this.generations.set(copy.reservationId, copy.generation); }
+    return this.snapshot();
+  }
 
   setLimits(next: CapacityLimits): CapacitySnapshot { this.current = limits(next); return this.snapshot(); }
   snapshot(): CapacitySnapshot {
@@ -101,7 +121,10 @@ export class SessionCapacity {
     const role = input.role;
     if (!roles.has(role)) throw new Error('Capacity reservation role is unsupported.');
     if (input.harness !== 'codex' && input.harness !== 'grok') throw new Error('Capacity reservation harness is unsupported.');
-    const reservation: ValidatedReservation = { reservationId: text(input.reservationId, 'Reservation ID'), runId: text(input.runId, 'Run ID'), harness: input.harness, role };
+    const reservation: ValidatedReservation = { reservationId: text(input.reservationId, 'Reservation ID'), harness: input.harness, role };
+    if (input.runId !== undefined) reservation.runId = text(input.runId, 'Run ID');
+    if (input.ownerId !== undefined) reservation.ownerId = text(input.ownerId, 'Operation owner ID');
+    if (!reservation.runId && !reservation.ownerId) throw new Error('Capacity reservation requires a run or operation owner.');
     const hasAuthorization = input.authorizationId !== undefined, hasWorkerLimit = input.workerParallelLimit !== undefined;
     if (workers.has(role) && !hasAuthorization) throw new Error('Worker and review reservations require authorization and parallel limits.');
     if (hasAuthorization !== hasWorkerLimit) throw new Error('Worker authorization and parallel limit must be supplied together.');

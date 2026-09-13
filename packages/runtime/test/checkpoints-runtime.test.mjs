@@ -7,7 +7,7 @@ import test from 'node:test';
 import { Runtime } from '../dist/index.js';
 import { prepareWorkspace } from '../dist/workspace.js';
 
-const info = { executable: '/fixture-codex', available: true, authenticated: true, version: 'fixture', executionModes: ['read-only', 'code'], models: [{ id: 'fixture', name: 'Fixture', efforts: ['low'], defaultEffort: 'low' }] };
+const info = { executable: '/fixture-codex', available: true, authenticated: true, cleanupVerified: true, version: 'fixture', executionModes: ['read-only', 'code'], models: [{ id: 'fixture', name: 'Fixture', efforts: ['low'], defaultEffort: 'low' }] };
 function git(root, ...args) { return execFileSync('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-C', root, ...args], { encoding: 'utf8' }).trim(); }
 function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'randolph-checkpoints-'))), projectRoot = join(root, 'project'), data = join(root, 'data');

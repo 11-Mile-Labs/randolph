@@ -34,7 +34,7 @@ test('migration upgrades v2 data additively and keeps the existing records', asy
   const database = new DatabaseSync(join(root, 'app.sqlite'));
   database.exec('CREATE TABLE projects (id TEXT PRIMARY KEY, root TEXT UNIQUE NOT NULL, document TEXT NOT NULL); CREATE TABLE conversations (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, document TEXT NOT NULL); CREATE TABLE runs (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, document TEXT NOT NULL); CREATE TABLE messages (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, document TEXT NOT NULL); CREATE TABLE events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, document TEXT NOT NULL); CREATE TABLE reviews (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, document TEXT NOT NULL); PRAGMA user_version=2;');
   database.prepare('INSERT INTO projects VALUES (?, ?, ?)').run('old-project', '/tmp/old', '{"id":"old-project"}'); database.close();
-  const store = new Store(root); assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 4); assert.equal(store.projects()[0].id, 'old-project'); assert.ok(store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='delegation_tool_receipts'").get()); store.close();
+  const store = new Store(root); assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 5); assert.equal(store.projects()[0].id, 'old-project'); assert.ok(store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='delegation_tool_receipts'").get()); store.close();
 });
 
 test('only the latest exact ready plan basis can authorize and older revisions remain historical', async t => {

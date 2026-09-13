@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { basename, resolve, join } from 'node:path';
 import { statSync } from 'node:fs';
 import { Store } from './store.js';
+import { NativeAdmission } from './native-admission.js';
 import { canonicalProject, prepareWorkspace } from './workspace.js';
 import { assertHarnessRoute, readHarnessSettings, writeHarnessSettings } from './harness-settings.js';
 import { inspectGitWorkspace } from './git-review.js';
@@ -112,6 +113,7 @@ function assertReconciledExternalActions(metadata: Record<string, unknown>): voi
 }
 export class Runtime {
   readonly store: Store;
+  private readonly nativeAdmission: NativeAdmission;
   readonly adapter?: HarnessAdapter;
   private readonly adapters: Partial<Record<HarnessId, HarnessAdapter>>;
   private readonly preferences: AppSettings;
@@ -133,6 +135,7 @@ export class Runtime {
     this.adapters = 'discover' in adapter ? { codex: adapter } : adapter;
     this.adapter = this.adapters.codex;
     this.store = new Store(resolve(dataRoot));
+    this.nativeAdmission = new NativeAdmission(this.store, this.executionOrigin ?? {}, undefined, () => this.changed());
     this.preferences = new AppSettings(this.store.root);
     this.checkpoints = new Checkpoints(this.store);
     this.memory = new ProjectMemory(this.store, () => this.changed());
@@ -151,7 +154,7 @@ export class Runtime {
           if (!run.enabledHarnessRoutes?.some(route => route.harness === assignment.harness && route.executable === assignment.executable)) return;
           const adapter = this.adapters[assignment.harness];
           if (!adapter) return;
-          const info = await adapter.discover(assignment.executable);
+          const info = await this.nativeAdmission.adapter(assignment.harness, adapter, { owner: { kind: 'delegation', id: run.id }, runId: run.id }).discover(assignment.executable);
           if (!info.available || !info.authenticated || info.executable !== assignment.executable || !info.version) return;
           routes.push({ harness: assignment.harness, executable: info.executable, version: info.version, models: info.models.map(model => ({ id: model.id, efforts: model.efforts })), modes: info.executionModes ?? ['read-only'], enabled: true, commandCapability: Boolean(adapter.runCommand && info.commandLifecycle === true && info.executionModes?.includes('code')) });
         }));
@@ -166,7 +169,13 @@ export class Runtime {
     new DelegationChecks(this.store).reconcileOnReopen();
     new DelegationTasks(this.store).reconcileOnReopen();
     for (const run of this.store.runs()) {
-      if (activeStatuses.has(run.status) || (!run.cleanupUnconfirmed && (this.delegation.records.sessions(run.id).some(session => session.state === 'cleanup-unconfirmed') || this.delegationControls.read(run.id)?.activities.some(activity => activity.state === 'cleanup-unconfirmed')))) {
+      const sessions = this.delegation.records.sessions(run.id);
+      const nativeCleanupConfirmed = sessions.length > 0 && sessions.every(session => session.cleanupConfirmed === true) && !this.delegationControls.read(run.id)?.activities.some(activity => activity.state === 'cleanup-unconfirmed');
+      if (['starting', 'running', 'stopping'].includes(run.status) && run.cleanupUnconfirmed !== true && nativeCleanupConfirmed) {
+        run.status = 'interrupted'; run.cleanupUnconfirmed = false; run.updatedAt = now();
+        run.error = 'The application ended after native cleanup. No work has been resumed.';
+        this.store.transaction(() => { this.store.putRun(run); this.store.append(run, 'run.interrupted', run.error!, { nativeCleanupConfirmed: true }); });
+      } else if (activeStatuses.has(run.status) || (!run.cleanupUnconfirmed && (this.delegation.records.sessions(run.id).some(session => session.state === 'cleanup-unconfirmed') || this.delegationControls.read(run.id)?.activities.some(activity => activity.state === 'cleanup-unconfirmed')))) {
         this.store.transaction(() => {
           run.status = 'interrupted'; run.cleanupUnconfirmed = true; run.updatedAt = now();
           run.error = 'The application ended during this run. It has not been restarted; previous process cleanup could not be verified.';
@@ -184,7 +193,7 @@ export class Runtime {
     }
     this.integrations = new Integrations(this.store, id => this.accepting && !this.admission.has(id) && !this.reviews.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed());
     this.pushes = new Pushes(this.store, id => this.accepting && !this.admission.has(id) && !this.reviews.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed(), options.push);
-    this.reviews = new Reviews(this.store, run => this.adapterForRun(run), id => !this.admission.has(id) && !this.pushes.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed());
+    this.reviews = new Reviews(this.store, (run, review, check) => this.nativeAdmission.adapter(run.harness ?? 'codex', this.adapterForRun(run), { owner: { kind: 'review', id: review.id }, runId: run.id, reviewId: review.id, checkId: check?.id, assertCurrent: check?.assertCurrent }), id => !this.admission.has(id) && !this.pushes.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed());
   }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   delegationSnapshot(runId: string): Promise<DelegationSnapshot> { return this.delegation.snapshot(runId); }
@@ -242,7 +251,7 @@ export class Runtime {
   }
   private async inspectExecutable(harness: HarnessId, executable?: string | null): Promise<HarnessInfo> {
     if (executable && !(await this.harnessInstallations(harness)).some(item => item.executable === executable)) throw new Error('The selected CLI is no longer discovered for this harness. Choose an installed CLI in Project settings.');
-    const info = await this.adapterFor(harness).discover(executable ?? undefined);
+    const info = await this.nativeAdmission.adapter(harness, this.adapterFor(harness), { owner: { kind: 'app-discovery', id: randomUUID() } }).discover(executable ?? undefined);
     if (info.harness && info.harness !== harness) throw new Error('Harness discovery returned a mismatched route.');
     return { ...info, harness };
   }
@@ -336,6 +345,7 @@ export class Runtime {
           this.store.append(run, 'run.cleanup-reconciled', run.error, { recordedOrigin: run.executionOrigin, observedOrigin: this.executionOrigin });
         }
       });
+      for (const { run } of snapshot.inspections) if (run.status === 'interrupted' && !run.cleanupUnconfirmed) this.nativeAdmission.reconcileSetupCleanup(run.id);
     } finally { this.setupAdmission.delete(projectId); this.changed(); }
     return this.projectSetup(projectId);
   }
@@ -652,7 +662,7 @@ export class Runtime {
       if (run.memory?.text) messages.unshift({ role: 'user', text: run.memory.text });
       if (run.projectContext?.value.purpose) messages.unshift({ role: 'user', text: 'Approved project context for this run (JSON; does not override execution or approval policy):\n' + JSON.stringify(run.projectContext) });
       if (run.workspaceIdentity) assertWorkspaceIdentity(run.workspace, run.workspaceIdentity);
-      const adapter = this.adapterForRun(run);
+      const adapter = this.nativeAdmission.adapter(run.harness ?? 'codex', this.adapterForRun(run), { owner: { kind: 'run', id: run.id }, runId: run.id, sessionId, assertCurrent: () => { if (run.workspaceIdentity) assertWorkspaceIdentity(run.workspace, run.workspaceIdentity); } });
       adapterInvoked = true;
       const result = await adapter.run({ workspaceIdentity: run.workspaceIdentity, executable: run.executable, executableVersion: run.executableVersion, workspace: run.workspace, model: run.model, effort: run.effort, executionMode: run.executionMode, messages, signal: controller.signal, onEvent });
       if (result.status === 'completed' && bound) settleSession('completed', true, { adapterStatus: result.status });
@@ -714,18 +724,19 @@ export class Runtime {
     this.store.transaction(() => { this.store.putRun(run); this.store.append(run, 'run.stopping', `Stopping ${run.harness ?? 'codex'}; awaiting confirmation`); });
     this.changed(); state.controller.abort(); await state.done;
   }
-  hasActiveWork(): boolean { return this.active.size > 0 || this.admission.size > 0 || this.reviews.hasActiveWork() || this.pushes.hasActiveWork(); }
+  hasActiveWork(options: { includeDiscovery?: boolean } = {}): boolean { return this.nativeAdmission.hasActiveWork(options.includeDiscovery !== false) || this.active.size > 0 || this.admission.size > 0 || this.reviews.hasActiveWork() || this.pushes.hasActiveWork(); }
   async stopAll(): Promise<void> {
+    await this.nativeAdmission.stopAll();
     await this.pushes.stopAll();
     await Promise.all([...this.active.keys()].map(id => this.stop(id)));
     await Promise.all(this.store.reviews().filter(review => review.status === 'checking').map(review => this.reviews.stop(review.id)));
   }
   async close(): Promise<void> {
     this.accepting = false;
+    await this.nativeAdmission.close();
     await this.pushes.close();
     await this.reviews.close();
     await Promise.all([...this.active.keys()].map(id => this.stop(id)));
-    // In-flight discovery cannot dispatch after accepting=false; it does not access storage again.
     this.store.close();
   }
 }

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { Runtime } from '../dist/index.js';
 import { DelegationRecords } from '../dist/delegation-records.js';
+import { NativeOperationRecords } from '../dist/native-operation-records.js';
 
 const firstBoot = { version: 1, hostIdHash: 'a'.repeat(64), bootSessionId: '11111111-1111-4111-8111-111111111111' };
 const laterBoot = { ...firstBoot, bootSessionId: '22222222-2222-4222-8222-222222222222' };
@@ -15,7 +16,7 @@ async function fixture(t) {
   const project = join(root, 'project'); mkdirSync(project);
   const calls = [];
   const adapter = {
-    async discover() { return { executable: '/fixture-codex', version: 'fixture-1', available: true, authenticated: true, models: [{ id: 'fixture', name: 'Fixture', efforts: ['low'], defaultEffort: 'low' }], executionModes: ['read-only'] }; },
+    async discover() { return { executable: '/fixture-codex', version: 'fixture-1', available: true, authenticated: true, cleanupVerified: true, models: [{ id: 'fixture', name: 'Fixture', efforts: ['low'], defaultEffort: 'low' }], executionModes: ['read-only'] }; },
     async run(input) { calls.push(input); input.onEvent({ type: 'session.turn-started', summary: 'fixture turn established', data: { threadId: 'setup-cleanup-thread', turnId: `setup-cleanup-turn-${calls.length}` } }); input.onEvent({ type: 'message.delta', summary: 'Proposal', data: { messageId: 'answer', text: response } }); return { status: 'completed' }; },
   };
   const state = { runtime: new Runtime(adapter, join(root, 'data'), { executionOrigin: () => firstBoot }), calls, adapter };
@@ -36,6 +37,11 @@ async function fixture(t) {
     session.state = 'cleanup-unconfirmed'; session.cleanupConfirmed = false; session.cleanupEvidence = undefined; session.error = 'Fixture simulates app ownership loss.';
     if (origin === undefined) delete session.origin; else session.origin = origin;
     state.runtime.store.db.prepare('UPDATE delegation_sessions SET document=? WHERE id=?').run(JSON.stringify(session), session.id);
+    const operation = new NativeOperationRecords(state.runtime.store).list({ runId: state.runId }).find(item => item.purpose === 'model-turn' && item.sessionId === session.id);
+    assert.ok(operation, 'fixture requires the main session native operation');
+    operation.state = 'admitted'; delete operation.terminalStatus; delete operation.cleanupConfirmed; delete operation.cleanupEvidence;
+    if (origin === undefined) delete operation.origin; else operation.origin = origin;
+    state.runtime.store.db.prepare('UPDATE native_operations SET document=? WHERE id=?').run(JSON.stringify(operation), operation.id);
   };
   return state;
 }
@@ -161,6 +167,8 @@ test('cleanup reconciliation cannot interrupt inspection admission or release an
   };
   const pending = f.runtime.inspectProject(f.request);
   assert.throws(() => f.runtime.reconcileProjectSetupCleanup(f.projectId), /active inspection/);
+  for (let i = 0; i < 100 && typeof release !== 'function'; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(typeof release, 'function');
   release();
   const run = await pending;
   assert.throws(() => f.runtime.reconcileProjectSetupCleanup(f.projectId), /active inspection/);

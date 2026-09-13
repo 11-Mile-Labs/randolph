@@ -44,6 +44,7 @@ function adapter(harness, { code = false, write = false, status = 'completed' } 
         version: `${harness}-1.0.25`,
         available: true,
         authenticated: true,
+        cleanupVerified: true,
         executionModes: code ? ['read-only', 'code'] : ['read-only'],
         models: [{ id: `${harness}-model`, name: harness, efforts: ['low'], defaultEffort: 'low' }],
       };

@@ -11,6 +11,7 @@ const info = {
   executable: '/fixture-codex',
   available: true,
   authenticated: true,
+  cleanupVerified: true,
   version: 'fixture-1',
   executionModes: ['read-only', 'code'],
   models: [

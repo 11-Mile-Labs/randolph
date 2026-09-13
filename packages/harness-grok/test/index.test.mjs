@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { GrokAdapter } from '../dist/index.js';
 import { GrokProtocol } from '../dist/protocol.js';
 
@@ -21,6 +23,7 @@ const {appendFileSync,readFileSync}=require('node:fs');
 const mode=${JSON.stringify(mode)},calls=${JSON.stringify(calls)},workspace=${JSON.stringify(workspace)},root=${JSON.stringify(root)};
 const version=${JSON.stringify(version)};
 if(process.argv.includes('--version')){console.log(version);process.exit(0);}
+process.once('SIGTERM',()=>{appendFileSync(calls,JSON.stringify({event:'terminated'})+'\\n');process.exit(0);});
 const profile=readFileSync(process.argv[process.argv.indexOf('--agent-profile')+1],'utf8');
 const code=profile.includes('tools: [read_file, write]');
 const send=m=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',...m})+'\\n');
@@ -73,9 +76,76 @@ createInterface({input:process.stdin}).on('line',line=>{
 }
 const input = f => ({workspace:f.workspace,model:'grok-4.6',effort:'low',messages:[{role:'user',text:'Inspect'}],signal:new AbortController().signal,onEvent:()=>{}});
 
+function uncleanDiscoveryChild() {
+ const child = new EventEmitter();
+ const stdin = new PassThrough(), stdout = new PassThrough(), stderr = new PassThrough();
+ Object.assign(child, { stdin, stdout, stderr, pid: undefined, exitCode: null, signalCode: null, kill: () => false });
+ let buffer = '';
+ stdin.on('data', chunk => {
+  buffer += chunk.toString(); let index;
+  while ((index = buffer.indexOf('\n')) >= 0) {
+   const request = JSON.parse(buffer.slice(0, index)); buffer = buffer.slice(index + 1);
+   if (request.method === 'initialize') stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { protocolVersion: 1, authMethods: [{ id: 'cached_token' }], _meta: { agentVersion: '1.0.30', modelState: { availableModels: [{ modelId: 'grok-4.6', name: 'Grok 4.6', _meta: { reasoningEfforts: [{ id: 'low', default: true }] } }] } } } }) + '\n');
+   if (request.method === 'authenticate') stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { _meta: { auth_mode: 'Oidc', backend_billed: false, subscription_tier: 'Test subscription' } } }) + '\n');
+  }
+ });
+ return child;
+}
+
+async function waitForCall(file, pattern) {
+ for (let i = 0; i < 100; i++) {
+  if (pattern.test(readFileSync(file, 'utf8'))) return;
+  await new Promise(resolve => setTimeout(resolve, 10));
+ }
+ throw new Error(`Timed out waiting for ${pattern}.`);
+}
+
 test('native discovery requires cached subscription auth and exposes the actual model/effort catalog', async()=>{
- const f=fixture();try{const info=await f.adapter.discover();assert.equal(info.authenticated,true);assert.deepEqual(info.executionModes,[]);assert.deepEqual(info.models[0].efforts,['low','high']);assert.equal(info.executable,f.executable);}finally{f.close();}
+ const f=fixture();try{const info=await f.adapter.discover();assert.equal(info.authenticated,true);assert.equal(info.cleanupVerified,true);assert.equal(info.version,'grok 1.0.30');assert.deepEqual(info.executionModes,[]);assert.deepEqual(info.models[0].efforts,['low','high']);assert.equal(info.executable,f.executable);}finally{f.close();}
  for(const mode of ['api','billed']){const f=fixture(mode);try{const info=await f.adapter.discover();assert.equal(info.authenticated,false);await assert.rejects(f.adapter.run(input(f)),/subscription|API/i);assert.equal(readFileSync(f.calls,'utf8').includes('session/prompt'),false);}finally{f.close();}}
+});
+
+test('installation candidates are filesystem-only and do not launch version probes', async()=>{
+ const f=fixture();try{
+  let probes=0;
+  const adapter=new GrokProtocol({executable:f.executable,execFile:()=>{probes++;throw new Error('unexpected process');},readConfig:()=>undefined});
+  const installations=await adapter.installations();
+  assert.ok(installations.every(installation=>typeof installation.executable==='string'&&installation.version===undefined));
+  assert.equal(probes,0);
+ }finally{f.close();}
+});
+
+test('discovery cancellation before launch and during initialization leaves no authenticated catalog', async()=>{
+ const before=fixture();try{
+  const controller=new AbortController();controller.abort();
+  const info=await before.adapter.discover(undefined,controller.signal);
+  assert.equal(info.cleanupVerified,true);assert.equal(info.available,false);assert.equal(readFileSync(before.calls,'utf8'),'');
+ }finally{before.close();}
+ const f=fixture('delayed-init');try{
+  const controller=new AbortController();const pending=f.adapter.discover(undefined,controller.signal);
+  await waitForCall(f.calls,/initialize/);controller.abort();
+  const info=await pending;
+  assert.equal(info.cleanupVerified,true);assert.equal(info.authenticated,false);assert.deepEqual(info.models,[]);assert.match(info.reason,/cancelled/);
+  const calls=readFileSync(f.calls,'utf8');assert.match(calls,/initialize/);assert.doesNotMatch(calls,/authenticate/);
+ }finally{f.close();}
+});
+
+test('repeated cancellation settles an owned discovery process once', async()=>{
+ const f=fixture('delayed-init');try{
+  const controller=new AbortController();const pending=f.adapter.discover(undefined,controller.signal);
+  await waitForCall(f.calls,/initialize/);controller.abort();controller.abort();
+  const info=await pending;
+  assert.equal(info.cleanupVerified,true);
+  const terminations=readFileSync(f.calls,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse).filter(entry=>entry.event==='terminated');
+  assert.equal(terminations.length,1);
+ }finally{f.close();}
+});
+
+test('unverified discovery cleanup clears authentication and catalog claims', async()=>{
+ const child=uncleanDiscoveryChild();
+ const adapter=new GrokProtocol({executable:'unclean-grok',readConfig:()=>undefined,spawn:()=>child});
+ const info=await adapter.discover();
+ assert.equal(info.cleanupVerified,false);assert.equal(info.authenticated,false);assert.deepEqual(info.models,[]);assert.deepEqual(info.executionModes,[]);assert.match(info.reason,/cleanup could not be confirmed/);
 });
 
 test('ACP streams only this session assistant text and preserves separate tool activity',async()=>{
