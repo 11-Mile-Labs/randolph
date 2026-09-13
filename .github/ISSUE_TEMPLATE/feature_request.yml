@@ -1,0 +1,27 @@
+name: Feature request
+description: Share a problem and the behavior that would help solve it.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Clear problem statements help us understand where Randolph should go next.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What are you trying to do, and what makes it difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Proposed behavior
+      description: Describe what you would like Randolph to do. Sketches, examples, and alternatives are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add anything else that would help us understand the request.

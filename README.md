@@ -8,6 +8,8 @@ An independent project from [11 Mile Labs](https://github.com/11-Mile-Labs).
 
 ## Status
 
+**Early development — contributors welcome.** Features and interfaces are still changing. Use trusted test projects and expect rough edges. See [Contributing](CONTRIBUTING.md) to get involved and [Security](SECURITY.md) for current trust limits.
+
 A developer desktop build now lives in `apps/desktop`, backed by `packages/runtime` and `packages/harness-codex`. It supports read-only conversations and controlled coding through an installed, ChatGPT-authenticated Codex CLI, with project checks, explicit local commit/merge approval, scoped lessons, parent integration, and separately approved origin push. This is an initial product slice, not the complete v1 release.
 
 ## Run the desktop
@@ -59,7 +61,7 @@ The default tests use temporary fixtures and no model inference. The desktop tes
 - Confirmed Restart in the same conversation and Rerun in a linked conversation, with retained context and fresh approvals while the original Git repository remains available.
 - A narrow Electron preload/IPC boundary with an isolated renderer and locally bundled assets.
 
-Original-repository-loss execution recovery, Claude/Grok adapters, workflow/backlog interfaces, broader project configuration, and Pause/Resume are not implemented in this slice. Process-group cleanup does not prove termination of detached descendants; hard owner-loss shutdown remains a release blocker. **Stop** requests native interruption and process-group termination, and reports uncertainty when that cleanup cannot be confirmed. Unconfirmed cleanup blocks further work in that conversation across reopening. There is no claim of application-level sandboxing; safety sandbox work is deferred until v2 at the earliest.
+Original-repository-loss execution recovery, Claude/Grok execution, workflow/backlog interfaces, and complete Pause/Resume remain unfinished. Project setup and delegation infrastructure are under active development; see the [implementation plan](docs/plans/working-application.md) for their current scope. Process-group cleanup does not prove termination of detached descendants; hard owner-loss shutdown remains a release blocker. **Stop** requests native interruption and process-group termination, and reports uncertainty when that cleanup cannot be confirmed. Unconfirmed cleanup blocks further work in that conversation across reopening. There is no claim of application-level sandboxing; safety sandbox work is deferred until v2 at the earliest.
 
 ## What we are building
 
@@ -78,9 +80,11 @@ The design separates the desktop interface, local execution runtime, harness ada
 
 No application account or required cloud backend is planned. Harnesses and enabled integrations still communicate with their respective services.
 
-## Open-source direction
+## Community and license
 
-The desktop application and execution runtime are intended for open-source release. License selection is pending. Personal service integrations and private operational data remain separate from the public core.
+Bug reports, documentation, accessibility improvements, and code contributions are welcome. Start with the [contributor guide](CONTRIBUTING.md), follow the [code of conduct](CODE_OF_CONDUCT.md), and report vulnerabilities through the [security policy](SECURITY.md).
+
+Randolph is licensed under the [MIT License](LICENSE). Third-party dependencies retain their own licenses. Personal service integrations and private operational data remain separate from the public core.
 
 ## Project documents
 

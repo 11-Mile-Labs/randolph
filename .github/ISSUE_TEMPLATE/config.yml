@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/11-Mile-Labs/randolph/security/policy
+    about: Please use the private security reporting instructions instead of opening a public issue.

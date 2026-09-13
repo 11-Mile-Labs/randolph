@@ -18,7 +18,7 @@ The primary v1 audience is individual developers managing multiple projects and 
 - macOS only for v1. A DMG is preferred; manual installation is acceptable for early builds.
 - No account for this application and no required cloud backend.
 - Configuration, conversations, lessons, and retained run material are local. Harnesses and enabled integrations connect to their own services.
-- The whole application and execution engine are intended to be open source. License selection and distribution details remain open.
+- The whole application and execution engine are open source under the [MIT License](../LICENSE). Distribution details remain open.
 
 ## Projects and conversations
 

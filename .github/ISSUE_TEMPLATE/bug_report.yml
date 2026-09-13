@@ -1,0 +1,63 @@
+name: Bug report
+description: Tell us what went wrong so we can reproduce it.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Randolph. Please do not include secrets, full app data, authentication files, or private project content.
+
+        For security vulnerabilities, follow the instructions in `SECURITY.md` instead of opening a public issue.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you do, and what happened along the way?
+      placeholder: |
+        1. Opened...
+        2. Selected...
+        3. Clicked...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect Randolph to do?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What did Randolph do instead? Include any visible error message.
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit or app version
+      description: Give the commit SHA, packaged app version, or other build identifier.
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: macOS 15.6
+    validations:
+      required: true
+  - type: input
+    id: cli
+    attributes:
+      label: CLI and version
+      description: Include the relevant harness CLI and version, or say N/A.
+      placeholder: codex-cli 0.154.0
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Optional redacted logs
+      description: Paste only short, redacted excerpts. Do not attach full app data or authentication files.
+      render: text
