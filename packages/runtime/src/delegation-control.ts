@@ -6,7 +6,7 @@ export class ExecutionAdmissionClosed extends Error {}
 
 export type ExecutionStage = 'discovery' | 'native-session' | 'source-preparation' | 'checkpoint' | 'integration-preparation' | 'verification';
 export type ExecutionActivity = { token: string; id: string; stage: ExecutionStage; generation: number; startedAt: number; elapsedMs: number; state: 'active' | 'settled' | 'cleanup-unconfirmed'; cleanupEvidence?: Record<string, unknown> };
-export type DelegationControl = { coordinator?: { id: string; active: boolean; context: Record<string, unknown> }; runId: string; authorizationId: string; generation: number; desired: 'running' | 'paused' | 'stopped'; priority: number; budgetMs: number; spentMs: number; accountedAt?: number; recoveryRequired: boolean; activities: ExecutionActivity[] };
+export type DelegationControl = { coordinator?: { id: string; active: boolean; context: Record<string, unknown> }; runId: string; authorizationId: string; /** UI command CAS; distinct from the admission generation. */ revision: number; generation: number; desired: 'running' | 'paused' | 'stopped'; priority: number; budgetMs: number; spentMs: number; accountedAt?: number; recoveryRequired: boolean; activities: ExecutionActivity[] };
 export type ControlStatus = 'running' | 'pausing' | 'paused' | 'stopping' | 'stopped' | 'interrupted';
 const open = (activity: ExecutionActivity): boolean => activity.state !== 'settled';
 const boundedInteger = (value: number, min: number, max: number): boolean => Number.isSafeInteger(value) && value >= min && value <= max;
@@ -18,13 +18,18 @@ export class DelegationControls {
   private time(): number { const value = this.clock(); if (!boundedInteger(value, 0, Number.MAX_SAFE_INTEGER)) throw new Error('Execution clock must return a valid millisecond timestamp.'); return value; }
   read(runId: string): DelegationControl | undefined {
     const row = this.store.db.prepare('SELECT document FROM delegation_controls WHERE run_id=?').get(runId) as { document: string } | undefined;
-    return row ? JSON.parse(row.document) as DelegationControl : undefined;
+    if (!row) return undefined;
+    const value = JSON.parse(row.document) as DelegationControl;
+    // Rows written before revision CAS existed are valid at the first revision.
+    if (value.revision === undefined) value.revision = 1;
+    if (!boundedInteger(value.revision, 1, Number.MAX_SAFE_INTEGER)) throw new Error('Delegation control revision is invalid.');
+    return value;
   }
   private required(runId: string): DelegationControl { const value = this.read(runId); if (!value) throw new Error('Delegation control does not exist.'); return value; }
   private persist(value: DelegationControl, type: string, data: Record<string, unknown> = {}): void {
     const run = this.store.runs().find(item => item.id === value.runId); if (!run) throw new Error('Delegation control run does not exist.');
     this.store.db.prepare('INSERT INTO delegation_controls VALUES (?, ?, ?) ON CONFLICT(run_id) DO UPDATE SET document=excluded.document').run(value.runId, value.authorizationId, JSON.stringify(value));
-    this.store.append(run, `delegation.control-${type}`, 'Delegation execution control updated.', { authorizationId: value.authorizationId, generation: value.generation, desired: value.desired, spentMs: value.spentMs, budgetMs: value.budgetMs, ...data });
+    this.store.append(run, `delegation.control-${type}`, 'Delegation execution control updated.', { authorizationId: value.authorizationId, revision: value.revision, generation: value.generation, desired: value.desired, spentMs: value.spentMs, budgetMs: value.budgetMs, ...data });
   }
   private authority(value: DelegationControl): void {
     const authorization = this.records.authorizations(value.runId).find(item => item.id === value.authorizationId && !item.revokedAt);
@@ -34,12 +39,14 @@ export class DelegationControls {
     if (run?.cleanupUnconfirmed || this.records.sessions(value.runId).some(session => session.state === 'cleanup-unconfirmed')) throw new Error('Execution is blocked by unconfirmed cleanup.');
   }
   private generation(value: DelegationControl, expected: number): void { if (value.generation !== expected) throw new Error('Execution control generation is stale.'); }
+  private revision(value: DelegationControl, expected: number): void { if (value.revision !== expected) throw new Error('Execution control revision is stale.'); }
+  private authorityTransition(value: DelegationControl): void { value.generation += 1; value.revision += 1; }
   private charge(value: DelegationControl, at: number): void {
     if (value.accountedAt !== undefined) {
       if (at < value.accountedAt) {
         value.recoveryRequired = true;
         if (value.desired !== 'stopped') value.desired = 'paused';
-        value.generation += 1;
+        this.authorityTransition(value);
         value.activities.filter(open).forEach(activity => { activity.state = 'cleanup-unconfirmed'; });
         delete value.accountedAt;
         return;
@@ -49,7 +56,7 @@ export class DelegationControls {
       value.activities.filter(open).forEach(activity => { activity.elapsedMs += elapsed; });
       value.accountedAt = at;
     }
-    if (value.spentMs >= value.budgetMs && value.desired === 'running') { value.desired = 'paused'; value.generation += 1; }
+    if (value.spentMs >= value.budgetMs && value.desired === 'running') { value.desired = 'paused'; this.authorityTransition(value); }
   }
   create(runId: string, authorizationId: string): DelegationControl {
     return this.store.transaction(() => {
@@ -57,7 +64,7 @@ export class DelegationControls {
       const authorization = this.records.authorizations(runId).find(item => item.id === authorizationId);
       const plan = authorization && this.records.plans(runId).find(item => item.id === authorization.planId);
       if (!plan) throw new Error('Delegation control requires an existing same-run authorization.');
-      const value: DelegationControl = { runId, authorizationId, generation: 1, desired: 'running', priority: 0, budgetMs: plan.plan.limits.activeMinutes * 60_000, spentMs: 0, recoveryRequired: false, activities: [] };
+      const value: DelegationControl = { runId, authorizationId, revision: 1, generation: 1, desired: 'running', priority: 0, budgetMs: plan.plan.limits.activeMinutes * 60_000, spentMs: 0, recoveryRequired: false, activities: [] };
       this.authority(value); this.persist(value, 'created'); return value;
     });
   }
@@ -67,39 +74,43 @@ export class DelegationControls {
     if (value.desired === 'stopped') return value.activities.some(open) ? 'stopping' : 'stopped';
     return value.activities.some(open) ? 'pausing' : 'paused';
   }
-  private account(runId: string, at: number): DelegationControl {
-    return this.store.transaction(() => { const value = this.required(runId); this.charge(value, at); this.persist(value, 'accounted'); return value; });
-  }
-  tick(runId: string): DelegationControl { return this.account(runId, this.time()); }
-  command(runId: string, expectedGeneration: number, action: 'pause' | 'resume' | 'stop'): DelegationControl {
-    this.generation(this.required(runId), expectedGeneration);
-    const accounted = this.tick(runId);
+  private account(runId: string, at: number, expectedRevision?: number): DelegationControl {
     return this.store.transaction(() => {
-      const value = this.required(runId); this.generation(value, accounted.generation);
-      if (!['pause', 'resume', 'stop'].includes(action)) throw new Error('Unknown execution control action.');
-      if (value.desired === 'stopped') throw new Error('Stopped delegation cannot resume or change in place.');
-      this.charge(value, this.time());
-      if (action === 'resume') {
-        this.authority(value);
-        if (value.recoveryRequired || value.activities.some(open) || value.spentMs >= value.budgetMs) throw new Error('Resume requires settled cleanup and an unexhausted budget.');
-        value.desired = 'running';
-      } else value.desired = action === 'stop' ? 'stopped' : 'paused';
-      value.generation += 1; this.persist(value, action); return value;
+      const value = this.required(runId);
+      if (expectedRevision !== undefined) this.revision(value, expectedRevision);
+      this.charge(value, at); this.persist(value, 'accounted'); return value;
     });
   }
-  extendBudget(runId: string, expectedGeneration: number, additionalMs: number): DelegationControl {
+  tick(runId: string): DelegationControl { return this.account(runId, this.time()); }
+  command(runId: string, expectedRevision: number, action: 'pause' | 'resume' | 'stop'): DelegationControl {
+    // Commit accounting before a command can be denied, so exhaustion and clock recovery
+    // never roll back with an invalid Resume.
+    const accounted = this.account(runId, this.time(), expectedRevision);
     return this.store.transaction(() => {
-      const value = this.required(runId); this.generation(value, expectedGeneration); this.authority(value);
+      const value = this.required(runId); this.revision(value, accounted.revision);
+      if (!['pause', 'resume', 'stop'].includes(action)) throw new Error('Unknown execution control action.');
+      if (value.desired === 'stopped') throw new Error('Stopped delegation cannot resume or change in place.');
+      if (action === 'resume') {
+        this.authority(value);
+        if (value.desired !== 'paused' || value.recoveryRequired || value.activities.some(open) || value.spentMs >= value.budgetMs) throw new Error('Resume requires a paused control with settled cleanup and an unexhausted budget.');
+        value.desired = 'running';
+      } else value.desired = action === 'stop' ? 'stopped' : 'paused';
+      this.authorityTransition(value); this.persist(value, action); return value;
+    });
+  }
+  extendBudget(runId: string, expectedRevision: number, additionalMs: number): DelegationControl {
+    return this.store.transaction(() => {
+      const value = this.required(runId); this.revision(value, expectedRevision); this.authority(value);
       if (value.desired === 'stopped' || value.recoveryRequired || !boundedInteger(additionalMs, 1, 480 * 60_000) || !Number.isSafeInteger(value.budgetMs + additionalMs)) throw new Error('Budget extension requires a positive bounded explicit decision on a recoverable run.');
-      this.charge(value, this.time()); value.budgetMs += additionalMs; value.generation += 1;
+      this.charge(value, this.time()); value.budgetMs += additionalMs; value.revision += 1;
       this.persist(value, 'budget-extended', { additionalMs }); return value;
     });
   }
-  setPriority(runId: string, expectedGeneration: number, priority: number): DelegationControl {
+  setPriority(runId: string, expectedRevision: number, priority: number): DelegationControl {
     return this.store.transaction(() => {
-      const value = this.required(runId); this.generation(value, expectedGeneration);
+      const value = this.required(runId); this.revision(value, expectedRevision);
       if (!boundedInteger(priority, -100, 100) || value.desired === 'stopped') throw new Error('Priority must be a bounded integer for an unstopped run.');
-      value.priority = priority; value.generation += 1; this.persist(value, 'priority', { priority }); return value;
+      value.priority = priority; value.revision += 1; this.persist(value, 'priority', { priority }); return value;
     });
   }
   begin(runId: string, expectedGeneration: number, id: string, stage: ExecutionStage): ExecutionActivity {
@@ -123,7 +134,7 @@ export class DelegationControls {
       if (activity.state === 'active') {
         activity.state = cleanup.confirmed ? 'settled' : 'cleanup-unconfirmed';
         if (cleanup.confirmed) activity.cleanupEvidence = structuredClone(cleanup.evidence);
-        else { value.recoveryRequired = true; if (value.desired !== 'stopped') value.desired = 'paused'; value.generation += 1; }
+        else { value.recoveryRequired = true; if (value.desired !== 'stopped') value.desired = 'paused'; this.authorityTransition(value); }
       }
       if (!value.activities.some(open)) delete value.accountedAt;
       this.persist(value, 'activity-finished', { token, state: activity.state }); return value;
@@ -139,7 +150,7 @@ export class DelegationControls {
       value.activities.filter(open).forEach(activity => { activity.state = 'cleanup-unconfirmed'; });
       delete value.accountedAt; value.recoveryRequired = true;
       if (value.desired !== 'stopped') value.desired = 'paused';
-      value.generation += 1; this.persist(value, 'reopen-interrupted'); return value;
+      this.authorityTransition(value); this.persist(value, 'reopen-interrupted'); return value;
     }));
   }
 }

@@ -75,11 +75,11 @@ test('priority changes and Pause let an already-active native result settle and 
   f.tasks.bindPreparedAttempt({ runId: 'run', taskId: worker.id, attemptId: 'attempt', sessionId: 'session', expectedGeneration: 1, source: source(), contextArtifacts: [], workspace });
   f.tasks.dispatchAttempt({ runId: 'run', taskId: worker.id, attemptId: 'attempt', sessionId: 'session', expectedGeneration: 1 });
   f.tasks.bindAttempt({ runId: 'run', taskId: worker.id, attemptId: 'attempt', sessionId: 'session', threadId: 'thread', turnId: 'turn' });
-  const priority = f.controls.setPriority('run', 1, 7); assert.equal(priority.generation, 2);
-  const paused = f.controls.command('run', 2, 'pause'); assert.equal(paused.desired, 'paused');
+  const priority = f.controls.setPriority('run', 1, 7); assert.equal(priority.generation, 1); assert.equal(priority.revision, 2);
+  const paused = f.controls.command('run', priority.revision, 'pause'); assert.equal(paused.desired, 'paused');
   f.records.finishSession({ runId: 'run', sessionId: 'session', status: 'completed', cleanupConfirmed: true, cleanupEvidence: { process: 'gone' } });
   assert.throws(() => f.tasks.beginOutputPublication({ runId: 'run', taskId: worker.id, attemptId: 'attempt', sessionId: 'session', expectedGeneration: paused.generation }), /requires a running control/);
-  const resumed = f.controls.command('run', paused.generation, 'resume'); assert.equal(resumed.desired, 'running');
+  const resumed = f.controls.command('run', paused.revision, 'resume'); assert.equal(resumed.desired, 'running');
   f.tasks.beginOutputPublication({ runId: 'run', taskId: worker.id, attemptId: 'attempt', sessionId: 'session', expectedGeneration: resumed.generation });
   f.tasks.completeOutputPublication({ runId: 'run', taskId: worker.id, attemptId: 'attempt', sessionId: 'session', expectedGeneration: resumed.generation, source: source(worker.id) });
   const settled = f.tasks.finishAttempt({ runId: 'run', taskId: worker.id, attemptId: 'attempt', sessionId: 'session', status: 'completed', result: { summary: 'late complete', artifacts: [], success: true, source: source(worker.id) } });
@@ -131,7 +131,7 @@ test('failed predecessors block a synthesis with an absent declared source and r
   assert.equal(recoveryFinish.state, 'failed'); assert.equal(recoveryFinish.attempts[0].result.success, false); assert.equal(f3.records.sessions('run')[0].cleanupConfirmed, true);
   const f4 = await fixture(t); const [prepared] = f4.taskRecords;
   f4.tasks.beginAttempt({ runId: 'run', taskId: prepared.id, authorizationId: f4.authorization.id, expectedGeneration: 1, attemptId: 'prepared-attempt', session: session('prepared-session') });
-  const paused = f4.controls.command('run', 1, 'pause'); const resumed = f4.controls.command('run', paused.generation, 'resume');
+  const paused = f4.controls.command('run', 1, 'pause'); const resumed = f4.controls.command('run', paused.revision, 'resume');
   assert.doesNotThrow(() => f4.tasks.readmittedPreparedAttempt({ runId: 'run', taskId: prepared.id, attemptId: 'prepared-attempt', sessionId: 'prepared-session', expectedGeneration: resumed.generation }));
   assert.equal(f4.records.tasks('run')[0].attempts[0].controlGeneration, resumed.generation);
 });

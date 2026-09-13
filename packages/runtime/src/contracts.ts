@@ -1,3 +1,5 @@
+import type { RunExecutionSnapshot } from './run-execution.js';
+export type { RunExecutionSnapshot } from './run-execution.js';
 import type { ExecutionOrigin } from './execution-origin.js';
 import type { ParsedSetupProposal } from './project-setup.js';
 import type { ProjectContext, ProjectContextSnapshot } from './project-context.js';
@@ -89,6 +91,7 @@ export type RestartCheckpointInput = { runId: string; checkpointDigest: string }
 export type RerunCheckpointInput = { runId: string; checkpointDigest: string };
 export type LinkedRunResult = { conversation: Conversation; run: Run };
 export interface DesktopBridge {
+  runExecutionSnapshot(runId: string): Promise<RunExecutionSnapshot>;
   delegationSnapshot(runId: string): Promise<DelegationSnapshot>;
   reviseDelegation(input: ReviseDelegationInput): Promise<DelegationSnapshot>;
   rejectDelegation(input: DelegationRevisionInput): Promise<DelegationSnapshot>;

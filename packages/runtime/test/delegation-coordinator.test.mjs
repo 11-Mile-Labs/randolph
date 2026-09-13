@@ -70,18 +70,18 @@ test('coordinator construction launches nothing and a retained active claim prev
   f.capacity.setLimits({ app: 1, perHarness: 1 });
   const execution = first.drive({ runId: 'run', expectedGeneration: 1, signal: new AbortController().signal }); await started;
   await assert.rejects(coordinator(f, adapter(events)).drive({ runId: 'run', expectedGeneration: 1, signal: new AbortController().signal }), /already claimed/);
-  const control = f.controls.read('run'); f.controls.command('run', control.generation, 'stop'); release();
+  const control = f.controls.read('run'); f.controls.command('run', control.revision, 'stop'); release();
   await execution; assert.ok(!events.length); assert.equal(f.capacity.snapshot().occupied, 0);
 });
 
 test('Pause between checks retains completed workers and exact check receipts; Resume does not rerun native work', async t => {
   const f = fixture(t), events = []; let first = true;
-  const normal = adapter(events), native = adapter(events, { async runCommand(input) { const result = await normal.runCommand(input); if (first) { first = false; f.controls.command('run', f.controls.read('run').generation, 'pause'); } return result; } });
+  const normal = adapter(events), native = adapter(events, { async runCommand(input) { const result = await normal.runCommand(input); if (first) { first = false; f.controls.command('run', f.controls.read('run').revision, 'pause'); } return result; } });
   const before = await coordinator(f, native).drive({ runId: 'run', expectedGeneration: 1, signal: new AbortController().signal });
   assert.deepEqual(events.slice(2), ['integrate', 'lint']);
   assert.equal(before.find(value => value.assignmentId === 'verify').state, 'running');
   assert.equal(f.capacity.snapshot().occupied, 0); assert.equal(f.leases.snapshot().length, 1);
-  const next = f.controls.command('run', f.controls.read('run').generation, 'resume');
+  const next = f.controls.command('run', f.controls.read('run').revision, 'resume');
   const done = await coordinator(f, native).drive({ runId: 'run', expectedGeneration: next.generation, signal: new AbortController().signal });
   assert.ok(done.every(value => value.state === 'completed'), JSON.stringify(done.map(value => [value.assignmentId, value.state, value.attempts.at(-1)?.error])));
   assert.deepEqual(events.slice(2), ['integrate', 'lint', 'test', 'review', 'synthesis']); assert.equal(f.leases.snapshot().length, 0);
@@ -99,7 +99,7 @@ test('budget exhaustion after source preparation resumes its retained receipt wi
   assert.equal(f.controls.read('run').desired, 'paused'); assert.equal(events.length, 0);
   const held = f.records.tasks('run').find(task => task.attempts.some(attempt => attempt.preparation?.state === 'completed'));
   const priorWorkspace = held.attempts[0].preparation.workspace;
-  const extended = f.controls.extendBudget('run', f.controls.read('run').generation, 300_000), resumed = f.controls.command('run', extended.generation, 'resume');
+  const extended = f.controls.extendBudget('run', f.controls.read('run').revision, 300_000), resumed = f.controls.command('run', extended.revision, 'resume');
   const done = await coordinator(f, native).drive({ runId: 'run', expectedGeneration: resumed.generation, signal: new AbortController().signal });
   assert.ok(done.every(value => value.state === 'completed'), JSON.stringify(done.map(value => [value.assignmentId, value.state, value.attempts.at(-1)?.error])));
   assert.deepEqual(done.find(task => task.id === held.id).attempts[0].preparation.workspace, priorWorkspace);
@@ -114,7 +114,7 @@ test('budget exhaustion after integration apply resumes without reapplying its c
   const events = [], native = adapter(events);
   await coordinator(f, native).drive({ runId: 'run', expectedGeneration: 1, signal: new AbortController().signal });
   assert.equal(f.controls.read('run').desired, 'paused'); assert.equal(events.length, 2);
-  const extended = f.controls.extendBudget('run', f.controls.read('run').generation, 300_000), resumed = f.controls.command('run', extended.generation, 'resume');
+  const extended = f.controls.extendBudget('run', f.controls.read('run').revision, 300_000), resumed = f.controls.command('run', extended.revision, 'resume');
   const done = await coordinator(f, native).drive({ runId: 'run', expectedGeneration: resumed.generation, signal: new AbortController().signal });
   assert.ok(done.every(value => value.state === 'completed'), JSON.stringify(done.map(value => [value.assignmentId, value.state, value.attempts.at(-1)?.error])));
   assert.equal(f.controls.read('run').activities.filter(value => value.id.endsWith(':apply')).length, 1);
@@ -131,12 +131,12 @@ test('failed raw integration keeps the conversation writer lease quarantined', a
   } finally { DelegationIntegration.prototype.apply = original; }
 });
 
-test('a priority change before native dispatch readmits under the new generation without stranding the graph', async t => {
+test('a priority change during discovery preserves the admitted generation without restarting work', async t => {
   const f = fixture(t), events = []; let first = true;
-  const native = adapter(events, { async discover() { if (first) { first = false; f.controls.setPriority('run', f.controls.read('run').generation, 10); } return info; } });
+  const native = adapter(events, { async discover() { if (first) { first = false; const priority = f.controls.setPriority('run', f.controls.read('run').revision, 10); assert.equal(priority.generation, 1); } return info; } });
   const done = await coordinator(f, native).drive({ runId: 'run', expectedGeneration: 1, signal: new AbortController().signal });
   assert.ok(done.every(value => value.state === 'completed'), JSON.stringify(done.map(value => [value.assignmentId, value.state, value.attempts.at(-1)?.error])));
-  assert.equal(events.length, 7);
+  assert.equal(f.controls.read('run').generation, 1); assert.equal(events.length, 7);
 });
 
 

@@ -58,6 +58,27 @@ test('a graph-invalid revision remains editable and cannot become ready or autho
   assert.equal(commands.records.authorizations('run-one').length, 0);
 });
 
+test('authorized and rejected snapshots do not probe availability', async t => {
+  let probes = 0, forbidProbe = false;
+  const unavailable = async () => { probes += 1; if (forbidProbe) throw new Error('availability must not be called for historical plans'); return availability; };
+  const authorizedFixture = await fixture(t, { availability: unavailable }); const authorized = authorizedFixture.ready();
+  await authorizedFixture.commands.approve(exact(authorized));
+  const authorizedTaskIds = authorizedFixture.commands.records.tasks('run-one').map(task => task.id);
+  probes = 0; forbidProbe = true;
+  const authorizedSnapshot = await authorizedFixture.commands.snapshot('run-one');
+  assert.equal(probes, 0); assert.equal(authorizedSnapshot.canApprove, false);
+  assert.deepEqual(authorizedSnapshot.tasks.map(task => task.id), authorizedTaskIds);
+  assert.deepEqual(authorizedSnapshot.history.map(item => item.disposition), ['authorized']);
+
+  let rejectedProbes = 0, rejectedForbidProbe = false;
+  const rejectedFixture = await fixture(t, { availability: async () => { rejectedProbes += 1; if (rejectedForbidProbe) throw new Error('availability must not be called for rejected plans'); return availability; } });
+  const rejected = rejectedFixture.ready(); rejectedForbidProbe = true;
+  const rejectedSnapshot = await rejectedFixture.commands.reject(exact(rejected));
+  assert.equal(rejectedProbes, 0); assert.equal(rejectedSnapshot.canApprove, false);
+  assert.deepEqual(rejectedSnapshot.tasks, []);
+  assert.deepEqual(rejectedSnapshot.history.map(item => item.disposition), ['rejected']);
+});
+
 test('preset writes preserve unrelated YAML, exactly replay, reject changed payloads, and never authorize', async t => {
   const { root, commands, ready } = await fixture(t); const value = ready();
   await writeFile(join(root, 'config.delegation.yaml'), 'schemaVersion: 1\nrouting: balanced\ndefaultPresetId: null\npresets: []\ncustom: retained\n');

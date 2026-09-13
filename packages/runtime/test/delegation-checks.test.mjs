@@ -75,7 +75,7 @@ test('Pause settles a current check, blocks the next, and Resume preserves passe
   f.records.finishSession({ ...f.input, status: 'completed', cleanupConfirmed: true, cleanupEvidence: { process: 'gone' } });
   f.checks.finishCheck({ ...f.input, checkId: first.check.id, status: 'completed', exitCode: 0, observedTreeOid: source().treeOid });
   assert.throws(() => f.checks.claimNext({ ...f.input, expectedGeneration: paused.generation, sessionId: 'second' }), /running control/);
-  const resumed = f.controls.command('run', paused.generation, 'resume');
+  const resumed = f.controls.command('run', paused.revision, 'resume');
   assert.throws(() => f.checks.claimNext({ ...f.input, sessionId: 'stale' }), /stale/);
   const second = f.checks.claimNext({ ...f.input, expectedGeneration: resumed.generation, sessionId: 'second' });
   complete(f, second); assert.equal(f.checks.passed(f.input), true);

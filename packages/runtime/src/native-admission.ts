@@ -9,7 +9,7 @@ import { Store } from './store.js';
 
 export type NativeAdmissionContext = { owner: NativeOperationOwner; runId?: string; sessionId?: string; reviewId?: string; checkId?: string; generation?: number; role?: NativeSessionRole; authorizationId?: string; workerParallelLimit?: number; priority?: () => number; assertCurrent?: () => void; onAdmitted?: () => void; queued?: (reason: CapacityQueueReason) => void; timeoutMs?: number; cleanupTimeoutMs?: number };
 export type NativeAdmissionCleanup = { status: 'completed' | 'failed' | 'interrupted'; confirmed: boolean; evidence: Record<string, unknown>; identity?: { executable: string; version: string } };
-type Active = { purpose: NativeOperation['purpose']; controller: AbortController; done: Promise<unknown> };
+type Active = { purpose: NativeOperation['purpose']; runId?: string; controller: AbortController; done: Promise<unknown> };
 
 /** One native admission owner. SQLite settlement precedes releasing any process capacity. */
 export class NativeAdmission {
@@ -115,10 +115,12 @@ export class NativeAdmission {
         throw new Error('Native admission authority guards must be synchronous.');
       }
     };
-    // Register before the first asynchronous continuation, including immediate queue admission.
-    const active: Active = { purpose, controller, done: Promise.resolve() };
+    // Publish the lifecycle promise before queue callbacks can synchronously cancel this operation.
+    let resolveDone: (value: unknown) => void, rejectDone: (reason?: unknown) => void;
+    const done = new Promise<unknown>((resolve, reject) => { resolveDone = resolve; rejectDone = reject; });
+    const active: Active = { purpose, runId: context.runId, controller, done };
     this.active.set(id, active);
-    active.done = (async () => {
+    const lifecycle = (async () => {
       let lease: CapacityLease | undefined, invoked = false, admitted = false, settlementAttempted = false, settled = false;
       let operationTimer: ReturnType<typeof setTimeout> | undefined, cleanupTimer: ReturnType<typeof setTimeout> | undefined, timedOut = false;
       let abandon: (() => void) | undefined;
@@ -186,15 +188,20 @@ export class NativeAdmission {
         this.active.delete(id); this.waiting.delete(id); this.changed();
       }
     })();
+    void (async () => { try { resolveDone!(await lifecycle); } catch (error) { rejectDone!(error); } })();
     this.changed();
     return active.done as Promise<T>;
   }
 
-  async stopAll(): Promise<void> {
-    const active = [...this.active.values()];
+  private async stop(active: Active[]): Promise<void> {
     for (const item of active) item.controller.abort();
     this.queue.drain();
     await Promise.allSettled(active.map(item => item.done));
   }
+  async stopRun(runId: string): Promise<void> {
+    if (typeof runId !== 'string' || !runId.trim() || runId.trim() !== runId || runId.length > 1_000) throw new Error('Native admission run ID is invalid.');
+    await this.stop([...this.active.values()].filter(item => item.runId === runId));
+  }
+  async stopAll(): Promise<void> { await this.stop([...this.active.values()]); }
   async close(): Promise<void> { this.accepting = false; await this.stopAll(); }
 }

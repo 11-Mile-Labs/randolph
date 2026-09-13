@@ -67,7 +67,7 @@ test('native verification runs one exact command per admission, retains all iden
 
 test('Pause during a check keeps its pass; explicit Resume runs only the next check', async t => {
   const f = fixture(t); let calls = 0;
-  const native = executor(f, adapter({ async runCommand(input) { calls++; const result = await adapter().runCommand(input); f.controls.command('run', f.controls.read('run').generation, 'pause'); return result; } }));
+  const native = executor(f, adapter({ async runCommand(input) { calls++; const result = await adapter().runCommand(input); f.controls.command('run', f.controls.read('run').revision, 'pause'); return result; } }));
   assert.equal((await native.runNext(f.input)).status, 'next-check');
   assert.throws(() => f.tasks.assertRuntimeStage({ ...f.input, expectedGeneration: 2 }), /running control/);
   const resumed = f.controls.command('run', 2, 'resume');

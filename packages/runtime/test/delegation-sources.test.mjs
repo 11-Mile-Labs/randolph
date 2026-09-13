@@ -85,7 +85,7 @@ test('an interrupted preparation intent fails closed instead of creating another
 test('a settled native attempt publishes after pause and resume with the current stage generation', t => {
   const f = fixture(t), worker = task(f, 'worker'), attempt = claim(f, worker), prepared = f.sources.prepare({ runId: f.run.id, taskId: worker.id, attemptId: attempt.id, workspaceId: randomUUID() });
   const recorded = task(f, 'worker'); replaceTask(f, { ...recorded, attempts: [{ ...recorded.attempts[0], workspace: { path: prepared.workspace, identity: prepared.workspaceIdentity }, source: prepared.source }] }); settleSession(f, attempt);
-  const controls = new DelegationControls(f.store); const paused = controls.command(f.run.id, 1, 'pause'), resumed = controls.command(f.run.id, paused.generation, 'resume');
+  const controls = new DelegationControls(f.store); const paused = controls.command(f.run.id, 1, 'pause'), resumed = controls.command(f.run.id, paused.revision, 'resume');
   const output = f.sources.capture({ runId: f.run.id, taskId: worker.id, attemptId: attempt.id, expectedGeneration: resumed.generation, workspace: prepared.workspace, workspaceIdentity: prepared.workspaceIdentity });
   assert.equal(output.producerTaskId, worker.id); assert.equal(f.records.sessions(f.run.id).length, 1);
 });

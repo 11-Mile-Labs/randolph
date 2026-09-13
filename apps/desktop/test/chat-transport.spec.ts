@@ -86,6 +86,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     await page.getByRole('textbox', { name: 'Message', exact: true }).fill('First question');
     await page.getByRole('button', { name: 'Send message' }).click();
     await expect(page.getByText('First stream:', { exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Run activity', exact: true })).toContainText('Codex · Active');
     await expect(page.locator('article.message.assistant')).not.toContainText('PRIVATE_REASONING_MUST_NOT_BE_ASSISTANT_TEXT');
     await expect(page.locator('article.message.assistant')).not.toContainText('PRIVATE_TOOL_RESULT_MUST_NOT_BE_ASSISTANT_TEXT');
 

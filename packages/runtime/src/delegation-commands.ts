@@ -63,7 +63,7 @@ export class DelegationCommands {
     let canEdit = Boolean(plan && ['draft', 'ready'].includes(plan.disposition));
     try { this.policy.assertMutable(run); } catch (cause) { blockedReasons.push(failure(cause)); canEdit = false; }
     if (this.pending.has(runId)) { blockedReasons.push('A proposal decision is being recorded.'); canEdit = false; }
-    if (plan) {
+    if (plan && ['draft', 'ready'].includes(plan.disposition)) {
       try { validationErrors.push(...this.check(run, plan, await this.policy.availability(run, plan))); } catch (cause) { validationErrors.push(failure(cause)); }
       if (plan.disposition === 'draft') blockedReasons.push('This draft is not ready for approval. Resolve its validation errors and prepare its source basis.');
     }

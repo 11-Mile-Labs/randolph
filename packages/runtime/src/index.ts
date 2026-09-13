@@ -23,6 +23,7 @@ import type { PushOptions } from './push.js';
 import { Reviews } from './reviews.js';
 import { Checkpoints, type CheckpointInput, type CheckpointRestore } from './checkpoints.js';
 import { DelegationCommands } from './delegation-commands.js';
+import { runExecutionSnapshot } from './run-execution.js';
 import { DelegationControls } from './delegation-control.js';
 import { DelegationTasks } from './delegation-tasks.js';
 import { DelegationChecks } from './delegation-checks.js';
@@ -265,6 +266,7 @@ export class Runtime {
     return lease;
   }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
+  runExecutionSnapshot(runId: string) { return runExecutionSnapshot(this.store, this.nativeAdmission, runId); }
   delegationSnapshot(runId: string): Promise<DelegationSnapshot> { return this.delegation.snapshot(runId); }
   reviseDelegation(input: ReviseDelegationInput): Promise<DelegationSnapshot> { return this.delegation.revise(input); }
   rejectDelegation(input: DelegationRevisionInput): Promise<DelegationSnapshot> { return this.delegation.reject(input); }

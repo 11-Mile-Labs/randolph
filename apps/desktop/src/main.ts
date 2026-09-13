@@ -139,6 +139,7 @@ else {
         updateTray(); notifyChanges();
       });
       command('randolph:snapshot', () => runtime!.snapshot());
+      command('randolph:run-execution-snapshot', input => runtime!.runExecutionSnapshot(parseId(input)));
       command('randolph:delegation-snapshot', input => runtime!.delegationSnapshot(parseId(input)));
       command('randolph:revise-delegation', input => runtime!.reviseDelegation(parseReviseDelegation(input)));
       command('randolph:reject-delegation', input => runtime!.rejectDelegation(parseRejectDelegation(input)));

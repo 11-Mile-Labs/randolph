@@ -72,7 +72,7 @@ export class DelegationCoordinator {
       for (;;) {
         this.own(runId, claim);
         const control = this.controls.tick(runId);
-        if (signal.aborted && control.desired !== 'stopped') this.controls.command(runId, control.generation, 'stop');
+        if (signal.aborted && control.desired !== 'stopped') this.controls.command(runId, control.revision, 'stop');
         if (this.controls.read(runId)!.desired === 'stopped') {
           for (const task of this.records.tasks(runId)) if (!task.attempts.length && !terminal(task)) this.tasks.cancelQueued({ runId, taskId: task.id, reason: 'The authorized graph was stopped before task launch.' });
         }

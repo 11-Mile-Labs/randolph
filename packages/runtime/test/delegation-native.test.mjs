@@ -131,7 +131,7 @@ test('budget exhaustion before a model turn can Resume the same prepared attempt
   f.controls.tick = runId => { if (!expired && f.controls.read(runId).activities.some(item => item.stage === 'native-session' && item.state === 'active')) { at += 60001; expired = true; } return tick(runId); };
   const native = new DelegationNative(f.store, f.controls, f.admission, f.leases, () => adapter({ async run(input) { launches++; return adapter().run(input); } }));
   const first = await native.run(f.input); assert.equal(first.status, 'pending'); assert.equal(launches, 0);
-  const paused = f.controls.read('run'); const extended = f.controls.extendBudget('run', paused.generation, 60000); const resumed = f.controls.command('run', extended.generation, 'resume');
+  const paused = f.controls.read('run'); const extended = f.controls.extendBudget('run', paused.revision, 60000); const resumed = f.controls.command('run', extended.revision, 'resume');
   const input = { ...f.input, expectedGeneration: resumed.generation };
   f.tasks.readmittedPreparedAttempt(input);
   const second = await native.run(input); assert.equal(second.status, 'completed'); assert.equal(launches, 1);

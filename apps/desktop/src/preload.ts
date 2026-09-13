@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { DesktopBridge } from '@randolph/runtime/contracts';
 const bridge: DesktopBridge = {
+  runExecutionSnapshot: async runId => ipcRenderer.invoke('randolph:run-execution-snapshot', runId),
   delegationSnapshot: async runId => ipcRenderer.invoke('randolph:delegation-snapshot', runId),
   reviseDelegation: async input => ipcRenderer.invoke('randolph:revise-delegation', input),
   rejectDelegation: async input => ipcRenderer.invoke('randolph:reject-delegation', input),

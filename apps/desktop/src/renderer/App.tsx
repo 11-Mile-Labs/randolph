@@ -3,6 +3,7 @@ import { NativeChatSession } from './chat-transport';
 import type { NativeChatMessage } from './chat-transport';
 import HistoryPanel from './HistoryPanel';
 import MemoryPanel from './MemoryPanel';
+import RunActivity from './RunActivity';
 import DelegationConversation from './DelegationConversation';
 import WorkspaceHome from './WorkspaceHome';
 import AppSettings from './AppSettings';
@@ -19,6 +20,7 @@ import type {
   Project,
   Run,
   RunEvent,
+  RunExecutionSnapshot,
   WorkspaceSnapshot,
   AppSettingsSnapshot,
 } from '@randolph/runtime/contracts';
@@ -224,6 +226,7 @@ function Sidebar({
 
 type ActivityPanelProps = {
   run?: Run;
+  execution?: RunExecutionSnapshot;
   events: RunEvent[];
   dataRoot: string;
   now: number;
@@ -231,7 +234,7 @@ type ActivityPanelProps = {
   onStop: (runId: string) => void;
 };
 
-function ActivityPanel({ run, events, dataRoot, now, stopping, onStop }: ActivityPanelProps) {
+function ActivityPanel({ run, execution, events, dataRoot, now, stopping, onStop }: ActivityPanelProps) {
   const lastNativeEvent = events.findLast((event) => NATIVE_EVENT_TYPES.has(event.type));
   const canStop = run ? run.status === 'starting' || run.status === 'running' : false;
   const lastResponse = events.findLast(event => event.type === 'message.delta');
@@ -245,7 +248,7 @@ function ActivityPanel({ run, events, dataRoot, now, stopping, onStop }: Activit
           <span className="eyebrow">Current run</span>
           <h2>Live activity</h2>
         </div>
-        {run ? <span className={`status-dot ${run.status}`} aria-hidden="true" /> : null}
+        {run ? <span className={`status-dot ${execution?.status ?? run.status}`} aria-hidden="true" /> : null}
       </div>
 
       {!run ? (
@@ -259,7 +262,7 @@ function ActivityPanel({ run, events, dataRoot, now, stopping, onStop }: Activit
           <div className="status-card">
             <div className="status-row">
               <span>Status</span>
-              <strong>{run.status.replace('-', ' ')}</strong>
+              <strong>{(execution?.status ?? run.status).replace('-', ' ')}</strong>
             </div>
             <div className="status-row">
               <span>Last native event</span>
@@ -492,6 +495,7 @@ function MessageBubble({ message }: { message: NativeChatMessage }) {
 
 export default function App() {
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>(EMPTY_SNAPSHOT);
+  const [runExecution, setRunExecution] = useState<RunExecutionSnapshot>();
   const [defaultHarness, setDefaultHarness] = useState<HarnessInfo>();
   const [projectHarness, setProjectHarness] = useState<HarnessInfo>();
   const [appSettings, setAppSettings] = useState<AppSettingsSnapshot>();
@@ -609,6 +613,7 @@ export default function App() {
     [selectedConversationId, snapshot.runs],
   );
   const latestRun = conversationRuns[0];
+  const execution = runExecution?.runId === latestRun?.id ? runExecution : undefined;
   const integration = conversationRuns.find(run => run.integration)?.integration;
   const runEvents = latestRun ? conversationEvents.filter((event) => event.runId === latestRun.id) : [];
   const messages = snapshot.messages
@@ -775,7 +780,7 @@ export default function App() {
   };
 
   const activeRun = latestRun && BLOCKING_STATUSES.has(latestRun.status);
-  const cleanupBlocked = conversationRuns.some(run => run.cleanupUnconfirmed || run.status === 'stop-unconfirmed') || snapshot.reviews.some(review => review.conversationId === selectedConversationId && review.status === 'stop-unconfirmed');
+  const cleanupBlocked = execution?.cleanupRequired || conversationRuns.some(run => run.cleanupUnconfirmed || run.status === 'stop-unconfirmed') || snapshot.reviews.some(review => review.conversationId === selectedConversationId && review.status === 'stop-unconfirmed');
   const composerDisabled =
     Boolean(activeRun) || checking || cleanupBlocked || integration?.status === 'interrupted' || integration?.status === 'applying' || !harness?.available || !harness.authenticated || harness.models.length === 0;
   const harnessReason = harness
@@ -873,7 +878,7 @@ export default function App() {
                   ))}
                 </div>
               )}
-              {latestRun ? <div className="message-column"><DelegationConversation key={latestRun.id} runId={latestRun.id} revision={snapshot.events.filter(event => event.runId === latestRun.id && event.type.startsWith('delegation.')).at(-1)?.sequence ?? 0} /></div> : null}
+              {latestRun ? <div className="message-column"><RunActivity key={`activity-${latestRun.id}`} runId={latestRun.id} onSnapshot={setRunExecution} /><DelegationConversation key={latestRun.id} runId={latestRun.id} revision={snapshot.events.filter(event => event.runId === latestRun.id && event.type.startsWith('delegation.')).at(-1)?.sequence ?? 0} /></div> : null}
             </div>
 
             <div className="composer-area">
@@ -952,6 +957,7 @@ export default function App() {
 
       {screen === 'chat' ? <ActivityPanel
         run={latestRun}
+        execution={execution}
         events={runEvents}
         dataRoot={snapshot.dataRoot}
         now={now}
