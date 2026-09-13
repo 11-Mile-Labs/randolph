@@ -16,6 +16,8 @@ pnpm test
 
 Default tests use synthetic local repositories and processes. They make no model calls. Approval tests validate predicates only; no commit/merge delivery engine is implemented.
 
+The native identity test requires visibility of its own process and parent. Full process-table access can be restricted on hosted Macs; that probe must either return identities or explicitly report observation uncertainty. A passing offline suite does not establish full process visibility or cleanup guarantees on that host.
+
 ## Explicit native execution
 
 Requires an installed `codex` CLI authenticated with its own ChatGPT subscription. The harness-owned authentication stays in place. Execution inherits an allowlisted environment, disables configured MCP servers and optional tools for this probe, and records version/schema metadata. API authentication and unavailable model/effort selections stop the run.
