@@ -54,16 +54,31 @@ int main(void) { return snapshot_main(1, (char *[]){"snapshot"}); }
   assert.match(output, /"pid":42/);
 });
 
-test("compiles and observes the real process table on macOS", { skip: process.platform !== "darwin" }, () => {
+test("compiles and observes owned process identities on macOS", { skip: process.platform !== "darwin" }, () => {
   const binary = compileSnapshot(join(dir, "snapshot"));
-  const processes = snapshot(binary);
   const selfPid = process.pid;
+  const processes = snapshot(binary, [selfPid, process.ppid]);
   const self = processes.find((entry) => entry.pid === selfPid);
   assert.ok(self);
   assert.equal(self.uid, process.getuid?.());
   assert.equal(snapshot(binary, [selfPid]).some((entry) => entry.pid === selfPid), true);
   assert.deepEqual(snapshot(binary, [999999999]), []);
   assert.ok(processes.some((entry) => entry.pid === self.ppid));
+});
+
+test("whole-table observation returns identities or reports native uncertainty", { skip: process.platform !== "darwin" }, (context) => {
+  const binary = compileSnapshot(join(dir, "whole-table"));
+  let processes: ProcessIdentity[];
+  try {
+    processes = snapshot(binary);
+  } catch (error) {
+    // Hosted Macs can deny libproc access even when a PID is still live.
+    // The observer must report uncertainty, never certify a partial snapshot.
+    assert.match(String(error), /process enumeration failed:.*proc_pidinfo failed for pid \d+/s);
+    context.diagnostic("Full process-table visibility is unavailable on this host; native observation failed closed.");
+    return;
+  }
+  assert.ok(processes.some((entry) => entry.pid === process.pid));
   try {
     const psRows = execFileSync("ps", ["-axo", "pid="], { encoding: "utf8" }).trim().split(/\s+/).filter(Boolean);
     assert.ok(psRows.includes("1"));

@@ -32,11 +32,6 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
-      - name: Runtime tests
-        working-directory: packages/runtime
-        # These isolated fixtures spend much of their time waiting on Git/child
-        # processes. The runner's CPU-based default unnecessarily serializes them.
-        run: node --test --test-concurrency=8 test/*.test.mjs
       - name: Harness and desktop unit tests
         run: pnpm -r --filter '!@randolph/runtime' test
       - name: Isolated experiment checks
@@ -46,6 +41,11 @@ jobs:
           pnpm lint
           pnpm typecheck
           pnpm test
+      - name: Runtime tests
+        working-directory: packages/runtime
+        # These isolated fixtures spend much of their time waiting on Git/child
+        # processes. The runner's CPU-based default unnecessarily serializes them.
+        run: node --test --test-concurrency=8 test/*.test.mjs
 
   desktop:
     name: Desktop acceptance
