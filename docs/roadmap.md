@@ -6,7 +6,7 @@ The [project harness defaults follow-up](decisions/project-harness-defaults.md) 
 
 ## Current implementation order
 
-1. Complete the delegation coordinator: connect proposals and presets to the full authorized task graph, shared main/worker admission, visible queues and controls, immutable sources, explicit Code integration/check phases, and main synthesis. The prepared-task executor has a native read-only worker/synthesis proof; production scheduler enablement remains pending.
+1. Complete the delegation coordinator: connect proposals and presets to the full authorized task graph, shared main/worker admission, visible queues and controls, immutable sources, explicit Code integration/check phases, and main synthesis. The graph driver now has complete scripted Code-path and Pause/Resume proofs; a native Codex Code graph also completed writing, integration, content checks, review, and synthesis with confirmed cleanup. App-wide admission, visible controls, preset selection, repair generations, and production scheduler enablement remain pending.
 2. Complete native harness coverage. Grok writing and project checks must use a verified Grok-only boundary; authentication alone does not establish it. Complete Claude support and cross-harness acceptance using existing subscriptions. Native compatibility work can proceed alongside coordinator work, while unavailable routes remain disabled.
 3. Complete all fourteen workflows, guided setup, local and Linear backlogs, outcome-driven advancement, and the attention inbox.
 4. Complete context/skill/hook selection and inspection, shared configuration, worktree/branch choices, optional external memory contracts, history, import/export, retention, and the remaining recovery paths.

@@ -95,6 +95,7 @@ export class DelegationTasks {
     if (!attempt || !['dispatching', 'running'].includes(attempt.status) || attempt.runtimeRecoveryRequired || attempt.controlGeneration !== input.expectedGeneration || control.generation !== input.expectedGeneration) throw new Error('Task attempt admission is stale.');
     return task;
   }
+  assertRuntimeStage(input: { runId: string; taskId: string; attemptId: string; expectedGeneration: number }): DelegationTask { return this.startContinuationAdmission(input); }
   beginAttempt(input: { runId: string; taskId: string; authorizationId: string; expectedGeneration: number; attemptId: string; session: SessionIntent }): DelegationTask {
     return this.store.transaction(() => {
       const { task, assignment, control } = this.dispatchAdmission(input);
@@ -214,6 +215,7 @@ export class DelegationTasks {
     return this.store.transaction(() => {
       const task = this.startContinuationAdmission(input), attempt = task.attempts.find(item => item.id === input.attemptId), session = this.records.sessions(input.runId).find(item => item.id === input.sessionId);
       if (!attempt || attempt.sessionId !== input.sessionId || !session || session.taskId !== task.id || session.state !== 'completed' || session.cleanupConfirmed !== true) throw new Error('Output publication requires this attempt’s completed session and confirmed cleanup.');
+      this.assertVerificationPassed(input.runId, task, attempt);
       if (attempt.outputPublication?.state === 'completed') return task;
       if (attempt.outputPublication?.state === 'intent') throw new Error('Output publication intent is unfinished and requires recovery; capture will not replay.');
       attempt.outputPublication = { state: 'intent', generation: input.expectedGeneration, createdAt: now(), updatedAt: now() }; attempt.updatedAt = now(); this.update(task);
@@ -229,7 +231,9 @@ export class DelegationTasks {
       if (attempt.runtimeRecoveryRequired || !attempt.outputPublication || attempt.outputPublication.generation !== input.expectedGeneration) throw new Error('Output publication continuation is stale or requires recovery.');
       const control = this.controls.read(input.runId);
       if (!control || control.desired === 'stopped' || control.recoveryRequired || control.activities.some(activity => activity.state === 'cleanup-unconfirmed')) throw new Error('Output publication continuation is closed.');
+      this.assertVerificationPassed(input.runId, task, attempt);
       const published = snapshot(input.source, 'Output publication source', task.id);
+      if (this.assignment(input.runId, task).role === 'runtime-verification' && published.treeOid !== attempt.verification?.input.treeOid) throw new Error('Published verification tree must exactly match its checked input.');
       if (attempt.outputPublication?.state === 'completed') {
         if (JSON.stringify(attempt.outputPublication.source) !== JSON.stringify(published)) throw new Error('Output publication was already completed with a different source.');
         return task;
@@ -247,7 +251,8 @@ export class DelegationTasks {
       const session = this.records.sessions(input.runId).find(item => item.id === input.sessionId);
       const attempt = task?.attempts.find(item => item.id === input.attemptId);
       if (!task || !attempt || attempt.sessionId !== input.sessionId || !session || session.taskId !== task.id || !['dispatching', 'running'].includes(attempt.status) || !['completed', 'failed', 'interrupted', 'cleanup-unconfirmed'].includes(session.state) || !['completed', 'failed', 'interrupted'].includes(input.status)) throw new Error('Task attempt completion does not match its active session.');
-      const cleanupConfirmed = session.cleanupConfirmed === true && session.state !== 'cleanup-unconfirmed';
+      const checkSessions = (attempt.verification?.checks ?? []).filter(check => check.state !== 'queued').map(check => this.records.sessions(input.runId).find(value => value.id === check.sessionId));
+      const cleanupConfirmed = session.cleanupConfirmed === true && session.state !== 'cleanup-unconfirmed' && checkSessions.every(value => value?.cleanupConfirmed === true && ['completed', 'failed', 'interrupted'].includes(value.state));
       const cleanupEvidence = cleanupConfirmed ? record(session.cleanupEvidence, 'Task cleanup evidence', 16 * 1024) : undefined;
       if (cleanupConfirmed && input.status === 'completed' && session.state !== 'completed') throw new Error('A completed task requires a completed retained native session.');
       const publishable = input.status !== 'completed' || this.publishable(input.runId, task, attempt);
@@ -255,6 +260,9 @@ export class DelegationTasks {
       const result = input.result === undefined ? undefined : this.result(input.result, effectiveStatus, task, !publishable);
       if (effectiveStatus === 'completed' && (!cleanupConfirmed || !result?.success)) throw new Error('Completed task attempts require confirmed cleanup and a successful result manifest.');
       const producesSource = this.assignment(input.runId, task).producesSource === true;
+      const verification = attempt.verification;
+      if (effectiveStatus === 'completed' && this.assignment(input.runId, task).role === 'runtime-verification' && (!verification?.checks.length || verification.checks.length !== verification.commands.length || verification.checks.some(check => check.state !== 'passed' || check.cleanupConfirmed !== true || check.observedTreeOid !== verification.input.treeOid))) throw new Error('Runtime verification cannot complete before every retained check passed with confirmed cleanup and an unchanged source tree.');
+      if (result?.source && this.assignment(input.runId, task).role === 'runtime-verification' && result.source.treeOid !== verification?.input.treeOid) throw new Error('Verification result source must match its checked input tree.');
       if (result?.source && !producesSource) throw new Error('This assignment is not authorized to produce a source snapshot.');
       if (result?.source && (!attempt.outputPublication || attempt.outputPublication.state !== 'completed' || JSON.stringify(attempt.outputPublication.source) !== JSON.stringify(result.source))) throw new Error('Attempt result source must exactly match its completed output publication receipt.');
       if (effectiveStatus === 'completed' && producesSource && (!result?.source || !attempt.outputPublication || attempt.outputPublication.state !== 'completed')) throw new Error('A successful source-producing task requires a completed output publication and exact result source.');
@@ -265,6 +273,11 @@ export class DelegationTasks {
       this.store.append(run, 'delegation.task-attempt-finished', 'Delegation task attempt outcome recorded from its retained session cleanup receipt.', { taskId: task.id, attemptId: attempt.id, sessionId: session.id, state: task.state, cleanupConfirmed, ...(result?.source ? { source: result.source } : {}) });
       return task;
     });
+  }
+  private assertVerificationPassed(runId: string, task: DelegationTask, attempt: DelegationAttempt): void {
+    if (this.assignment(runId, task).role !== 'runtime-verification') return;
+    const verification = attempt.verification;
+    if (!verification?.checks.length || verification.checks.length !== verification.commands.length || verification.checks.some(check => check.state !== 'passed' || check.cleanupConfirmed !== true || check.observedTreeOid !== verification.input.treeOid)) throw new Error('Runtime verification requires every retained check to pass before publishing a checked source.');
   }
   private publishable(runId: string, task: DelegationTask, attempt: DelegationAttempt): boolean {
     try {
@@ -332,7 +345,11 @@ export class DelegationTasks {
         const attempt = task.attempts.find(item => ['dispatching', 'running'].includes(item.status));
         if (!attempt) continue;
         const session = attempt.sessionId ? this.records.sessions(run.id).find(item => item.id === attempt.sessionId) : undefined;
-        if (session?.cleanupConfirmed === true && ['completed', 'failed', 'interrupted'].includes(session.state)) {
+        const checksClean = (attempt.verification?.checks ?? []).filter(check => check.state !== 'queued').every(check => {
+          const commandSession = this.records.sessions(run.id).find(value => value.id === check.sessionId);
+          return commandSession?.cleanupConfirmed === true && ['completed', 'failed', 'interrupted'].includes(commandSession.state);
+        });
+        if (checksClean && session?.cleanupConfirmed === true && ['completed', 'failed', 'interrupted'].includes(session.state)) {
           if (attempt.runtimeRecoveryRequired) continue;
           attempt.runtimeRecoveryRequired = true; attempt.error = 'Application reopened after native cleanup but before this task continuation settled.'; attempt.updatedAt = now(); task.updatedAt = now();
           this.update(task); this.store.append(run, 'delegation.task-attempt-recovery-required', attempt.error, { taskId: task.id, attemptId: attempt.id, sessionId: session.id, nativeCleanupConfirmed: true }); changed.push(task); continue;

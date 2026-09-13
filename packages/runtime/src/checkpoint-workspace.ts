@@ -98,7 +98,7 @@ function copyObject(source: string, destination: string, expectedBytes: number, 
   return true;
 }
 
-function importObjects(projectRoot: string, commonDirectory: string, manifest: CheckpointManifest): void {
+export function importCheckpointObjects(projectRoot: string, commonDirectory: string, manifest: CheckpointManifest): void {
   const packDirectory = canonicalDirectory(join(commonDirectory, 'objects', 'pack'), 'Git object pack directory');
   const pack = join(packDirectory, `pack-${manifest.pack.gitHash}.pack`);
   const index = join(packDirectory, `pack-${manifest.pack.gitHash}.idx`);
@@ -176,7 +176,7 @@ export function restoreCheckpointWorktree(directory: string, expectedDigest: str
   const rootIdentity = directoryIdentity(root);
   const commonIdentity = directoryIdentity(commonDirectory);
   if (gitText(root, ['rev-parse', '--show-object-format']) !== manifest.objectFormat) throw restoreLimitation('The original project uses a different Git object format.');
-  importObjects(root, commonDirectory, manifest);
+  importCheckpointObjects(root, commonDirectory, manifest);
   try { runSafeGit(root, ['merge-base', '--is-ancestor', manifest.baseCommitOid, parentOid]); }
   catch { throw restoreLimitation('The checkpoint base is not an ancestor of the current parent branch.'); }
   let created = false;

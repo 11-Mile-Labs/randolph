@@ -20,6 +20,7 @@ import { Checkpoints, type CheckpointInput, type CheckpointRestore } from './che
 import { DelegationCommands } from './delegation-commands.js';
 import { DelegationControls } from './delegation-control.js';
 import { DelegationTasks } from './delegation-tasks.js';
+import { DelegationChecks } from './delegation-checks.js';
 import { assertDelegationBasis } from './delegation-basis.js';
 import type { DelegationAvailability } from './delegation-plan.js';
 import type { DelegationSnapshot, DelegationRevisionInput, ReviseDelegationInput, SaveDelegationPresetInput } from './delegation-contracts.js';
@@ -152,7 +153,7 @@ export class Runtime {
           if (!adapter) return;
           const info = await adapter.discover(assignment.executable);
           if (!info.available || !info.authenticated || info.executable !== assignment.executable || !info.version) return;
-          routes.push({ harness: assignment.harness, executable: info.executable, version: info.version, models: info.models.map(model => ({ id: model.id, efforts: model.efforts })), modes: info.executionModes ?? ['read-only'], enabled: true, commandCapability: Boolean(adapter.runCommand && info.executionModes?.includes('code')) });
+          routes.push({ harness: assignment.harness, executable: info.executable, version: info.version, models: info.models.map(model => ({ id: model.id, efforts: model.efforts })), modes: info.executionModes ?? ['read-only'], enabled: true, commandCapability: Boolean(adapter.runCommand && info.commandLifecycle === true && info.executionModes?.includes('code')) });
         }));
         if (results.some(result => result.status === 'rejected')) throw new Error('A proposed CLI could not be inspected. Refresh before approval.');
         if (!run.executable || !run.executableVersion) throw new Error('The retained main-agent CLI identity is incomplete.');
@@ -162,6 +163,7 @@ export class Runtime {
     this.delegation.records.reconcileUnfinishedSessions();
     this.delegationControls = new DelegationControls(this.store);
     this.delegationControls.reconcileOnReopen();
+    new DelegationChecks(this.store).reconcileOnReopen();
     new DelegationTasks(this.store).reconcileOnReopen();
     for (const run of this.store.runs()) {
       if (activeStatuses.has(run.status) || (!run.cleanupUnconfirmed && (this.delegation.records.sessions(run.id).some(session => session.state === 'cleanup-unconfirmed') || this.delegationControls.read(run.id)?.activities.some(activity => activity.state === 'cleanup-unconfirmed')))) {

@@ -228,7 +228,7 @@ export class CodexAdapter implements HarnessAdapter {
     let child: ChildProcessWithoutNullStreams | undefined;
     let client: RpcClient | undefined;
     let stop: Promise<boolean> | undefined;
-    let info: HarnessInfo = { executable: selected, available: true, authenticated: false, version, models: [], cleanupVerified: false };
+    let info: HarnessInfo = { executable: selected, available: true, authenticated: false, commandLifecycle: false, version, models: [], cleanupVerified: false };
     const onAbort = (): void => {
       client?.fail(new Error('Discovery was cancelled.'));
       if (child) stop ??= terminate(child);
@@ -252,7 +252,7 @@ export class CodexAdapter implements HarnessAdapter {
           if (cursor && seen.has(cursor)) throw new Error('Codex model pagination repeated a cursor.');
           if (cursor) seen.add(cursor);
         } while (cursor);
-        info = { ...info, applicationTools: version === 'codex-cli 0.154.0', authenticated: true, models, executionModes: VERIFIED_CODE_VERSION.test(version) ? ['read-only', 'code'] : ['read-only'] };
+        info = { ...info, applicationTools: version === 'codex-cli 0.154.0', commandLifecycle: VERIFIED_CODE_VERSION.test(version), authenticated: true, models, executionModes: VERIFIED_CODE_VERSION.test(version) ? ['read-only', 'code'] : ['read-only'] };
       }
     } catch (error) {
       info = { ...info, authenticated: false, models: [], reason: error instanceof Error ? error.message : 'Codex discovery failed.' };
@@ -261,11 +261,12 @@ export class CodexAdapter implements HarnessAdapter {
       client?.fail(new Error('Discovery ended.'));
       if (child) info.cleanupVerified = await (stop ?? terminate(child));
     }
-    if (!info.cleanupVerified) info = { ...info, authenticated: false, models: [], executionModes: [], reason: 'Native discovery cleanup could not be confirmed.' };
-    if (signal?.aborted) info = { ...info, authenticated: false, models: [], executionModes: [], reason: 'Discovery was cancelled.' };
+    if (!info.cleanupVerified) info = { ...info, authenticated: false, commandLifecycle: false, models: [], executionModes: [], reason: 'Native discovery cleanup could not be confirmed.' };
+    if (signal?.aborted) info = { ...info, authenticated: false, commandLifecycle: false, models: [], executionModes: [], reason: 'Discovery was cancelled.' };
     return info;
   }
   async runCommand(input: AdapterCommand): Promise<{ exitCode: number | null; output: string; truncated: boolean; cleanupVerified: boolean; error?: string }> {
+    input = { ...input };
     if (input.executable) return new CodexAdapter({ ...this.options, executable: input.executable }).runCommand({ ...input, executable: undefined });
     let child: ChildProcessWithoutNullStreams | undefined;
     let client: RpcClient | undefined;
@@ -273,6 +274,9 @@ export class CodexAdapter implements HarnessAdapter {
     let error: string | undefined; let cleanupVerified = true; let dispatched = false;
     let stop: Promise<void> | undefined;
     const processId = randomUUID();
+    let identity!: { device: number; inode: number };
+    let command!: string[];
+    const assertIdentity = (): void => assertWorkspaceIdentity(input.workspace, identity);
     const decoders = { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') };
     const append = (text: string): void => {
       const remaining = 65_536 - output.length;
@@ -296,12 +300,14 @@ export class CodexAdapter implements HarnessAdapter {
     };
     try {
       check();
+      identity = input.workspaceIdentity ? { device: input.workspaceIdentity.device, inode: input.workspaceIdentity.inode } : workspaceIdentity(input.workspace);
       if (!Array.isArray(input.command) || !input.command.length || input.command.length > 100 || !input.command[0]
         || input.command.some(value => typeof value !== 'string' || value.includes(String.fromCharCode(0))) || input.command.join('').length > 65_536) throw new Error('Verification requires a bounded command argument vector.');
+      command = [...input.command];
       const version = this.exec(this.executablePath(), ['--version'], { encoding: 'utf8', timeout: 5_000, env: environment() }).trim();
       if (input.executableVersion && version !== input.executableVersion) throw new Error('The selected CLI version changed after this run. Start fresh work before verification.');
       if (!VERIFIED_CODE_VERSION.test(version)) throw new Error('Native verification requires the verified Codex CLI 0.149.0 or 0.154.0 version.');
-      if (realpathSync(input.workspace) !== input.workspace || !statSync(input.workspace).isDirectory()) throw new Error('Verification requires a canonical conversation workspace.');
+      assertIdentity();
       child = this.launch(input.workspace, true);
       client = new RpcClient(child, this.timeout, message => {
         if (message.method !== 'command/exec/outputDelta') return;
@@ -313,17 +319,22 @@ export class CodexAdapter implements HarnessAdapter {
       });
       input.signal.addEventListener('abort', onAbort, { once: true });
       if (input.signal.aborted) onAbort();
-      await this.initialize(client); check();
+      await this.initialize(client); assertIdentity(); check();
       const account = object((await client.rpc('account/read', { refreshToken: false })).account);
+      assertIdentity();
       if (account.type !== 'chatgpt') throw new Error('A ChatGPT-authenticated Codex session is required.');
       const models = modelsFrom(await client.rpc('model/list', { limit: 100, includeHidden: false }));
+      assertIdentity();
       if (!models.length) throw new Error('Codex returned no model for permission verification.');
       check();
       const thread = await client.rpc('thread/start', { cwd: input.workspace, model: models[0].id, modelProvider: 'openai', ephemeral: true, sandbox: 'workspace-write', approvalPolicy: 'never', baseInstructions: 'Randolph is validating native command permissions. No agent turn is requested.' });
-      verifyCodePolicy(thread, input.workspace); check();
+      assertIdentity(); verifyCodePolicy(thread, input.workspace); check(); assertIdentity();
+      const dispatchedValue = input.onDispatch?.({ processId });
+      if (dispatchedValue && typeof (dispatchedValue as { then?: unknown }).then === 'function') { void Promise.resolve(dispatchedValue).catch(() => {}); throw new Error('Command dispatch callback must be synchronous.'); }
+      check(); assertIdentity();
       dispatched = true;
-      const result = await client.rpc('command/exec', { command: input.command, cwd: input.workspace, sandboxPolicy: workspacePolicy(input.workspace), processId, streamStdoutStderr: true, streamStdin: false, tty: false, timeoutMs: 600_000, outputBytesCap: 32_768 }, 610_000);
-      check();
+      const result = await client.rpc('command/exec', { command, cwd: input.workspace, sandboxPolicy: workspacePolicy(input.workspace), processId, streamStdoutStderr: true, streamStdin: false, tty: false, timeoutMs: 600_000, outputBytesCap: 32_768 }, 610_000);
+      assertIdentity(); check();
       if (!Number.isInteger(result.exitCode) || typeof result.stdout !== 'string' || typeof result.stderr !== 'string') throw new Error('Codex returned an invalid command result.');
       append(decoders.stdout.end()); append(decoders.stderr.end());
       append(result.stdout); append(result.stderr); check();

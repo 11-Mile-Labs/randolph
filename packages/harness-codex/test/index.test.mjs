@@ -286,6 +286,7 @@ test('code capability is advertised only for authenticated verified native versi
   ]) {
     const info = await adapterFor([fakeChild({ accountType })], { execFile: () => version }).discover();
     assert.deepEqual(info.executionModes ?? [], expected);
+    assert.equal(info.commandLifecycle, accountType === 'chatgpt' && expected.includes('code'));
   }
 });
 
@@ -373,6 +374,51 @@ test('runCommand uses native argv execution with restricted policy, live output 
   assert.equal(result.output, 'checks passed\n');
   assert.equal(output.join(''), result.output);
   assert.equal(result.cleanupVerified, true);
+});
+
+test('runCommand synchronously reports its native correlation token immediately before command RPC', async t => {
+  const { workspace, threadResponse } = codeFixture(t); const order = [];
+  const child = fakeChild({ threadResponse, beforeResponse(method) { if (method === 'command/exec') order.push('rpc'); } });
+  const result = await adapterFor([child]).runCommand({ workspace, command: ['/usr/bin/true'], signal: new AbortController().signal, onOutput() {}, onDispatch({ processId }) { assert.match(processId, /^[0-9a-f-]{36}$/); order.push('dispatch'); } });
+  assert.equal(result.exitCode, 0); assert.deepEqual(order, ['dispatch', 'rpc']); assert.equal(child.methods.filter(method => method === 'command/exec').length, 1);
+});
+
+test('runCommand dispatch callback errors, thenables, cancellation, and workspace replacement prevent command RPC', async t => {
+  const { workspace, threadResponse } = codeFixture(t);
+  for (const onDispatch of [() => { throw new Error('ledger rejected dispatch'); }, () => Promise.reject(new Error('async callback rejection'))]) {
+    const child = fakeChild({ threadResponse });
+    const result = await adapterFor([child]).runCommand({ workspace, command: ['/usr/bin/true'], signal: new AbortController().signal, onOutput() {}, onDispatch });
+    assert.equal(result.exitCode, null); assert.match(result.error, /ledger rejected|synchronous/); assert.equal(child.methods.includes('command/exec'), false);
+  }
+  const controller = new AbortController(), cancelled = fakeChild({ threadResponse });
+  const interrupted = await adapterFor([cancelled]).runCommand({ workspace, command: ['/usr/bin/true'], signal: controller.signal, onOutput() {}, onDispatch() { controller.abort(); } });
+  assert.equal(interrupted.exitCode, null); assert.match(interrupted.error, /interrupt/i); assert.equal(cancelled.methods.includes('command/exec'), false);
+  const replacement = codeFixture(t), original = `${replacement.workspace}-original`;
+  t.after(() => rmSync(original, { recursive: true, force: true }));
+  const replaced = fakeChild({ threadResponse: replacement.threadResponse, beforeResponse(method) { if (method === 'thread/start') { renameSync(replacement.workspace, original); mkdirSync(replacement.workspace); } } });
+  const stale = await adapterFor([replaced]).runCommand({ workspace: replacement.workspace, command: ['/usr/bin/true'], signal: new AbortController().signal, onOutput() {} });
+  assert.equal(stale.exitCode, null); assert.match(stale.error, /workspace.*changed/i); assert.equal(replaced.methods.includes('command/exec'), false);
+  const mismatch = fakeChild({ threadResponse });
+  const invalidIdentity = await adapterFor([mismatch]).runCommand({ workspace, workspaceIdentity: { device: 0, inode: 0 }, command: ['/usr/bin/true'], signal: new AbortController().signal, onOutput() {} });
+  assert.equal(invalidIdentity.exitCode, null); assert.match(invalidIdentity.error, /workspace.*changed/i); assert.equal(mismatch.methods.includes('command/exec'), false);
+});
+
+test('runCommand consumes a rejecting async dispatch callback without issuing a command RPC', async t => {
+  const { workspace, threadResponse } = codeFixture(t), child = fakeChild({ threadResponse });
+  const result = await adapterFor([child]).runCommand({ workspace, command: ['/usr/bin/true'], signal: new AbortController().signal, onOutput() {}, onDispatch: async () => { throw new Error('rejected asynchronously'); } });
+  assert.equal(result.exitCode, null); assert.match(result.error, /synchronous/); assert.equal(child.methods.includes('command/exec'), false);
+});
+
+test('runCommand snapshots mutable command input before the native handshake and rejects missing workspaces without launch', async t => {
+  const { workspace, threadResponse } = codeFixture(t); let dispatched = 0;
+  const input = { workspace, command: ['/usr/bin/true'], signal: new AbortController().signal, onOutput() {}, onDispatch() { dispatched += 1; } };
+  const child = fakeChild({ threadResponse, beforeResponse(method) { if (method === 'initialize') { input.workspace = '/mutated'; input.signal = new AbortController().signal; input.onDispatch = () => { throw new Error('mutated hook'); }; } } });
+  const result = await adapterFor([child]).runCommand(input);
+  assert.equal(result.exitCode, 0); assert.equal(dispatched, 1);
+  let launches = 0;
+  const missing = new CodexAdapter({ executable: 'fake-codex', execFile: () => 'codex-cli 0.149.0', spawn: () => { launches += 1; return fakeChild(); } });
+  const absent = await missing.runCommand({ workspace: join(workspace, 'gone'), command: ['/usr/bin/true'], signal: new AbortController().signal, onOutput() {} });
+  assert.equal(absent.exitCode, null); assert.equal(absent.cleanupVerified, true); assert.equal(launches, 0);
 });
 
 test('runCommand rejects incompatible authentication/version and reports bounded output', async t => {

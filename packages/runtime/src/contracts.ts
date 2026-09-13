@@ -44,7 +44,7 @@ export type ChatEventsResult = { run: Run; events: RunEvent[] };
 export type WorkspaceSnapshot = { projects: Project[]; conversations: Conversation[]; runs: Run[]; messages: Message[]; events: RunEvent[]; reviews: ReviewRecord[]; dataRoot: string };
 export type HarnessModel = { id: string; name: string; efforts: string[]; defaultEffort: string };
 export type HarnessInstallation = { harness?: HarnessId; executable: string; version?: string; reason?: string };
-export type HarnessInfo = { cleanupVerified?: boolean; applicationTools?: boolean; harness?: HarnessId; executable?: string; available: boolean; authenticated: boolean; version?: string; models: HarnessModel[]; executionModes?: ExecutionMode[]; reason?: string };
+export type HarnessInfo = { cleanupVerified?: boolean; applicationTools?: boolean; commandLifecycle?: boolean; harness?: HarnessId; executable?: string; available: boolean; authenticated: boolean; version?: string; models: HarnessModel[]; executionModes?: ExecutionMode[]; reason?: string };
 export type AdapterEvent = { type: string; summary: string; data?: Record<string, unknown> };
 export type ApplicationToolDefinition = { name: string; description: string; inputSchema: Record<string, unknown> };
 export type ApplicationToolRequest = { threadId: string; turnId: string; callId: string; requestId: string | number; name: string; arguments: unknown };
@@ -71,7 +71,7 @@ export class AdapterRunFailure extends Error {
     this.cleanupEvidence = cloned as Record<string, unknown>;
   }
 }
-export type AdapterCommand = { executable?: string; executableVersion?: string; workspace: string; command: string[]; signal: AbortSignal; onOutput: (text: string) => void };
+export type AdapterCommand = { executable?: string; executableVersion?: string; workspace: string; workspaceIdentity?: WorkspaceIdentity; command: string[]; signal: AbortSignal; onOutput: (text: string) => void; onDispatch?: (value: { processId: string }) => void };
 export type AdapterCommandResult = { exitCode: number | null; output: string; truncated: boolean; cleanupVerified: boolean; error?: string };
 export interface HarnessAdapter {
   discover(executable?: string, signal?: AbortSignal): Promise<HarnessInfo>;

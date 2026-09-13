@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { Store } from '../dist/store.js';
 import { DelegationRecords } from '../dist/delegation-records.js';
-import { DelegationControls } from '../dist/delegation-control.js';
+import { DelegationControls, ExecutionAdmissionClosed } from '../dist/delegation-control.js';
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'randolph-control-')); const store = new Store(root);
@@ -34,7 +34,7 @@ test('accounting charges the union of runtime and native work and retains indivi
 test('pause and stop invalidate admissions while old generation activity can settle exactly once', async t => {
   const { controls, advance } = await fixture(t); const activity = controls.begin('run', 1, 'verify', 'verification');
   advance(20); const paused = controls.command('run', 1, 'pause'); assert.equal(controls.status(paused), 'pausing');
-  assert.throws(() => controls.begin('run', 1, 'late', 'checkpoint'), /stale/);
+  assert.throws(() => controls.begin('run', 1, 'late', 'checkpoint'), ExecutionAdmissionClosed);
   assert.throws(() => controls.begin('run', paused.generation, 'late', 'checkpoint'), /closed/);
   const stopped = controls.command('run', paused.generation, 'stop'); assert.equal(controls.status(stopped), 'stopping');
   advance(10); const settled = controls.finish('run', activity.token, { confirmed: true, evidence: { exit: true } }); assert.equal(controls.status(settled), 'stopped'); assert.equal(settled.spentMs, 30);
@@ -43,7 +43,7 @@ test('pause and stop invalidate admissions while old generation activity can set
 test('a tick detects exhaustion during open activity and extension preserves spent time without resuming', async t => {
   const { controls, advance } = await fixture(t); const activity = controls.begin('run', 1, 'integrate', 'integration-preparation');
   advance(60_001); const exhausted = controls.tick('run'); assert.equal(exhausted.desired, 'paused'); assert.equal(controls.status(exhausted), 'pausing');
-  assert.throws(() => controls.begin('run', 1, 'late', 'checkpoint'), /stale/);
+  assert.throws(() => controls.begin('run', 1, 'late', 'checkpoint'), ExecutionAdmissionClosed);
   controls.finish('run', activity.token, { confirmed: true, evidence: { files: 'settled' } });
   assert.throws(() => controls.command('run', exhausted.generation, 'resume'), /budget/);
   assert.throws(() => controls.extendBudget('run', exhausted.generation, 0), /positive/);
@@ -89,4 +89,24 @@ test('activity and its event roll back together on failed persistence', async t 
   store.append = (run, type, ...args) => { if (type === 'delegation.control-activity-began') throw new Error('disk fault'); original(run, type, ...args); };
   assert.throws(() => controls.begin('run', 1, 'fault', 'native-session'), /disk fault/); assert.equal(controls.read('run').activities.length, 0);
   store.append = original; assert.equal(controls.begin('run', 1, 'fault', 'native-session').state, 'active');
+});
+
+test('begin commits budget expiry and reports typed closed admission using one clock observation', async t => {
+  const f = await fixture(t);
+  const active = f.controls.begin('run', 1, 'open', 'checkpoint');
+  let calls = 0;
+  const expiring = new DelegationControls(f.store, () => { calls++; return f.time() + 60_001; });
+  assert.throws(() => expiring.begin('run', 1, 'must-not-start', 'verification'), ExecutionAdmissionClosed);
+  assert.equal(calls, 1); assert.equal(expiring.read('run').desired, 'paused'); assert.equal(expiring.read('run').spentMs, 60_001);
+  assert.equal(expiring.read('run').activities.length, 1);
+  expiring.finish('run', active.token, { confirmed: true, evidence: { settled: true } });
+});
+
+test('begin never makes a rollback-prone second clock charge inside admission', async t => {
+  const f = await fixture(t); f.controls.begin('run', 1, 'open', 'checkpoint');
+  let calls = 0;
+  const clock = new DelegationControls(f.store, () => f.time() + (++calls === 1 ? 1 : 60_001));
+  clock.begin('run', 1, 'admitted', 'verification');
+  assert.equal(calls, 1); assert.equal(clock.read('run').spentMs, 1);
+  clock.tick('run'); assert.equal(clock.read('run').desired, 'paused'); assert.equal(clock.read('run').spentMs, 60_001);
 });

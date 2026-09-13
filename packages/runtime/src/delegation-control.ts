@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { DelegationRecords } from './delegation-records.js';
 import { Store } from './store.js';
 
+export class ExecutionAdmissionClosed extends Error {}
+
 export type ExecutionStage = 'discovery' | 'native-session' | 'source-preparation' | 'checkpoint' | 'integration-preparation' | 'verification';
 export type ExecutionActivity = { token: string; id: string; stage: ExecutionStage; generation: number; startedAt: number; elapsedMs: number; state: 'active' | 'settled' | 'cleanup-unconfirmed'; cleanupEvidence?: Record<string, unknown> };
-export type DelegationControl = { runId: string; authorizationId: string; generation: number; desired: 'running' | 'paused' | 'stopped'; priority: number; budgetMs: number; spentMs: number; accountedAt?: number; recoveryRequired: boolean; activities: ExecutionActivity[] };
+export type DelegationControl = { coordinator?: { id: string; active: boolean; context: Record<string, unknown> }; runId: string; authorizationId: string; generation: number; desired: 'running' | 'paused' | 'stopped'; priority: number; budgetMs: number; spentMs: number; accountedAt?: number; recoveryRequired: boolean; activities: ExecutionActivity[] };
 export type ControlStatus = 'running' | 'pausing' | 'paused' | 'stopping' | 'stopped' | 'interrupted';
 const open = (activity: ExecutionActivity): boolean => activity.state !== 'settled';
 const boundedInteger = (value: number, min: number, max: number): boolean => Number.isSafeInteger(value) && value >= min && value <= max;
@@ -65,9 +67,10 @@ export class DelegationControls {
     if (value.desired === 'stopped') return value.activities.some(open) ? 'stopping' : 'stopped';
     return value.activities.some(open) ? 'pausing' : 'paused';
   }
-  tick(runId: string): DelegationControl {
-    return this.store.transaction(() => { const value = this.required(runId); this.charge(value, this.time()); this.persist(value, 'accounted'); return value; });
+  private account(runId: string, at: number): DelegationControl {
+    return this.store.transaction(() => { const value = this.required(runId); this.charge(value, at); this.persist(value, 'accounted'); return value; });
   }
+  tick(runId: string): DelegationControl { return this.account(runId, this.time()); }
   command(runId: string, expectedGeneration: number, action: 'pause' | 'resume' | 'stop'): DelegationControl {
     this.generation(this.required(runId), expectedGeneration);
     const accounted = this.tick(runId);
@@ -101,13 +104,12 @@ export class DelegationControls {
   }
   begin(runId: string, expectedGeneration: number, id: string, stage: ExecutionStage): ExecutionActivity {
     // Accounting commits separately so a denied admission cannot roll back budget exhaustion.
-    this.tick(runId);
+    const at = this.time(); this.account(runId, at);
     return this.store.transaction(() => {
-      const value = this.required(runId); this.generation(value, expectedGeneration); this.authority(value);
-      if (value.desired !== 'running' || value.recoveryRequired || value.activities.some(activity => activity.state === 'cleanup-unconfirmed')) throw new Error('Execution admission is closed.');
+      const value = this.required(runId);
+      if (value.desired !== 'running' || value.recoveryRequired || value.activities.some(activity => activity.state === 'cleanup-unconfirmed')) throw new ExecutionAdmissionClosed('Execution admission is closed.');
+      this.generation(value, expectedGeneration); this.authority(value);
       if (typeof id !== 'string' || !/^[a-zA-Z0-9:_-]{1,200}$/u.test(id) || !['discovery', 'native-session', 'source-preparation', 'checkpoint', 'integration-preparation', 'verification'].includes(stage) || value.activities.some(activity => activity.id === id) || value.activities.length >= 10_000) throw new Error('Execution activity identity or stage is invalid or already used.');
-      const at = this.time(); this.charge(value, at);
-      if (value.desired !== 'running' || value.recoveryRequired) throw new Error('Execution admission expired.');
       const activity: ExecutionActivity = { token: randomUUID(), id, stage, generation: value.generation, startedAt: at, elapsedMs: 0, state: 'active' };
       value.activities.push(activity); value.accountedAt ??= at; this.persist(value, 'activity-began', { activity }); return activity;
     });

@@ -5,6 +5,7 @@ import { AdapterRunFailure } from './contracts.js';
 import { DelegationControls, type ExecutionActivity } from './delegation-control.js';
 import { DelegationRecords } from './delegation-records.js';
 import { DelegationTasks } from './delegation-tasks.js';
+import { DelegationIntegrationStage } from './delegation-integration-stage.js';
 import { NativeAdmissionQueue } from './native-admission-queue.js';
 import type { CapacityLease, CapacityReservation } from './session-capacity.js';
 import { Store } from './store.js';
@@ -98,7 +99,8 @@ export class DelegationNative {
       guard();
       if (!info.available || !info.authenticated || info.executable !== assignment.executable || info.version !== assignment.executableVersion || !info.models.some(model => model.id === assignment.model && model.efforts.includes(assignment.effort)) || !info.executionModes?.includes(assignment.mode)) throw new Error('The authorized native route, model, effort, or execution capability is unavailable.');
       activity = this.controls.begin(input.runId, input.expectedGeneration, `${attempt.id}:native:${claim}`, 'native-session');
-      if (captureGitTree(workspace.path, this.store.runDirectory(run)) !== attempt.source.treeOid) throw new Error('Prepared task source changed while native admission was pending.');
+      const inputTree = assignment.role === 'main-integration' ? new DelegationIntegrationStage(this.store, this.workspaceLeases).candidate(input).treeOid : attempt.source.treeOid;
+      if (captureGitTree(workspace.path, this.store.runDirectory(run)) !== inputTree) throw new Error('Prepared task source changed while native admission was pending.');
       this.controls.tick(input.runId);
       guard(); this.tasks.dispatchAttempt(input); turnDispatched = true;
       const onEvent = (event: AdapterEvent): void => {
