@@ -6,6 +6,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 export interface PushOptions {
   signal?: AbortSignal;
+  /** Synchronous authority check, invoked immediately before every Git spawn. */
+  assertCurrent?: () => void;
   sshKeyPath?: string;
   /** Explicitly opt in for local bare fixture origins; never accept this through IPC. */
   allowLocalTransport?: boolean;
@@ -61,8 +63,17 @@ async function cleanup(pid: number | undefined): Promise<boolean> {
   return !groupAlive(pid);
 }
 
+function assertCurrent(options: PushOptions): void {
+  const result: unknown = options.assertCurrent?.();
+  if (result && typeof (result as { then?: unknown }).then === 'function') {
+    void Promise.resolve(result).catch(() => { /* Async guards cannot authorize a spawn. */ });
+    throw new Error('Push authority guards must be synchronous.');
+  }
+}
 async function git(root: string, args: string[], options: PushOptions, extraEnv: NodeJS.ProcessEnv = {}): Promise<{ code: number; output: string }> {
   if (process.platform === 'win32') throw new Error('Origin push requires a POSIX host.');
+  options.signal?.throwIfAborted();
+  assertCurrent(options);
   options.signal?.throwIfAborted();
   const env = { ...environment(options), ...extraEnv };
   return await new Promise((resolve, reject) => {
@@ -140,11 +151,15 @@ async function inspect(root: string, options: PushOptions): Promise<Omit<PushPla
 
 async function isolated<T>(plan: Pick<PushPlan, 'commonDir'>, options: PushOptions, action: (scratch: string, env: NodeJS.ProcessEnv) => Promise<T>, useObjects = true): Promise<T> {
   const scratch = await realpath(await mkdtemp(join(tmpdir(), 'randolph-origin-')));
+  let preserve = false;
   try {
     await requiredGit(scratch, ['init', '--bare', '--template=', '.'], options);
     const env = useObjects ? { GIT_ALTERNATE_OBJECT_DIRECTORIES: join(plan.commonDir, 'objects') } : {};
     return await action(scratch, env);
-  } finally { await rm(scratch, { recursive: true, force: true }); }
+  } catch (error) {
+    preserve = error instanceof CleanupUnconfirmedError;
+    throw error;
+  } finally { if (!preserve) await rm(scratch, { recursive: true, force: true }); }
 }
 async function remoteOid(plan: PushPlan | Omit<PushPlan, 'remoteOid' | 'createdAt'>, options: PushOptions): Promise<string | null> {
   validateTransport(plan.originUrl, options);
@@ -196,8 +211,10 @@ export async function executeOriginPush(plan: PushPlan, options: PushOptions = {
       await requiredGit(scratch, ['push', '--porcelain', '--no-verify', '--no-follow-tags', '--recurse-submodules=no', '--receive-pack=git-receive-pack', `--force-with-lease=refs/heads/${plan.branch}:${plan.remoteOid ?? ''}`, '--', plan.originUrl, `${plan.localOid}:refs/heads/${plan.branch}`], options, env);
     });
   } catch (error) {
+    // Unknown process cleanup is terminal for this operation: reconciliation would
+    // launch another subprocess and overwrite the evidence we must retain.
+    if (error instanceof CleanupUnconfirmedError) return { status: 'uncertain', localOid: plan.localOid, remoteOid: null, cleanupVerified: false, error: error.message };
     const reconciled = await reconcileOriginPush(plan, { ...options, signal: undefined });
-    if (error instanceof CleanupUnconfirmedError) return { ...reconciled, status: 'uncertain', cleanupVerified: false, error: error.message };
     return reconciled.status === 'pushed' ? reconciled : { ...reconciled, error: error instanceof Error ? error.message : 'Push failed; reconcile before retry.' };
   }
   return await reconcileOriginPush(plan, { ...options, signal: undefined });

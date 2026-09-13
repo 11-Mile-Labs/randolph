@@ -1,14 +1,18 @@
 import { assertWorkspaceIdentity, workspaceIdentity } from './workspace-identity.js';
-import { readExecutionOrigin, type ExecutionOrigin } from './execution-origin.js';
+import { cleanupReconciliationReason, readExecutionOrigin, type ExecutionOrigin } from './execution-origin.js';
 import { parseSetupProposal, setupPrompt } from './project-setup.js';
 import { readProjectContext, writeProjectContext, parseProjectContext, type ProjectContextSnapshot } from './project-context.js';
 import { AppSettings, type AppSettingsSnapshot, type SaveAppSettingsInput, type SaveGlobalMemoryInput } from './app-settings.js';
 import { randomUUID } from 'node:crypto';
 import { basename, resolve, join } from 'node:path';
-import { statSync } from 'node:fs';
+import { statSync, mkdirSync, realpathSync } from 'node:fs';
 import { Store } from './store.js';
+import { reconstructLegacyWorkspaceOwnership } from './workspace-recovery.js';
+import { WorkspaceOwnership } from './workspace-ownership.js';
+import type { WorkspaceLease, WorkspaceProvenance } from './workspace-leases.js';
+import { workspaceCleanupConfirmed } from './workspace-operation.js';
 import { NativeAdmission } from './native-admission.js';
-import { canonicalProject, prepareWorkspace } from './workspace.js';
+import { canonicalProject, prepareWorkspace, plannedConversationWorkspace } from './workspace.js';
 import { assertHarnessRoute, readHarnessSettings, writeHarnessSettings } from './harness-settings.js';
 import { inspectGitWorkspace } from './git-review.js';
 import { ProjectMemory, type MemoryCommand, type MemorySnapshot, type PreparedMemory } from './memory.js';
@@ -114,6 +118,8 @@ function assertReconciledExternalActions(metadata: Record<string, unknown>): voi
 export class Runtime {
   readonly store: Store;
   private readonly nativeAdmission: NativeAdmission;
+  private readonly workspaceOwnership: WorkspaceOwnership;
+  private readonly preparations = new Set<Promise<void>>();
   readonly adapter?: HarnessAdapter;
   private readonly adapters: Partial<Record<HarnessId, HarnessAdapter>>;
   private readonly preferences: AppSettings;
@@ -135,6 +141,9 @@ export class Runtime {
     this.adapters = 'discover' in adapter ? { codex: adapter } : adapter;
     this.adapter = this.adapters.codex;
     this.store = new Store(resolve(dataRoot));
+    this.workspaceOwnership = new WorkspaceOwnership(this.store, this.executionOrigin);
+    this.workspaceOwnership.reconcileOnReopen();
+    reconstructLegacyWorkspaceOwnership(this.store, this.workspaceOwnership);
     this.nativeAdmission = new NativeAdmission(this.store, this.executionOrigin ?? {}, undefined, () => this.changed());
     this.preferences = new AppSettings(this.store.root);
     this.checkpoints = new Checkpoints(this.store);
@@ -191,9 +200,69 @@ export class Runtime {
       }
       this.store.exportRun(run);
     }
-    this.integrations = new Integrations(this.store, id => this.accepting && !this.admission.has(id) && !this.reviews.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed());
-    this.pushes = new Pushes(this.store, id => this.accepting && !this.admission.has(id) && !this.reviews.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed(), options.push);
-    this.reviews = new Reviews(this.store, (run, review, check) => this.nativeAdmission.adapter(run.harness ?? 'codex', this.adapterForRun(run), { owner: { kind: 'review', id: review.id }, runId: run.id, reviewId: review.id, checkId: check?.id, assertCurrent: check?.assertCurrent }), id => !this.admission.has(id) && !this.pushes.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed(), true);
+    this.integrations = new Integrations(this.store, id => this.accepting && !this.admission.has(id) && !this.reviews.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed(), this.workspaceOwnership);
+    this.pushes = new Pushes(this.store, id => this.accepting && !this.admission.has(id) && !this.reviews.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed(), options.push, undefined, this.workspaceOwnership);
+    this.reviews = new Reviews(this.store, (run, review, check) => this.nativeAdmission.adapter(run.harness ?? 'codex', this.adapterForRun(run), { owner: { kind: 'review', id: review.id }, runId: run.id, reviewId: review.id, checkId: check?.id, assertCurrent: check?.assertCurrent }), id => !this.admission.has(id) && !this.pushes.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed(), true, this.workspaceOwnership);
+  }
+  private preparation(): () => void {
+    let complete!: () => void;
+    const pending = new Promise<void>(resolve => { complete = resolve; });
+    this.preparations.add(pending);
+    return () => { this.preparations.delete(pending); complete(); };
+  }
+  private ownWorkspace(workspace: string, provenance: WorkspaceProvenance, held: Map<string, WorkspaceLease>, access: 'read' | 'write' = 'write'): WorkspaceLease {
+    const acquired = this.workspaceOwnership.acquire({ reservationId: randomUUID(), ownerId: provenance.id, workspace, provenance, phase: 'preparation', access });
+    if (acquired.status !== 'acquired') throw new Error('This workspace is owned by active work or unconfirmed cleanup. Reconcile the original operation before continuing.');
+    held.set(acquired.lease.reservationId, acquired.lease);
+    return acquired.lease;
+  }
+  private planWorkspace(root: string, provenance: WorkspaceProvenance, plan: () => string, held: Map<string, WorkspaceLease>, readOnlyPlanning = false): { parent: WorkspaceLease; lease: WorkspaceLease; workspace: string } {
+    let parent = this.ownWorkspace(root, provenance, held, readOnlyPlanning ? 'read' : 'write');
+    let workspace = plan();
+    this.workspaceOwnership.assert(parent);
+    if (workspace === root) return { parent, lease: parent, workspace };
+    if (readOnlyPlanning) {
+      const promoted = this.store.transaction(() => {
+        this.workspaceOwnership.release({ ...parent, cleanupConfirmed: true, cleanupEvidence: { operation: 'workspace-planning', outcome: 'read-only-probe-returned' } });
+        const acquired = this.workspaceOwnership.acquire({ reservationId: randomUUID(), ownerId: provenance.id, workspace: root, provenance, phase: 'workspace-preparation', access: 'write' });
+        if (acquired.status !== 'acquired') throw new Error('Workspace preparation is waiting for other readers or writers to settle.');
+        return acquired.lease;
+      });
+      held.delete(parent.reservationId); held.set(promoted.reservationId, promoted); parent = promoted;
+      workspace = plan(); this.workspaceOwnership.assert(parent);
+      if (workspace === root) return { parent, lease: parent, workspace };
+    }
+    const base = join(root, '.worktrees');
+    mkdirSync(base, { recursive: true });
+    if (realpathSync(base) !== base) throw new Error('Project worktree directory was redirected.');
+    const lease = this.ownWorkspace(workspace, provenance, held);
+    return { parent, lease, workspace };
+  }
+  private releaseWorkspaces(held: Map<string, WorkspaceLease>, failure?: unknown): void {
+    const cleanupConfirmed = workspaceCleanupConfirmed(failure);
+    this.store.transaction(() => {
+      for (const lease of held.values()) this.workspaceOwnership.release({ reservationId: lease.reservationId, generation: lease.generation, cleanupConfirmed, cleanupEvidence: { operation: lease.provenance?.kind ?? 'runtime', phase: lease.phase ?? 'preparation', runtimeCleanupConfirmed: cleanupConfirmed, outcome: failure instanceof Error ? failure.message : failure ? 'failed' : 'returned' } });
+    });
+    held.clear();
+  }
+  private observeExecution(run: Run, work: Promise<void>): Promise<void> {
+    return (async () => {
+      try { await work; }
+      catch (error) {
+        run.cleanupUnconfirmed = true;
+        try { this.finish(run, 'stop-unconfirmed', `Workspace settlement failed: ${error instanceof Error ? error.message : 'unknown failure'}`); } catch { /* The retained ownership row continues to block admission if SQLite is unavailable. */ }
+      }
+    })();
+  }
+  private transferWorkspace(plan: { parent: WorkspaceLease; lease: WorkspaceLease }, held: Map<string, WorkspaceLease>): WorkspaceLease {
+    const lease = this.workspaceOwnership.bind(plan.lease);
+    this.workspaceOwnership.assert(plan.parent);
+    if (plan.parent.reservationId !== lease.reservationId) {
+      this.releaseWorkspaces(new Map([[plan.parent.reservationId, plan.parent]]));
+      held.delete(plan.parent.reservationId);
+    }
+    held.delete(lease.reservationId);
+    return lease;
   }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   delegationSnapshot(runId: string): Promise<DelegationSnapshot> { return this.delegation.snapshot(runId); }
@@ -212,7 +281,16 @@ export class Runtime {
   }
   restoreCheckpoint(input: CheckpointInput, destination: string): CheckpointRestore {
     if (!this.accepting) throw new Error('Application is closing.');
-    return this.checkpoints.restore(input, destination);
+    const held = new Map<string, WorkspaceLease>();
+    let failure: unknown;
+    try {
+      const lease = this.ownWorkspace(destination, { kind: 'checkpoint-export', id: randomUUID() }, held);
+      this.workspaceOwnership.assert(lease);
+      const result = this.checkpoints.restore(input, destination);
+      this.workspaceOwnership.bind(lease);
+      return result;
+    } catch (error) { failure = error; throw error; }
+    finally { this.releaseWorkspaces(held, failure); }
   }
   appSettings(): AppSettingsSnapshot { return this.preferences.read(); }
   saveAppSettings(input: SaveAppSettingsInput): AppSettingsSnapshot {
@@ -299,6 +377,15 @@ export class Runtime {
   checkPush(reviewId: string): Promise<ReviewRecord> { return this.pushes.check(reviewId); }
   stopPush(reviewId: string): Promise<void> { return this.pushes.stop(reviewId); }
   stopReview(reviewId: string): Promise<void> { return this.reviews.stop(reviewId); }
+  private setupCleanupReason(runId: string): string | null {
+    const nativeReason = this.delegation.records.setupSessionCleanupReason(runId, this.executionOrigin);
+    if (nativeReason) return nativeReason;
+    for (const lease of this.workspaceOwnership.snapshot().filter(value => ['run', 'main-run'].includes(value.provenance?.kind ?? '') && value.provenance?.id === runId)) {
+      const reason = cleanupReconciliationReason(lease.provenance?.origin, this.executionOrigin);
+      if (reason) return reason;
+    }
+    return null;
+  }
   projectSetup(projectId: string): ProjectSetupSnapshot {
     const project = this.project(projectId);
     const context = readProjectContext(project.root);
@@ -306,7 +393,7 @@ export class Runtime {
     const runs = this.store.runs().filter(run => conversations.has(run.conversationId));
     const busy = this.setupAdmission.has(projectId) || runs.some(run => activeStatuses.has(run.status) || run.cleanupUnconfirmed);
     const uncertain = runs.filter(run => run.cleanupUnconfirmed || run.status === 'stop-unconfirmed');
-    const cleanupReason = uncertain.map(run => this.delegation.records.setupSessionCleanupReason(run.id, this.executionOrigin)).find(reason => reason !== null);
+    const cleanupReason = uncertain.map(run => this.setupCleanupReason(run.id)).find(reason => reason !== null);
     const cleanup = uncertain.length ? { canReconcile: !this.setupAdmission.has(projectId) && !runs.some(run => this.active.has(run.id)) && !cleanupReason, reason: cleanupReason ?? 'A later boot on the original Mac confirms that the previous inspection processes have exited. Verify cleanup before starting another inspection.' } : undefined;
     return { context, cleanup, inspections: runs.map(run => {
       let proposal; let error;
@@ -336,9 +423,15 @@ export class Runtime {
       this.store.transaction(() => {
         for (const { run } of snapshot.inspections) {
           if (!run.cleanupUnconfirmed && run.status !== 'stop-unconfirmed') continue;
-          const reason = this.delegation.records.setupSessionCleanupReason(run.id, this.executionOrigin);
+          const reason = this.setupCleanupReason(run.id);
           if (reason) throw new Error(reason);
+          const workspaces = this.workspaceOwnership.snapshot().filter(lease => ['run', 'main-run'].includes(lease.provenance?.kind ?? '') && lease.provenance?.id === run.id);
+          for (const lease of workspaces) {
+            const workspaceReason = cleanupReconciliationReason(lease.provenance?.origin, this.executionOrigin);
+            if (workspaceReason) throw new Error(workspaceReason);
+          }
           this.delegation.records.reconcileProjectSetupSessions(run.id, this.executionOrigin);
+          for (const lease of workspaces) this.workspaceOwnership.release({ ...lease, cleanupConfirmed: true, cleanupEvidence: { reconciliation: 'later-boot-original-setup-owner', recordedOrigin: lease.provenance!.origin!, observedOrigin: this.executionOrigin! } });
           run.status = 'interrupted'; run.cleanupUnconfirmed = false; run.updatedAt = now();
           run.error = 'Previous inspection execution ended with an earlier boot on this Mac. No work has been restarted.';
           this.store.putRun(run);
@@ -372,14 +465,19 @@ export class Runtime {
     const inspection = snapshot.inspections.find(item => item.run.id === input.runId);
     if (!inspection?.canApprove || inspection.proposal?.revision !== input.proposalRevision || inspection.run.projectContext?.revision !== input.expectedContextRevision) throw new Error('This proposal or approved context changed. Reload project setup before approving.');
     const value = parseProjectContext(input.value);
-    this.store.append(inspection.run, 'project-context.approval-requested', 'Project context approval requested', { proposalRevision: input.proposalRevision, expectedContextRevision: input.expectedContextRevision, value });
+    const held = new Map<string, WorkspaceLease>();
+    let failure: unknown;
+    const lease = this.ownWorkspace(this.project(input.projectId).root, { kind: 'setup-approval', id: randomUUID(), projectId: input.projectId, conversationId: inspection.run.conversationId }, held);
     try {
+      this.workspaceOwnership.assert(lease);
+      this.store.append(inspection.run, 'project-context.approval-requested', 'Project context approval requested', { proposalRevision: input.proposalRevision, expectedContextRevision: input.expectedContextRevision, value });
       assertWorkspaceIdentity(this.project(input.projectId).root, inspection.run.workspaceIdentity!);
       const saved = writeProjectContext(this.project(input.projectId).root, value, input.expectedContextRevision);
       this.store.append(inspection.run, 'project-context.approved', 'Project context approved', { proposalRevision: input.proposalRevision, revision: saved.revision, value: saved.value });
       this.store.exportRun(inspection.run);
       return saved;
-    } finally { this.changed(); }
+    } catch (error) { failure = error; throw error; }
+    finally { this.releaseWorkspaces(held, failure); this.changed(); }
   }
   private project(id: string): Project {
     const project = this.store.projects().find(value => value.id === id);
@@ -397,9 +495,16 @@ export class Runtime {
     const info = await this.inspectExecutable(input.defaults.harness, input.defaults.executable);
     if (!this.accepting) throw new Error('Application is closing.');
     this.validateSelection(input.defaults, info);
-    const settings = writeHarnessSettings(project.root, input.defaults, input.expectedRevision, input.enabledRoutes);
-    this.changed();
-    return settings;
+    const held = new Map<string, WorkspaceLease>();
+    let failure: unknown;
+    try {
+      const lease = this.ownWorkspace(project.root, { kind: 'harness-settings', id: randomUUID(), projectId: project.id }, held);
+      this.workspaceOwnership.assert(lease);
+      const settings = writeHarnessSettings(project.root, input.defaults, input.expectedRevision, input.enabledRoutes);
+      this.changed();
+      return settings;
+    } catch (error) { failure = error; throw error; }
+    finally { this.releaseWorkspaces(held, failure); }
   }
   async setConversationSelection(input: ConversationSelectionInput): Promise<Conversation> {
     if (!this.accepting) throw new Error('Application is closing.');
@@ -468,6 +573,9 @@ export class Runtime {
     this.admission.add(sourceConversation.id);
     let targetConversationId: string | undefined;
     let run: Run | undefined;
+    const prepared = this.preparation();
+    const held = new Map<string, WorkspaceLease>();
+    let preparationFailure: unknown;
     try {
       const project = this.project(sourceRun.projectId);
       const settings = readHarnessSettings(project.root);
@@ -488,7 +596,8 @@ export class Runtime {
         : { id: randomUUID(), projectId: project.id, sourceConversationId: sourceConversation.id, title: `Rerun: ${context.title}`, harness: context.harness, model: context.model, effort: context.effort, executionMode: context.executionMode, createdAt, updatedAt: createdAt, lastReadSequence: 0 };
       targetConversationId = targetConversation.id;
       if (targetConversation.id !== sourceConversation.id) this.admission.add(targetConversation.id);
-      const workspace = join(project.root, '.worktrees', `randolph-${runId}`);
+      const planned = this.planWorkspace(project.root, { kind: 'run', id: runId, projectId: project.id, conversationId: targetConversation.id }, () => join(project.root, '.worktrees', `randolph-${runId}`), held);
+      const workspace = planned.workspace;
       run = {
         harnessAuthorizationRevision: settings.revision,
         enabledHarnessRoutes: settings.enabledRoutes?.map(route => ({ ...route })) ?? (info.executable ? [{ harness: context.harness, executable: info.executable }] : []),
@@ -532,19 +641,33 @@ export class Runtime {
         if (kind === 'restart') this.reviews.invalidate(sourceConversation.id);
         this.checkpoints.capture(run, 'before-turn');
       } catch (cause) {
+        preparationFailure = cause;
         this.checkpoints.failed(run, cause);
+        run.cleanupUnconfirmed = !workspaceCleanupConfirmed(cause);
         this.finish(run, 'failed', preDispatchRecoveryFailure);
         throw cause;
       }
       const controller = new AbortController();
       const state = { controller, done: Promise.resolve(), run };
+      const lease = this.transferWorkspace(planned, held);
       this.active.set(run.id, state);
-      state.done = this.execute(run, controller);
+      state.done = this.observeExecution(run, this.execute(run, controller, lease));
       this.changed();
       return { conversation: targetConversation, run: { ...run } };
+    } catch (error) {
+      if (workspaceCleanupConfirmed(preparationFailure)) preparationFailure = error;
+      if (run && !this.active.has(run.id) && this.store.runs().some(value => value.id === run!.id)) {
+        run.cleanupUnconfirmed ||= !workspaceCleanupConfirmed(preparationFailure);
+        if (run.status === 'starting') this.finish(run, 'failed', preDispatchRecoveryFailure);
+        else this.store.putRun(run);
+      }
+      throw error;
     } finally {
-      this.admission.delete(sourceConversation.id);
-      if (targetConversationId) this.admission.delete(targetConversationId);
+      try { this.releaseWorkspaces(held, preparationFailure); } finally {
+        this.admission.delete(sourceConversation.id);
+        if (targetConversationId) this.admission.delete(targetConversationId);
+        prepared();
+      }
     }
   }
   async send(input: SendInput): Promise<Run> { return this.#send(input); }
@@ -556,6 +679,10 @@ export class Runtime {
     if (this.admission.has(conversation.id) || this.reviews.hasActiveWork(conversation.id) || this.pushes.hasActiveWork(conversation.id) || this.store.runs().some(run => run.conversationId === conversation.id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed))) throw new Error('This conversation already has active work.');
     if (this.integrations.blocksNewWork(conversation.id)) throw new Error('Finish interrupted parent integration before starting new work.');
     this.admission.add(conversation.id);
+    const prepared = this.preparation();
+    const held = new Map<string, WorkspaceLease>();
+    let preparationFailure: unknown;
+    let createdRun: Run | undefined;
     try {
       const project = this.project(conversation.projectId);
       const rootIdentity = workspaceIdentity(project.root);
@@ -600,11 +727,17 @@ export class Runtime {
         : undefined;
       const cleaned = this.store.reviews().some(review => review.runId === previousRun?.id && review.cleaned);
       const previous = cleaned || (executionMode === 'code' && previousRun?.workspace === project.root) ? undefined : previousRun?.workspace;
-      const workspace = conversation.kind === 'project-setup' ? project.root : prepareWorkspace(project.root, conversation.id, previous);
+      const runId = randomUUID();
+      const plan = () => conversation.kind === 'project-setup' ? project.root : plannedConversationWorkspace(project.root, conversation.id, previous);
+      const planned = this.planWorkspace(project.root, { kind: 'run', id: runId, projectId: project.id, conversationId: conversation.id }, plan, held, executionMode === 'read-only');
+      const workspace = planned.lease.access === 'read' || conversation.kind === 'project-setup' ? project.root : prepareWorkspace(project.root, conversation.id, previous);
+      if (workspace !== planned.workspace) throw new Error('Conversation workspace changed during preparation.');
+      planned.lease = this.workspaceOwnership.bind(planned.lease);
+      held.set(planned.lease.reservationId, planned.lease);
       if (executionMode === 'code') inspectGitWorkspace(project.root, workspace);
       this.reviews.invalidate(conversation.id);
       assertWorkspaceIdentity(project.root, rootIdentity);
-      const run: Run = { harnessAuthorizationRevision: settings.revision, enabledHarnessRoutes: settings.enabledRoutes?.map(route => ({ ...route })) ?? (info.executable ? [{ harness: selection.harness, executable: info.executable }] : []), executionOrigin: this.executionOrigin, workspaceIdentity: workspaceIdentity(workspace), projectContext, harness: selection.harness, executable: info.executable, executableVersion: info.version, id: randomUUID(), projectId: project.id, conversationId: conversation.id, ...(recoveryMessages ? { recoveryMessages } : {}), status: 'starting', model: selection.model, effort: selection.effort, executionMode, settingsSource, memory, projectSettingsRevision: settings.revision, workspace, createdAt: now(), updatedAt: now(), lastActivityAt: now() };
+      const run: Run = { harnessAuthorizationRevision: settings.revision, enabledHarnessRoutes: settings.enabledRoutes?.map(route => ({ ...route })) ?? (info.executable ? [{ harness: selection.harness, executable: info.executable }] : []), executionOrigin: this.executionOrigin, workspaceIdentity: workspaceIdentity(workspace), projectContext, harness: selection.harness, executable: info.executable, executableVersion: info.version, id: runId, projectId: project.id, conversationId: conversation.id, ...(recoveryMessages ? { recoveryMessages } : {}), status: 'starting', model: selection.model, effort: selection.effort, executionMode, settingsSource, memory, projectSettingsRevision: settings.revision, workspace, createdAt: now(), updatedAt: now(), lastActivityAt: now() };
       run.logsPath = join(this.store.runDirectory(run), 'logs');
       this.store.transaction(() => {
         this.store.putConversation({ ...conversation, title: conversation.title === 'New conversation' ? input.text.trim().slice(0, 64) : conversation.title, ...(explicit ? { harness: selection.harness, model: selection.model, effort: selection.effort } : {}), updatedAt: now() });
@@ -612,29 +745,43 @@ export class Runtime {
         this.store.putMessage({ id: randomUUID(), runId: run.id, conversationId: conversation.id, role: 'user', text: input.text, createdAt: now() });
         this.store.append(run, 'run.created', executionMode === 'code' ? 'Code conversation queued' : 'Read-only conversation queued', { harness: run.harness, model: run.model, effort: run.effort, settingsSource, projectSettingsRevision: settings.revision, nativeVersion: info.version ?? 'unknown', executable: run.executable, workspace, executionMode });
       });
+      createdRun = run;
       try { this.memory.retain(project.id, run.id, memory); this.store.exportRun(run); }
       catch { this.finish(run, 'failed', 'Could not export run logs. No harness was launched.'); throw new Error('Could not export run logs.'); }
       if (workspace !== project.root) {
         try { this.checkpoints.capture(run, 'before-turn'); }
-        catch (cause) { this.checkpoints.failed(run, cause); this.finish(run, 'failed', 'Could not retain the starting checkpoint. No harness was launched.'); throw cause; }
+        catch (cause) { preparationFailure = cause; this.checkpoints.failed(run, cause); run.cleanupUnconfirmed = !workspaceCleanupConfirmed(cause); this.finish(run, 'failed', 'Could not retain the starting checkpoint. No harness was launched.'); throw cause; }
       } else {
         this.checkpoints.failed(run, new Error('File recovery is currently supported only for Git worktrees with a committed HEAD. This read-only folder run has retained history but no recoverable code checkpoint.'));
       }
       const controller = new AbortController();
       // Register ownership before asynchronous adapter startup; Stop can interrupt launch too.
       const state = { controller, done: Promise.resolve(), run };
+      const lease = this.transferWorkspace(planned, held);
       this.active.set(run.id, state);
-      state.done = this.execute(run, controller);
+      state.done = this.observeExecution(run, this.execute(run, controller, lease));
       this.changed();
       return { ...run };
-    } finally { this.admission.delete(conversation.id); }
+    } catch (error) {
+      if (workspaceCleanupConfirmed(preparationFailure)) preparationFailure = error;
+      if (createdRun && !this.active.has(createdRun.id)) {
+        createdRun.cleanupUnconfirmed ||= !workspaceCleanupConfirmed(preparationFailure);
+        if (createdRun.status === 'starting') this.finish(createdRun, 'failed', 'Workspace preparation failed before native dispatch.');
+        else this.store.putRun(createdRun);
+      }
+      throw error;
+    } finally {
+      try { this.releaseWorkspaces(held, preparationFailure); } finally { this.admission.delete(conversation.id); prepared(); }
+    }
   }
-  private async execute(run: Run, controller: AbortController): Promise<void> {
+  private async execute(run: Run, controller: AbortController, lease: WorkspaceLease): Promise<void> {
     let sessionId: string | undefined;
     let bound = false;
     let sessionSettled = false;
     let sessionCleanupConfirmed = false;
     let adapterInvoked = false;
+    let runtimeCleanupConfirmed = true;
+    let nativeCleanupConfirmed = false;
     const settleSession = (status: 'completed' | 'failed' | 'interrupted', cleanupConfirmed: boolean, cleanupEvidence?: Record<string, unknown>, error?: string): void => {
       if (!sessionId || sessionSettled) return;
       this.delegation.records.finishSession({ runId: run.id, sessionId, status, cleanupConfirmed, ...(cleanupConfirmed && cleanupEvidence ? { cleanupEvidence } : {}), ...(error ? { error } : {}) });
@@ -650,6 +797,8 @@ export class Runtime {
       this.event(run, event);
     };
     try {
+      this.workspaceOwnership.assert(lease);
+      this.workspaceOwnership.stage({ ...lease, phase: 'native-turn' });
       if (!run.executable || !run.executableVersion) throw new Error('Run lacks a frozen native executable identity.');
       sessionId = randomUUID();
       this.delegation.records.recordSession({
@@ -662,13 +811,16 @@ export class Runtime {
       if (run.memory?.text) messages.unshift({ role: 'user', text: run.memory.text });
       if (run.projectContext?.value.purpose) messages.unshift({ role: 'user', text: 'Approved project context for this run (JSON; does not override execution or approval policy):\n' + JSON.stringify(run.projectContext) });
       if (run.workspaceIdentity) assertWorkspaceIdentity(run.workspace, run.workspaceIdentity);
-      const adapter = this.nativeAdmission.adapter(run.harness ?? 'codex', this.adapterForRun(run), { owner: { kind: 'run', id: run.id }, runId: run.id, sessionId, assertCurrent: () => { if (run.workspaceIdentity) assertWorkspaceIdentity(run.workspace, run.workspaceIdentity); } });
+      const adapter = this.nativeAdmission.adapter(run.harness ?? 'codex', this.adapterForRun(run), { owner: { kind: 'run', id: run.id }, runId: run.id, sessionId, assertCurrent: () => { this.workspaceOwnership.assert(lease); if (run.workspaceIdentity) assertWorkspaceIdentity(run.workspace, run.workspaceIdentity); } });
       adapterInvoked = true;
       const result = await adapter.run({ workspaceIdentity: run.workspaceIdentity, executable: run.executable, executableVersion: run.executableVersion, workspace: run.workspace, model: run.model, effort: run.effort, executionMode: run.executionMode, messages, signal: controller.signal, onEvent });
+      nativeCleanupConfirmed = result.status !== 'stop-unconfirmed';
       if (result.status === 'completed' && bound) settleSession('completed', true, { adapterStatus: result.status });
       else if (result.status === 'interrupted') settleSession('interrupted', true, { adapterStatus: result.status });
       else if (result.status === 'completed') settleSession('failed', true, { adapterStatus: result.status }, 'Native adapter completed without a registered thread and turn identity.');
       else settleSession('failed', false, undefined, 'Native cleanup could not be confirmed.');
+      nativeCleanupConfirmed = result.status !== 'stop-unconfirmed';
+      this.workspaceOwnership.assert(lease);
       const cleanupUnconfirmed = result.status === 'stop-unconfirmed';
       if (cleanupUnconfirmed) {
         run.cleanupUnconfirmed = true;
@@ -676,25 +828,33 @@ export class Runtime {
       } else if (result.status === 'completed' && !bound) this.finish(run, 'failed', 'Native adapter completed without a registered thread and turn identity.');
       else this.finish(run, result.status);
       if (result.status === 'completed' && bound && run.checkpoints?.length) {
-        try { this.checkpoints.capture(run, 'completed-turn'); }
-        catch (cause) { this.checkpoints.failed(run, cause); }
+        try { this.workspaceOwnership.stage({ ...lease, phase: 'completed-checkpoint' }); this.workspaceOwnership.assert(lease); this.checkpoints.capture(run, 'completed-turn'); }
+        catch (cause) { runtimeCleanupConfirmed &&= workspaceCleanupConfirmed(cause); this.checkpoints.failed(run, cause); if (!workspaceCleanupConfirmed(cause)) { run.cleanupUnconfirmed = true; this.finish(run, 'stop-unconfirmed', 'Checkpoint process cleanup could not be confirmed.'); } }
       }
     } catch (error) {
+      runtimeCleanupConfirmed &&= workspaceCleanupConfirmed(error);
       const message = error instanceof Error ? error.message : 'Harness failed.';
       const trustedFailure = error instanceof AdapterRunFailure;
       const confirmedBeforeDispatch = !adapterInvoked;
-      const confirmedSessionCleanup = sessionSettled && sessionCleanupConfirmed;
+      const confirmedSessionCleanup = nativeCleanupConfirmed || sessionSettled && sessionCleanupConfirmed;
       try {
         if (trustedFailure) settleSession('failed', true, error.cleanupEvidence, message);
+        else if (nativeCleanupConfirmed) settleSession('failed', true, { adapterResultCleanupConfirmed: true }, message);
         else if (confirmedBeforeDispatch) settleSession('failed', true, { dispatch: 'not-invoked' }, message);
         else settleSession('failed', false, undefined, message);
       } catch { /* The run failure below remains authoritative. */ }
-      if (trustedFailure || confirmedBeforeDispatch || confirmedSessionCleanup) this.finish(run, 'failed', message);
+      nativeCleanupConfirmed = trustedFailure || confirmedBeforeDispatch || confirmedSessionCleanup;
+      if (nativeCleanupConfirmed && runtimeCleanupConfirmed) this.finish(run, 'failed', message);
       else {
         run.cleanupUnconfirmed = true;
         this.finish(run, 'stop-unconfirmed', `${message} Process cleanup could not be confirmed.`);
       }
-    } finally { this.active.delete(run.id); this.changed(); }
+    } finally {
+      try {
+        const cleanupConfirmed = nativeCleanupConfirmed && runtimeCleanupConfirmed;
+        this.workspaceOwnership.release({ ...lease, cleanupConfirmed, cleanupEvidence: { runId: run.id, nativeCleanupConfirmed, runtimeCleanupConfirmed, durableStatus: this.store.runs().find(value => value.id === run.id)?.status ?? 'unknown' } });
+      } finally { this.active.delete(run.id); this.changed(); }
+    }
   }
   private event(run: Run, event: AdapterEvent): void {
     if (!this.active.has(run.id)) return;
@@ -734,6 +894,7 @@ export class Runtime {
   async close(): Promise<void> {
     this.accepting = false;
     await this.nativeAdmission.close();
+    await Promise.all(this.preparations);
     await this.pushes.close();
     await this.reviews.close();
     await Promise.all([...this.active.keys()].map(id => this.stop(id)));

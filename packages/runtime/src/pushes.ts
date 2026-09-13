@@ -4,13 +4,16 @@ import { join } from 'node:path';
 import type { ReviewRecord } from './contracts.js';
 import type { Store } from './store.js';
 import { CleanupUnconfirmedError, previewOriginPush, executeOriginPush, reconcileOriginPush, type PushPlan, type PushState, type PushOptions } from './push.js';
+import { randomUUID } from 'node:crypto';
+import { WorkspaceOwnership } from './workspace-ownership.js';
+import { workspaceCleanupConfirmed } from './workspace-operation.js';
 export type PushRecord = { revision: string; plan: PushPlan; status: 'preview' | 'pushing' | 'pushed' | 'stale' | 'uncertain'; approvedAt?: string; result?: PushState; error?: string };
 export type ApprovePushInput = { reviewId: string; revision: string };
 type PushOperations = { preview: typeof previewOriginPush; execute: typeof executeOriginPush; reconcile: typeof reconcileOriginPush };
 export class Pushes {
   private readonly active = new Map<string, { conversationId: string; controller: AbortController; done: Promise<ReviewRecord> }>();
   private accepting = true;
-  constructor(private readonly store: Store, private readonly canWork: (id: string) => boolean, private readonly changed: () => void, private readonly options: PushOptions = { sshKeyPath: join(homedir(), '.ssh', 'id_ed25519') }, private readonly operations: PushOperations = { preview: previewOriginPush, execute: executeOriginPush, reconcile: reconcileOriginPush }) {
+  constructor(private readonly store: Store, private readonly canWork: (id: string) => boolean, private readonly changed: () => void, private readonly options: PushOptions = { sshKeyPath: join(homedir(), '.ssh', 'id_ed25519') }, private readonly operations: PushOperations = { preview: previewOriginPush, execute: executeOriginPush, reconcile: reconcileOriginPush }, private readonly ownership = new WorkspaceOwnership(store)) {
     for (const review of store.reviews()) if (review.originOperation === 'active' || review.push?.status === 'pushing') {
       if (review.push) {
         review.push.result = { status: 'uncertain', localOid: review.push.plan.localOid, remoteOid: null, cleanupVerified: false };
@@ -44,50 +47,63 @@ export class Pushes {
     this.store.transaction(() => { this.store.putReview(review); this.store.append(run, event, review.push?.error ?? `Origin push ${review.push?.status}`, { push: review.push }); });
     this.store.exportRun(run); this.changed();
   }
-  private async operation(id: string, action: (review: ReviewRecord, options: PushOptions) => Promise<ReviewRecord>): Promise<ReviewRecord> {
+  private async operation(id: string, action: (review: ReviewRecord, options: PushOptions, markUnknown: () => void) => Promise<ReviewRecord>): Promise<ReviewRecord> {
     const review = this.get(id);
-    if (!this.accepting || !this.canWork(review.conversationId) || this.hasActiveWork(review.conversationId)) throw new Error('Wait for active work or unconfirmed cleanup before an origin operation.');
-    review.originOperation = 'active';
-    try { this.save(review, 'push.operation-started'); }
-    catch (error) { review.originOperation = undefined; this.store.putReview(review); throw error; }
-    const controller = new AbortController();
-    const state = { conversationId: review.conversationId, controller, done: Promise.resolve(review) };
-    this.active.set(id, state);
-    const done = action(review, { ...this.options, signal: controller.signal }); state.done = done; this.changed();
+    const acquired = this.ownership.acquire({ reservationId: randomUUID(), ownerId: `push:${review.id}`, runId: review.runId, workspace: review.basis.root, provenance: { kind: 'push', id: review.id, projectId: review.projectId, conversationId: review.conversationId }, phase: 'push' });
+    if (acquired.status !== 'acquired') throw new Error('Push workspace ownership is unavailable.');
+    const lease = acquired.lease;
+    let cleanupConfirmed = true;
+    let state: { conversationId: string; controller: AbortController; done: Promise<ReviewRecord> } | undefined;
     try {
+      if (!this.accepting || !this.canWork(review.conversationId) || this.hasActiveWork(review.conversationId)) throw new Error('Wait for active work or unconfirmed cleanup before an origin operation.');
+      review.originOperation = 'active'; this.save(review, 'push.operation-started');
+      const controller = new AbortController();
+      state = { conversationId: review.conversationId, controller, done: Promise.resolve(review) };
+      this.active.set(id, state);
+      this.ownership.assert(lease); this.ownership.bind({ reservationId: lease.reservationId, generation: lease.generation, workspace: review.basis.root }); this.ownership.stage({ reservationId: lease.reservationId, generation: lease.generation, phase: 'native-push' });
+      const done = action(review, { ...this.options, signal: controller.signal, assertCurrent: () => { this.ownership.assert(lease); } }, () => { cleanupConfirmed = false; }); state.done = done; this.changed();
       const result = await done;
-      if (result.push?.result?.cleanupVerified === false) this.quarantine(review);
+      if (result.push?.result?.cleanupVerified === false) { cleanupConfirmed = false; this.quarantine(review); }
       return result;
     } catch (error) {
-      if (error instanceof CleanupUnconfirmedError) this.quarantine(review);
+      cleanupConfirmed &&= review.push?.result?.cleanupVerified !== false && !(error instanceof CleanupUnconfirmedError) && workspaceCleanupConfirmed(error);
+      if (!cleanupConfirmed) this.quarantine(review);
       throw error;
     } finally {
-      this.active.delete(id);
-      if (review.originOperation === 'active') {
-        review.originOperation = undefined;
-        this.save(review, 'push.operation-finished');
-      }
-      this.changed();
+      try {
+        this.store.transaction(() => {
+          if (review.originOperation === 'active') {
+            review.originOperation = undefined;
+            this.store.putReview(review);
+            const run = this.store.runs().find(item => item.id === review.runId)!;
+            this.store.append(run, 'push.operation-finished', 'Origin push operation settled without an outstanding process.', { reviewId: review.id });
+          }
+          this.ownership.release({ reservationId: lease.reservationId, generation: lease.generation, cleanupConfirmed, cleanupEvidence: cleanupConfirmed ? { stage: 'push', status: review.push?.status ?? 'none' } : { stage: 'push', cleanup: 'unconfirmed' } });
+        });
+      } finally { this.active.delete(id); this.changed(); }
     }
   }
 
   preview(id: string): Promise<ReviewRecord> {
-    return this.operation(id, async (review, options) => {
+    return this.operation(id, async (review, options, _markUnknown) => {
       if (review.push?.approvedAt && review.push.status !== 'stale') throw new Error('Recheck the approved push outcome before replacing its preview.');
       const plan = await this.operations.preview(review.basis.root, options);
+      options.assertCurrent?.();
       if (plan.localOid !== review.commitOid) throw new Error('The parent has additional commits since delivery. Start a fresh delivery review before pushing this result.');
       review.push = { revision: createHash('sha256').update(JSON.stringify(plan)).digest('hex'), plan, status: 'preview' };
       this.save(review, 'push.previewed'); return review;
     });
   }
   approve(input: ApprovePushInput): Promise<ReviewRecord> {
-    return this.operation(input.reviewId, async (review, options) => {
+    return this.operation(input.reviewId, async (review, options, markUnknown) => {
       if (!review.push || review.push.revision !== input.revision) throw new Error('Push preview changed. Inspect and approve the current preview.');
       if (review.push.status === 'pushed') return review;
       if (review.push.status !== 'preview') throw new Error('Recheck the push outcome and prepare a fresh preview before approving.');
       review.push.status = 'pushing'; review.push.approvedAt = new Date().toISOString();
       this.save(review, 'push.approved');
       const result = await this.operations.execute(review.push.plan, options);
+      if (result.cleanupVerified === false) markUnknown();
+      options.assertCurrent?.();
       review.push.result = result;
       review.push.status = result.status === 'pushed' ? 'pushed' : result.status === 'uncertain' ? 'uncertain' : 'stale';
       review.push.error = result.error;
@@ -95,9 +111,11 @@ export class Pushes {
     });
   }
   check(id: string): Promise<ReviewRecord> {
-    return this.operation(id, async (review, options) => {
+    return this.operation(id, async (review, options, markUnknown) => {
       if (!review.push) throw new Error('There is no retained push to reconcile.');
       const result = await this.operations.reconcile(review.push.plan, options);
+      if (result.cleanupVerified === false) markUnknown();
+      options.assertCurrent?.();
       review.push.result = result;
       review.push.status = result.status === 'pushed' ? 'pushed' : result.status === 'uncertain' ? 'uncertain' : 'stale';
       review.push.error = result.error;

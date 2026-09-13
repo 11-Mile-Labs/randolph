@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Runtime } from '../dist/index.js';
 import { Pushes } from '../dist/pushes.js';
 import { CleanupUnconfirmedError } from '../dist/push.js';
+import { WorkspaceOwnership } from '../dist/workspace-ownership.js';
+import { randomUUID } from 'node:crypto';
 
 function git(root, args) {
   return execFileSync('/usr/bin/git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', '-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -79,6 +81,13 @@ test('review and verification leave refs unchanged; explicit approval commits an
   const verified = await f.runtime.verifyReview(review.id);
   assert.equal(verified.verification.status, 'passed');
   assert.equal(git(f.projectRoot, ['rev-parse', 'HEAD']), f.initialHead);
+  const ownership = new WorkspaceOwnership(f.runtime.store);
+  const parent = ownership.acquire({ reservationId: randomUUID(), ownerId: 'other-writer', workspace: realpathSync(f.projectRoot) });
+  assert.equal(parent.status, 'acquired');
+  await assert.rejects(f.runtime.approveReview({ reviewId: review.id, message: 'Blocked delivery' }), /ownership|workspace/i);
+  assert.equal(ownership.snapshot().length, 1);
+  assert.equal(ownership.snapshot()[0].workspace, realpathSync(f.projectRoot));
+  ownership.release({ reservationId: parent.lease.reservationId, generation: parent.lease.generation, cleanupConfirmed: true, cleanupEvidence: { fixture: 'release' } });
   const delivered = await f.runtime.approveReview({ reviewId: review.id, message: 'Apply verified change' });
   assert.equal(delivered.status, 'delivered');
   assert.equal(git(f.projectRoot, ['rev-parse', 'HEAD']), delivered.commitOid);
@@ -125,6 +134,39 @@ test('a review queued behind native discovery rechecks its workspace before comm
   assert.equal(f.runtime.snapshot().reviews.find(item => item.id === review.id)?.status, 'stale');
 });
 
+test('a shared workspace writer blocks review and integration before either changes git state', async t => {
+  const f = fixture(t);
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  const run = await f.runtime.send({ conversationId: f.conversation.id, text: 'Update value.' }); await settled(f.runtime);
+  const ownership = new WorkspaceOwnership(f.runtime.store);
+  const reviewLock = ownership.acquire({ reservationId: randomUUID(), ownerId: 'other-review', workspace: run.workspace });
+  assert.equal(reviewLock.status, 'acquired');
+  assert.throws(() => f.runtime.prepareReview(f.conversation.id), /ownership|workspace/i);
+  assert.equal(f.runtime.snapshot().reviews.length, 0);
+  ownership.release({ reservationId: reviewLock.lease.reservationId, generation: reviewLock.lease.generation, cleanupConfirmed: true, cleanupEvidence: { fixture: 'release' } });
+  writeFileSync(join(f.projectRoot, 'parent.txt'), 'advance\n'); git(f.projectRoot, ['add', 'parent.txt']); git(f.projectRoot, ['commit', '-m', 'advance']);
+  const integrationLock = ownership.acquire({ reservationId: randomUUID(), ownerId: 'other-integration', workspace: run.workspace });
+  assert.equal(integrationLock.status, 'acquired');
+  assert.throws(() => f.runtime.integrateConversation(f.conversation.id), /ownership|workspace/i);
+  assert.equal(git(run.workspace, ['rev-parse', 'HEAD']), f.initialHead);
+  ownership.release({ reservationId: integrationLock.lease.reservationId, generation: integrationLock.lease.generation, cleanupConfirmed: true, cleanupEvidence: { fixture: 'release' } });
+});
+
+test('a shared writer blocks verification before review freshness inspection can touch Git', async t => {
+  const f = fixture(t);
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  const run = await f.runtime.send({ conversationId: f.conversation.id, text: 'Update value.' }); await settled(f.runtime);
+  const review = f.runtime.prepareReview(f.conversation.id);
+  const reviews = f.runtime.reviews; const original = reviews.assertCurrent.bind(reviews); let inspections = 0;
+  reviews.assertCurrent = value => { inspections += 1; return original(value); };
+  const ownership = new WorkspaceOwnership(f.runtime.store);
+  const lock = ownership.acquire({ reservationId: randomUUID(), ownerId: 'other-verification', workspace: run.workspace });
+  assert.equal(lock.status, 'acquired');
+  await assert.rejects(f.runtime.verifyReview(review.id), /ownership|workspace/i);
+  assert.equal(inspections, 0);
+  ownership.release({ reservationId: lock.lease.reservationId, generation: lock.lease.generation, cleanupConfirmed: true, cleanupEvidence: { fixture: 'release' } });
+});
+
 test('failed checks block final approval and preserve failure evidence', async t => {
   const f = fixture(t, { failedCheck: true });
   await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
@@ -146,6 +188,7 @@ test('unconfirmed verification cleanup blocks further work across reopening', as
   const review = f.runtime.prepareReview(f.conversation.id);
   const checked = await f.runtime.verifyReview(review.id);
   assert.equal(checked.status, 'stop-unconfirmed');
+  assert.equal(new WorkspaceOwnership(f.runtime.store).snapshot().some(lease => lease.state === 'cleanup-unconfirmed'), true);
   await assert.rejects(f.runtime.send({ conversationId: f.conversation.id, text: 'Must remain blocked' }), /active|cleanup/i);
   assert.throws(() => f.runtime.prepareReview(f.conversation.id), /active|cleanup/i);
   await f.close();
@@ -220,6 +263,12 @@ test('local delivery never pushes; a separate exact preview approval publishes a
   const review = f.runtime.prepareReview(f.conversation.id); await f.runtime.verifyReview(review.id);
   await f.runtime.approveReview({ reviewId: review.id, message: 'Reviewed local delivery' });
   assert.equal(git(origin, ['for-each-ref', '--format=%(refname)']), '');
+  const ownership = new WorkspaceOwnership(f.runtime.store);
+  const pushLock = ownership.acquire({ reservationId: randomUUID(), ownerId: 'other-push', workspace: realpathSync(f.projectRoot) });
+  assert.equal(pushLock.status, 'acquired');
+  await assert.rejects(f.runtime.previewPush(review.id), /ownership|workspace/i);
+  assert.equal(git(origin, ['for-each-ref', '--format=%(refname)']), '');
+  ownership.release({ reservationId: pushLock.lease.reservationId, generation: pushLock.lease.generation, cleanupConfirmed: true, cleanupEvidence: { fixture: 'release' } });
   const preview = await f.runtime.previewPush(review.id);
   assert.equal(preview.push.status, 'preview');
   assert.equal(git(origin, ['for-each-ref', '--format=%(refname)']), '');
@@ -253,4 +302,23 @@ test('a failed push preview with unknown process cleanup quarantines even withou
   assert.equal(f.runtime.snapshot().reviews[0].push, undefined);
   assert.equal(f.runtime.snapshot().reviews[0].originOperation, 'cleanup-unconfirmed');
   await assert.rejects(f.runtime.send({ conversationId: f.conversation.id, text: 'Must stay blocked' }), /active|cleanup/i);
+});
+
+
+test('raw unknown push cleanup remains quarantined when the post-result ownership guard rejects', async t => {
+  const f = fixture(t);
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  await f.runtime.send({ conversationId: f.conversation.id, text: 'Update value.' }); await settled(f.runtime);
+  const review = f.runtime.prepareReview(f.conversation.id); await f.runtime.verifyReview(review.id);
+  await f.runtime.approveReview({ reviewId: review.id, message: 'Deliver locally' });
+  const delivered = f.runtime.snapshot().reviews.find(item => item.id === review.id);
+  f.runtime.store.putReview({ ...delivered, push: { revision: 'exact', plan: {}, status: 'preview' } });
+  const pushes = new Pushes(f.runtime.store, () => true, () => {}, {}, {
+    async preview() { throw new Error('not used'); },
+    async execute() { renameSync(f.projectRoot, `${f.projectRoot}-replaced`); return { status: 'uncertain', localOid: 'local', remoteOid: null, cleanupVerified: false }; },
+    async reconcile() { throw new Error('not used'); },
+  });
+  await assert.rejects(pushes.approve({ reviewId: review.id, revision: 'exact' }), /ownership|workspace|stale/i);
+  assert.equal(f.runtime.snapshot().reviews.find(item => item.id === review.id)?.originOperation, 'cleanup-unconfirmed');
+  assert.equal(new WorkspaceOwnership(f.runtime.store).snapshot().some(lease => lease.state === 'cleanup-unconfirmed'), true);
 });

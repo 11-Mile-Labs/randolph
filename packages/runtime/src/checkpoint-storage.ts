@@ -1,3 +1,4 @@
+import { workspaceCleanupConfirmed } from './workspace-operation.js';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -303,7 +304,7 @@ export function createCheckpoint(workspace: string, evidenceDirectory: string, m
     syncPath(evidence);
     return { ...stored, digest: hashBytes(raw), directory };
   } catch (error) {
-    rmSync(published ? directory : pending, { force: true, recursive: true });
+    if (workspaceCleanupConfirmed(error)) rmSync(published ? directory : pending, { force: true, recursive: true });
     throw error;
   }
 }
@@ -374,11 +375,11 @@ export function restoreCheckpoint(directory: string, expectedDigest: string, des
     assertOwnedDirectory(destination, identity);
     const gitDirectory = canonicalDirectory(join(destination, '.git'), 'Restored Git directory');
     let attached = false;
-    try { gitText(destination, ['symbolic-ref', '-q', 'HEAD']); attached = true; } catch { /* Detached HEAD is required. */ }
+    try { gitText(destination, ['symbolic-ref', '-q', 'HEAD']); attached = true; } catch (error) { if (!workspaceCleanupConfirmed(error)) throw error; /* Detached HEAD is required. */ }
     if (captureGitTree(destination, gitDirectory) !== manifest.snapshotTreeOid || captureGitTree(destination, gitDirectory) !== manifest.snapshotTreeOid || gitText(destination, ['rev-parse', '--verify', 'HEAD^{commit}']) !== manifest.baseCommitOid || attached) throw new Error('Restored checkpoint content or base identity does not match the manifest.');
     return { workspace: destination, manifest };
   } catch (error) {
-    try { assertOwnedDirectory(destination, identity); rmSync(destination, { force: true, recursive: true }); } catch { /* Preserve a replaced destination rather than deleting an unknown path. */ }
+    try { if (workspaceCleanupConfirmed(error)) { assertOwnedDirectory(destination, identity); rmSync(destination, { force: true, recursive: true }); } } catch { /* Preserve a replaced destination rather than deleting an unknown path. */ }
     throw error;
   }
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, realpathSync, renameSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -92,4 +92,109 @@ test('corrupt retained ownership is rejected without inspecting the filesystem',
   const { store, ownership, request } = fixture(t); ownership.acquire(request);
   store.db.prepare('UPDATE workspace_ownership SET document=?').run(JSON.stringify({ ...ownership.snapshot()[0], generation: 0 }));
   assert.throws(() => new WorkspaceOwnership(store), /invalid/);
+});
+
+
+test('persisted read ownership without an observed identity is rejected at load', t => {
+  const { store, ownership, request } = fixture(t);
+  mkdirSync(request.workspace); ownership.acquire({ ...request, access: 'read' });
+  const retained = JSON.parse(store.db.prepare('SELECT document FROM workspace_ownership').get().document);
+  retained.access = 'read'; delete retained.identity;
+  store.db.prepare('UPDATE workspace_ownership SET document=?').run(JSON.stringify(retained));
+  assert.throws(() => new WorkspaceOwnership(store), /read workspace ownership lacks an observed identity/i);
+});
+
+test('provenance is immutable, facade origin is injected, and staged assertion rejects replacement', t => {
+  const { root, store, request } = fixture(t), ownership = new WorkspaceOwnership(store, { boot: 'origin' });
+  const acquired = ownership.acquire({ ...request, provenance: { kind: 'integration', id: 'plan', origin: { caller: true } }, phase: 'prepared' });
+  assert.equal(acquired.status, 'acquired'); mkdirSync(request.workspace); const bound = ownership.bind({ reservationId: request.reservationId, generation: 1, workspace: request.workspace });
+  assert.equal(ownership.stage({ reservationId: request.reservationId, generation: 1, phase: 'applying' }).phase, 'applying'); assert.equal(ownership.assert({ reservationId: request.reservationId, generation: 1, workspace: request.workspace, identity: bound.identity }).reservationId, request.reservationId);
+  renameSync(request.workspace, join(root, 'replaced-old')); mkdirSync(request.workspace);
+  assert.throws(() => ownership.assert({ reservationId: request.reservationId, generation: 1, workspace: request.workspace, identity: bound.identity }), /identity changed/);
+  const retained = JSON.parse(store.db.prepare('SELECT document FROM workspace_ownership').get().document); assert.deepEqual(retained.provenance.origin, { caller: true });
+  assert.throws(() => ownership.acquire({ ...request, provenance: { kind: 'integration', id: 'other' } }), /different ownership/);
+});
+
+test('uncertain witnesses aggregate only as quarantine and cannot recreate released ownership', t => {
+  const { root, ownership } = fixture(t), workspace = join(root, 'legacy-missing');
+  const first = ownership.retainUncertain({ reservationId: 'legacy', ownerId: 'run', workspace, cleanupEvidence: { witness: 'run' }, provenance: { kind: 'run', id: 'run' } });
+  assert.equal(first.state, 'cleanup-unconfirmed'); assert.equal(ownership.retainUncertain({ reservationId: 'legacy', ownerId: 'run', workspace, cleanupEvidence: { witness: 'other' }, provenance: { kind: 'run', id: 'run' } }).state, 'cleanup-unconfirmed');
+  ownership.release({ reservationId: 'legacy', generation: 1, cleanupConfirmed: true, cleanupEvidence: { reconciled: true } });
+  assert.throws(() => ownership.retainUncertain({ reservationId: 'legacy', ownerId: 'run', workspace, cleanupEvidence: { witness: 'run' }, provenance: { kind: 'run', id: 'run' } }), /Terminal/);
+});
+
+
+test('distinct quarantine witnesses sharing a path block until every owner is released', t => {
+  const { root, ownership } = fixture(t), workspace = join(root, 'legacy-shared');
+  const one = ownership.retainUncertain({ reservationId: 'legacy-run', ownerId: 'run', workspace, cleanupEvidence: { witness: 'run' }, provenance: { kind: 'run', id: 'run' } });
+  const two = ownership.retainUncertain({ reservationId: 'legacy-review', ownerId: 'review', workspace, cleanupEvidence: { witness: 'review' }, provenance: { kind: 'review', id: 'review' } });
+  assert.equal(one.state, 'cleanup-unconfirmed'); assert.equal(two.state, 'cleanup-unconfirmed');
+  assert.equal(ownership.acquire({ reservationId: 'new', ownerId: 'new', workspace }).status, 'blocked');
+  ownership.release({ reservationId: 'legacy-run', generation: 1, cleanupConfirmed: true, cleanupEvidence: { reconciled: 'run' } });
+  assert.equal(ownership.acquire({ reservationId: 'new', ownerId: 'new', workspace }).status, 'blocked');
+  ownership.release({ reservationId: 'legacy-review', generation: 1, cleanupConfirmed: true, cleanupEvidence: { reconciled: 'review' } });
+  assert.equal(ownership.acquire({ reservationId: 'new', ownerId: 'new', workspace }).status, 'acquired');
+});
+
+test('quarantine inode aliases each block admission until every original witness is released', t => {
+  const { root, ownership } = fixture(t), workspace = join(root, 'workspace'), alias = join(root, 'alias'); mkdirSync(workspace); symlinkSync(workspace, alias);
+  const stat = statSync(workspace), identity = { device: stat.dev, inode: stat.ino };
+  const first = ownership.retainUncertain({ reservationId: 'unknown-one', ownerId: 'one', workspace, identity, cleanupEvidence: { unknown: true }, provenance: { kind: 'run', id: 'one' } });
+  const second = ownership.retainUncertain({ reservationId: 'unknown-two', ownerId: 'two', workspace: alias, identity, cleanupEvidence: { unknown: true }, provenance: { kind: 'review', id: 'two' } });
+  assert.equal(first.state, 'cleanup-unconfirmed'); assert.equal(second.state, 'cleanup-unconfirmed');
+  assert.equal(ownership.acquire({ reservationId: 'active', ownerId: 'active', workspace }).status, 'blocked');
+  ownership.release({ reservationId: 'unknown-one', generation: 1, cleanupConfirmed: true, cleanupEvidence: { reconciled: 'one' } });
+  assert.equal(ownership.acquire({ reservationId: 'active', ownerId: 'active', workspace }).status, 'blocked');
+  ownership.release({ reservationId: 'unknown-two', generation: 1, cleanupConfirmed: true, cleanupEvidence: { reconciled: 'two' } });
+  assert.equal(ownership.acquire({ reservationId: 'active', ownerId: 'active', workspace }).status, 'acquired');
+});
+
+test('active ownership rejects an uncertain witness, while constructor permits only quarantine overlap', t => {
+  const { root, store, ownership } = fixture(t), workspace = join(root, 'workspace'); mkdirSync(workspace);
+  assert.equal(ownership.acquire({ reservationId: 'active', ownerId: 'active', workspace }).status, 'acquired');
+  assert.throws(() => ownership.retainUncertain({ reservationId: 'unknown', ownerId: 'unknown', workspace, cleanupEvidence: { unknown: true }, provenance: { kind: 'run', id: 'unknown' } }), /active ownership/i);
+  ownership.release({ reservationId: 'active', generation: 1, cleanupConfirmed: false, cleanupEvidence: { unknown: true } });
+  ownership.retainUncertain({ reservationId: 'unknown', ownerId: 'unknown', workspace, cleanupEvidence: { unknown: true }, provenance: { kind: 'run', id: 'unknown' } });
+  assert.doesNotThrow(() => new WorkspaceOwnership(store));
+  const retained = store.db.prepare('SELECT document FROM workspace_ownership WHERE id=?').get('unknown');
+  const active = JSON.parse(retained.document); active.state = 'active'; delete active.cleanupEvidence;
+  store.db.prepare('UPDATE workspace_ownership SET document=? WHERE id=?').run(JSON.stringify(active), 'unknown');
+  assert.throws(() => new WorkspaceOwnership(store), /conflicts/);
+});
+
+test('active readers share one observed workspace while writers and write batches remain exclusive', t => {
+  const { store, ownership, request } = fixture(t); mkdirSync(request.workspace);
+  const first = ownership.acquire({ ...request, access: 'read' }); assert.equal(first.status, 'acquired');
+  const other = new WorkspaceOwnership(store);
+  assert.equal(other.acquire({ ...request, reservationId: 'two', ownerId: 'two', access: 'read' }).status, 'acquired');
+  assert.equal(other.acquire({ ...request, reservationId: 'writer', ownerId: 'writer', access: 'write' }).status, 'blocked');
+  assert.throws(() => other.acquireMany([{ ...request, reservationId: 'third', ownerId: 'third', access: 'read' }, { ...request, reservationId: 'batch-writer', ownerId: 'batch-writer', access: 'write' }]), /could not acquire/);
+  assert.equal(ownership.snapshot().length, 2);
+});
+
+test('read access is immutable, requires an observed directory, and quarantines all later readers and writers', t => {
+  const { root, store, ownership, request } = fixture(t); mkdirSync(request.workspace);
+  const reader = ownership.acquire({ ...request, access: 'read' }); assert.equal(reader.status, 'acquired');
+  assert.throws(() => ownership.acquire({ ...request, access: 'write' }), /different ownership/);
+  assert.throws(() => ownership.acquire({ reservationId: 'missing-read', ownerId: 'reader', workspace: join(root, 'missing'), access: 'read' }), /existing observed/i);
+  const sibling = ownership.acquire({ ...request, reservationId: 'sibling', ownerId: 'sibling', access: 'read' }); assert.equal(sibling.status, 'acquired');
+  ownership.release({ reservationId: reader.lease.reservationId, generation: reader.lease.generation, cleanupConfirmed: false, cleanupEvidence: { unknown: true } });
+  assert.doesNotThrow(() => new WorkspaceOwnership(store));
+  assert.throws(() => ownership.assert({ reservationId: sibling.lease.reservationId, generation: sibling.lease.generation, workspace: request.workspace, identity: sibling.lease.identity }), /uncertain cleanup/i);
+  assert.equal(ownership.acquire({ ...request, reservationId: 'late-read', ownerId: 'late', access: 'read' }).status, 'blocked');
+  assert.equal(ownership.acquire({ ...request, reservationId: 'late-write', ownerId: 'late', access: 'write' }).status, 'blocked');
+  const reopened = new WorkspaceOwnership(store); reopened.reconcileOnReopen();
+  assert.equal(reopened.snapshot().filter(item => item.state === 'cleanup-unconfirmed').length, 2);
+  reopened.release({ reservationId: reader.lease.reservationId, generation: reader.lease.generation, cleanupConfirmed: true, cleanupEvidence: { settled: 'one' } });
+  assert.equal(reopened.acquire({ ...request, reservationId: 'still-blocked', ownerId: 'late', access: 'read' }).status, 'blocked');
+  reopened.release({ reservationId: sibling.lease.reservationId, generation: sibling.lease.generation, cleanupConfirmed: true, cleanupEvidence: { settled: 'two' } });
+  assert.equal(reopened.acquire({ ...request, reservationId: 'fresh-reader', ownerId: 'fresh', access: 'read' }).status, 'acquired');
+});
+
+test('reader identity aliases are compatible only with readers and retained read uncertainty preserves identity', t => {
+  const { root, ownership } = fixture(t); const workspace = join(root, 'workspace'); mkdirSync(workspace);
+  const identity = { device: statSync(workspace).dev, inode: statSync(workspace).ino };
+  ownership.retainUncertain({ reservationId: 'reader-unknown', ownerId: 'reader', workspace, identity, access: 'read', cleanupEvidence: { unknown: true } });
+  assert.throws(() => ownership.retainUncertain({ reservationId: 'missing-reader', ownerId: 'reader', workspace: join(root, 'missing'), access: 'read', cleanupEvidence: { unknown: true } }), /identity/i);
+  assert.equal(ownership.acquire({ reservationId: 'writer', ownerId: 'writer', workspace, access: 'write' }).status, 'blocked');
 });

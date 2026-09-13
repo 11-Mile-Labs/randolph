@@ -1,3 +1,4 @@
+import { workspaceCleanupConfirmed } from './workspace-operation.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -16,7 +17,13 @@ function git(root: string, args: string[]): string {
 export function canonicalProject(path: string): string {
   const root = realpathSync(path);
   try { return realpathSync(git(root, ['rev-parse', '--show-toplevel'])); }
-  catch { return root; }
+  catch (error) { if (!workspaceCleanupConfirmed(error)) throw error; return root; }
+}
+export function plannedConversationWorkspace(root: string, conversationId: string, previous?: string): string {
+  if (previous) return previous;
+  try { git(root, ['rev-parse', '--verify', 'HEAD']); }
+  catch (error) { if (!workspaceCleanupConfirmed(error)) throw error; return root; }
+  return join(root, '.worktrees', `randolph-${conversationId}`);
 }
 export function prepareWorkspace(root: string, conversationId: string, previous?: string): string {
   if (realpathSync(root) !== root) throw new Error('Project root changed. Re-add the project before continuing.');
@@ -38,7 +45,7 @@ export function prepareWorkspace(root: string, conversationId: string, previous?
   }
   let head: string;
   try { head = git(root, ['rev-parse', '--verify', 'HEAD']); }
-  catch { return root; }
+  catch (error) { if (!workspaceCleanupConfirmed(error)) throw error; return root; }
   mkdirSync(base, { recursive: true });
   if (realpathSync(base) !== base) throw new Error('Project worktree directory must be inside the repository, without a symlink.');
   // A process may have exited after Git created this exact conversation workspace.

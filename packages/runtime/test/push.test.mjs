@@ -155,3 +155,24 @@ test('completed push remains confirmed after local HEAD and origin settings chan
   assert.equal((await executeOriginPush(plan, options)).status, 'pushed');
   assert.equal(git(f.origin, ['rev-parse', 'main']), plan.localOid);
 });
+
+
+test('a synchronous authority revocation after async identity inspection prevents every Git spawn', { timeout: 30_000 }, async t => {
+  const f = await fixture(t); let guards = 0;
+  await assert.rejects(previewOriginPush(f.root, { ...options, assertCurrent() { guards += 1; throw new Error('ownership revoked'); } }), /ownership revoked/);
+  assert.equal(guards, 1);
+  assert.equal(git(f.origin, ['for-each-ref', '--format=%(refname)', 'refs/heads/']), '');
+});
+
+test('an asynchronous push authority guard is rejected before dispatch and its rejection is observed', { timeout: 30_000 }, async t => {
+  const f = await fixture(t);
+  await assert.rejects(previewOriginPush(f.root, { ...options, assertCurrent() { return Promise.reject(new Error('late guard')); } }), /synchronous/);
+  assert.equal(git(f.origin, ['for-each-ref', '--format=%(refname)', 'refs/heads/']), '');
+});
+
+
+test('a guard that aborts synchronously prevents the pending Git spawn', { timeout: 30_000 }, async t => {
+  const f = await fixture(t), controller = new AbortController();
+  await assert.rejects(previewOriginPush(f.root, { ...options, signal: controller.signal, assertCurrent() { controller.abort(); } }), /abort/i);
+  assert.equal(git(f.origin, ['for-each-ref', '--format=%(refname)', 'refs/heads/']), '');
+});

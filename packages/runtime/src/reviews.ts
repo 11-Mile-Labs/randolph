@@ -7,6 +7,8 @@ import { workspaceIdentity, assertWorkspaceIdentity } from './workspace-identity
 import { Store } from './store.js';
 import { cleanupGitDelivery, commitGitDelivery, createGitDeliveryPlan, createGitReview, mergeGitDelivery, reconcileGitDelivery } from './git-review.js';
 import { detectVerificationCommands, runVerification } from './verification.js';
+import { WorkspaceOwnership } from './workspace-ownership.js';
+import { workspaceCleanupConfirmed } from './workspace-operation.js';
 
 const now = (): string => new Date().toISOString();
 const errorText = (error: unknown): string => error instanceof Error ? error.message : 'Review operation failed.';
@@ -16,7 +18,7 @@ export class Reviews {
   private readonly busy = new Set<string>();
   private accepting = true;
 
-  constructor(private readonly store: Store, private readonly adapterFor: (run: Run, review: ReviewRecord, check?: { id: string; assertCurrent: () => void }) => HarnessAdapter, private readonly canWork: (conversationId: string) => boolean, private readonly changed: () => void, private readonly executorOwnsDeadlines = false) {
+  constructor(private readonly store: Store, private readonly adapterFor: (run: Run, review: ReviewRecord, check?: { id: string; assertCurrent: () => void }) => HarnessAdapter, private readonly canWork: (conversationId: string) => boolean, private readonly changed: () => void, private readonly executorOwnsDeadlines = false, private readonly ownership = new WorkspaceOwnership(store)) {
     for (const review of store.reviews()) {
       if (review.status === 'checking' || review.status === 'delivering') {
         review.status = review.status === 'checking' ? 'stop-unconfirmed' : 'interrupted';
@@ -66,23 +68,24 @@ export class Reviews {
     if (run.status === 'stop-unconfirmed') throw new Error('Process cleanup must be confirmed before review.');
     const project = this.store.projects().find(item => item.id === run.projectId);
     if (!project) throw new Error('Project does not exist.');
-    const priorDeliveries = this.store.reviews().filter(review => review.conversationId === conversationId && review.deliveryPlan && review.status !== 'delivered' && review.status !== 'stale');
-    for (const prior of priorDeliveries) {
-      if (reconcileSupersededDelivery(prior.basis.root, prior.basis.workspace, prior.deliveryPlan!).merged) throw new Error('The earlier delivery already merged. Continue its cleanup before requesting a new review.');
-    }
-    let evidenceDir = join(this.store.runDirectory(run), 'reviews');
-    mkdirSync(evidenceDir, { recursive: true, mode: 0o700 });
-    evidenceDir = realpathSync(evidenceDir);
-    const basis = createGitReview(project.root, run.workspace, evidenceDir);
-    if (!basis.files.length) throw new Error('No changes to review.');
-    for (const prior of priorDeliveries) {
-      prior.status = 'stale';
-      this.save(prior, 'delivery.superseded', 'Unmerged delivery intent replaced by a fresh review. The earlier approval cannot be used again.');
-    }
-    this.invalidate(conversationId);
-    const review: ReviewRecord = { id: randomUUID(), projectId: project.id, conversationId, runId: run.id, createdAt: now(), updatedAt: now(), status: 'pending', basis };
-    this.save(review, 'review.created', 'Changes are ready for checks and final review.', { treeOid: basis.treeOid, parentOid: basis.parentOid, files: basis.files.length });
-    return review;
+    const acquired = this.ownership.acquire({ reservationId: randomUUID(), ownerId: `review-prepare:${conversationId}`, runId: run.id, workspace: run.workspace, provenance: { kind: 'review-prepare', id: conversationId, projectId: project.id, conversationId }, phase: 'prepare' });
+    if (acquired.status !== 'acquired') throw new Error('Review workspace ownership is unavailable.');
+    const lease = acquired.lease;
+    let cleanupConfirmed = true;
+    try {
+      this.ownership.bind({ reservationId: lease.reservationId, generation: lease.generation, workspace: run.workspace });
+      const priorDeliveries = this.store.reviews().filter(review => review.conversationId === conversationId && review.deliveryPlan && review.status !== 'delivered' && review.status !== 'stale');
+      for (const prior of priorDeliveries) if (reconcileSupersededDelivery(prior.basis.root, prior.basis.workspace, prior.deliveryPlan!).merged) throw new Error('The earlier delivery already merged. Continue its cleanup before requesting a new review.');
+      let evidenceDir = join(this.store.runDirectory(run), 'reviews');
+      mkdirSync(evidenceDir, { recursive: true, mode: 0o700 }); evidenceDir = realpathSync(evidenceDir);
+      const basis = createGitReview(project.root, run.workspace, evidenceDir);
+      if (!basis.files.length) throw new Error('No changes to review.');
+      for (const prior of priorDeliveries) { prior.status = 'stale'; this.save(prior, 'delivery.superseded', 'Unmerged delivery intent replaced by a fresh review. The earlier approval cannot be used again.'); }
+      this.invalidate(conversationId);
+      const review: ReviewRecord = { id: randomUUID(), projectId: project.id, conversationId, runId: run.id, createdAt: now(), updatedAt: now(), status: 'pending', basis };
+      this.save(review, 'review.created', 'Changes are ready for checks and final review.', { treeOid: basis.treeOid, parentOid: basis.parentOid, files: basis.files.length });
+      return review;
+    } catch (error) { cleanupConfirmed = workspaceCleanupConfirmed(error); throw error; } finally { this.ownership.release({ reservationId: lease.reservationId, generation: lease.generation, cleanupConfirmed, cleanupEvidence: cleanupConfirmed ? { stage: 'review-prepare' } : { stage: 'review-prepare', cleanup: 'unconfirmed' } }); }
   }
   private assertCurrent(review: ReviewRecord): void {
     const current = createGitReview(review.basis.root, review.basis.workspace, review.basis.evidenceDir);
@@ -97,16 +100,26 @@ export class Reviews {
     if (review.status !== 'pending' && review.status !== 'interrupted') throw new Error('Request a fresh review before running checks.');
     if (review.deliveryPlan) throw new Error('Delivery is pending; continue that delivery before running new checks.');
     if (!this.adapterFor(this.run(review), review).runCommand) throw new Error('This run\'s harness has no verified command execution capability.');
-    this.assertCurrent(review);
+    const ownership = this.ownership.acquire({ reservationId: randomUUID(), ownerId: `review:${review.id}`, runId: review.runId, workspace: review.basis.workspace, provenance: { kind: 'verification', id: review.id, projectId: review.projectId, conversationId: review.conversationId }, phase: 'check' });
+    if (ownership.status !== 'acquired') throw new Error('Review workspace ownership is unavailable.');
+    const lease = ownership.lease;
     this.busy.add(review.conversationId);
     const controller = new AbortController();
-    const done = this.runChecks(review, controller);
+    const done = this.runChecks(review, controller, lease);
     this.checking.set(id, { controller, done });
-    try { return await done; }
-    finally { this.checking.delete(id); this.busy.delete(review.conversationId); this.changed(); }
-  }
-  private async runChecks(review: ReviewRecord, controller: AbortController): Promise<ReviewRecord> {
+    let cleanupConfirmed = true;
     try {
+      const result = await done;
+      cleanupConfirmed = String(review.status) !== 'stop-unconfirmed' && !review.verification?.checks.some(check => !check.cleanupVerified);
+      return result;
+    } catch (error) {
+      cleanupConfirmed = String(review.status) !== 'stop-unconfirmed' && !review.verification?.checks.some(check => !check.cleanupVerified) && workspaceCleanupConfirmed(error);
+      throw error;
+    } finally { this.checking.delete(id); this.busy.delete(review.conversationId); this.ownership.release({ reservationId: lease.reservationId, generation: lease.generation, cleanupConfirmed, cleanupEvidence: cleanupConfirmed ? { stage: 'review-verification', status: review.status } : { stage: 'review-verification', cleanup: 'unconfirmed' } }); this.changed(); }
+  }
+  private async runChecks(review: ReviewRecord, controller: AbortController, lease: { reservationId: string; generation: number; workspace: string; identity?: { device: number; inode: number } }): Promise<ReviewRecord> {
+    try {
+      this.ownership.assert(lease); this.assertCurrent(review);
       review.status = 'checking'; review.error = undefined;
       this.save(review, 'verification.started', 'Running project checks through the native permission boundary.');
       const run = this.store.runs().find(candidate => candidate.id === review.runId);
@@ -114,8 +127,9 @@ export class Reviews {
       const adapter = this.adapterFor(run, review);
       if (!adapter.runCommand) throw new Error('This run\'s harness has no verified command execution capability.');
       const identity = workspaceIdentity(review.basis.workspace);
-      const assertCurrent = () => { assertWorkspaceIdentity(review.basis.workspace, identity); this.assertCurrent(review); };
+      const assertCurrent = () => { this.ownership.assert(lease); this.ownership.bind({ reservationId: lease.reservationId, generation: lease.generation, workspace: review.basis.workspace }); assertWorkspaceIdentity(review.basis.workspace, identity); this.assertCurrent(review); };
       const commands = await detectVerificationCommands(review.basis.workspace);
+      this.ownership.stage({ reservationId: lease.reservationId, generation: lease.generation, phase: 'native-check' });
       review.verification = await runVerification(review.basis.workspace, commands, {
         signal: controller.signal, executorOwnsDeadlines: this.executorOwnsDeadlines,
         executor: async (workspace, command, options) => this.adapterFor(run, review, { id: command.id, assertCurrent }).runCommand!({ executable: run.executable, executableVersion: run.executableVersion, workspace, workspaceIdentity: identity, command: [command.command, ...command.args], signal: options.signal, onOutput: options.onOutput, onDispatch: assertCurrent }),
@@ -138,6 +152,7 @@ export class Reviews {
       this.save(review, 'verification.completed', `Project checks ${review.verification.status}.`, { status: review.verification.status });
       return review;
     } catch (error) {
+      if (!workspaceCleanupConfirmed(error)) review.status = 'stop-unconfirmed';
       if (review.status !== 'stale' && review.status !== 'stop-unconfirmed') review.status = 'failed';
       review.error = errorText(error);
       this.save(review, 'verification.failed', review.error);
@@ -151,8 +166,15 @@ export class Reviews {
     if (review.status === 'stale' || review.status === 'stop-unconfirmed') throw new Error('Request a fresh review before final approval.');
     if (!review.deliveryPlan && review.status !== 'pending') throw new Error('Request a fresh review before final approval.');
     if (review.verification?.status !== 'passed') throw new Error('Successful project checks are required before final approval.');
+    const acquired = this.ownership.acquireMany([
+      { reservationId: randomUUID(), ownerId: `delivery:${review.id}`, runId: review.runId, workspace: review.basis.workspace, provenance: { kind: 'delivery', id: review.id, projectId: review.projectId, conversationId: review.conversationId }, phase: 'delivery' },
+      { reservationId: randomUUID(), ownerId: `delivery:${review.id}`, runId: review.runId, workspace: review.basis.root, provenance: { kind: 'delivery', id: review.id, projectId: review.projectId, conversationId: review.conversationId }, phase: 'delivery' },
+    ]);
+    const leases = acquired.map(item => { if (item.status !== 'acquired') throw new Error('Delivery workspace ownership is unavailable.'); return item.lease; });
     this.busy.add(review.conversationId);
+    let cleanupConfirmed = true;
     try {
+      for (const lease of leases) { this.ownership.assert(lease); this.ownership.bind({ reservationId: lease.reservationId, generation: lease.generation, workspace: lease.workspace }); this.ownership.stage({ reservationId: lease.reservationId, generation: lease.generation, phase: 'delivery-mutation' }); }
       if (!review.deliveryPlan) {
         this.assertCurrent(review);
         review.deliveryPlan = createGitDeliveryPlan(review.basis.root, review.basis.workspace, review.basis, input.message);
@@ -175,11 +197,12 @@ export class Reviews {
       this.save(review, 'delivery.completed', 'Local delivery completed. Push remains a separate action.', { commitOid: plan.commitOid, cleaned: review.cleaned });
       return review;
     } catch (error) {
+      cleanupConfirmed = workspaceCleanupConfirmed(error);
       review.status = review.deliveryPlan ? 'interrupted' : this.get(review.id).status === 'stale' ? 'stale' : 'failed';
       review.error = errorText(error);
       this.save(review, 'delivery.failed', review.error);
       throw error;
-    } finally { this.busy.delete(review.conversationId); this.changed(); }
+    } finally { for (const lease of leases) this.ownership.release({ reservationId: lease.reservationId, generation: lease.generation, cleanupConfirmed, cleanupEvidence: cleanupConfirmed ? { stage: 'delivery', status: review.status } : { stage: 'delivery', cleanup: 'unconfirmed' } }); this.busy.delete(review.conversationId); this.changed(); }
   }
   async stop(id: string): Promise<void> {
     const state = this.checking.get(id);

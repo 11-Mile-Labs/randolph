@@ -105,7 +105,9 @@ test('a failure before adapter invocation retains dispatch-not-invoked cleanup e
   const at = new Date().toISOString();
   const run = { id: 'pre-dispatch-run', projectId: f.project.id, conversationId: f.conversation.id, status: 'starting', harness: 'codex', executable: '/fixture-codex', executableVersion: 'fixture-1', workspace: f.project.root, workspaceIdentity: { device: 0, inode: 0 }, model: 'fixture-model', effort: 'low', executionMode: 'read-only', createdAt: at, updatedAt: at, lastActivityAt: at };
   f.runtime.store.putRun(run);
-  await f.runtime.execute(run, new AbortController());
+  const ownership = f.runtime.workspaceOwnership.acquire({ reservationId: 'pre-dispatch-workspace', runId: run.id, workspace: run.workspace, provenance: { kind: 'run', id: run.id } });
+  assert.equal(ownership.status, 'acquired');
+  await f.runtime.execute(run, new AbortController(), ownership.lease);
   const [session] = new DelegationRecords(f.runtime.store).sessions(run.id);
   assert.equal(f.calls.length, 0);
   assert.equal(f.runtime.snapshot().runs.find(item => item.id === run.id).status, 'failed');

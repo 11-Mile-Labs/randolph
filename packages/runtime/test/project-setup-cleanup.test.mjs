@@ -42,6 +42,13 @@ async function fixture(t) {
     operation.state = 'admitted'; delete operation.terminalStatus; delete operation.cleanupConfirmed; delete operation.cleanupEvidence;
     if (origin === undefined) delete operation.origin; else operation.origin = origin;
     state.runtime.store.db.prepare('UPDATE native_operations SET document=? WHERE id=?').run(JSON.stringify(operation), operation.id);
+    const workspaceRow = state.runtime.store.db.prepare("SELECT id, document FROM workspace_ownership WHERE json_extract(document, '$.provenance.kind')='run' AND json_extract(document, '$.provenance.id')=?").get(state.runId);
+    assert.ok(workspaceRow, 'fixture requires original workspace ownership');
+    const workspace = JSON.parse(workspaceRow.document);
+    workspace.state = 'active'; delete workspace.cleanupEvidence;
+    if (origin === undefined) delete workspace.provenance.origin; else workspace.provenance.origin = origin;
+    state.runtime.store.db.prepare('UPDATE workspace_ownership SET document=? WHERE id=?').run(JSON.stringify(workspace), workspaceRow.id);
+
   };
   return state;
 }
@@ -175,4 +182,17 @@ test('cleanup reconciliation cannot interrupt inspection admission or release an
   assert.equal(f.runtime.hasActiveWork(), true);
   await f.runtime.stop(run.id);
   assert.equal(f.runtime.hasActiveWork(), false);
+});
+
+
+test('setup cleanup displays the original workspace origin blocker before the action is offered', async t => {
+  const f = await fixture(t); f.interrupt();
+  const row = f.runtime.store.db.prepare("SELECT id, document FROM workspace_ownership WHERE json_extract(document, '$.state')='active'").get();
+  const workspace = JSON.parse(row.document); delete workspace.provenance.origin;
+  f.runtime.store.db.prepare('UPDATE workspace_ownership SET document=? WHERE id=?').run(JSON.stringify(workspace), row.id);
+  await f.reopen(laterBoot);
+  const cleanup = f.runtime.projectSetup(f.projectId).cleanup;
+  assert.equal(cleanup.canReconcile, false);
+  assert.match(cleanup.reason, /original Mac execution record is missing or malformed/);
+  assert.throws(() => f.runtime.reconcileProjectSetupCleanup(f.projectId), { message: cleanup.reason });
 });

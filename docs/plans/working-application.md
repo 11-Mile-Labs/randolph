@@ -39,6 +39,8 @@ Status: active implementation toward the complete [approved v1 scope](../product
 - [x] Verify file restoration after original source/worktree loss while preserving original history.
 - [ ] Complete original-repository-loss execution recovery, later workflow/external-effect reconciliation, and non-Git recovery.
 - [x] Implement application navigation/settings, background execution, menu-bar controls, opt-in notifications, and explicit quit behavior.
+- [x] Share durable workspace ownership across ordinary runs/recovery, setup, checkpoint exports, verification, integration, delivery, and push; retain unfinished original writers without execution on reopen.
+- [ ] Complete explicit recovery controls for uncertain workspace operations beyond project setup.
 - [ ] Implement Pause/Resume.
 - [ ] Complete descendant and owner-loss control without a VM; rerun fault cases and retain honest compatibility limits.
 

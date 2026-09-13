@@ -1,3 +1,4 @@
+import { workspaceCleanupConfirmed } from './workspace-operation.js';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
@@ -26,7 +27,7 @@ function git(root: string, args: string[], input?: string | Buffer | number, ind
     return execFileSync('/usr/bin/git', [...settings, '-C', root, ...args], { env, input: typeof input === 'number' ? undefined : input, timeout: 30_000, maxBuffer: MAX_OUTPUT, stdio: [typeof input === 'number' ? input : 'pipe', 'pipe', 'pipe'] });
   } catch (error) {
     const failure = error as { stderr?: Buffer; message?: string };
-    throw new Error(`Git operation failed: ${failure.stderr?.toString().trim().slice(0, 2000) || failure.message || args[0]}`);
+    throw new Error(`Git operation failed: ${failure.stderr?.toString().trim().slice(0, 2000) || failure.message || args[0]}`, { cause: error });
   }
 }
 const text = (root: string, args: string[], input?: string | Buffer | number, index?: string): string => git(root, args, input, index).toString('utf8').trim();
@@ -47,7 +48,7 @@ export function inspectGitWorkspace(root: string, workspace: string): GitWorkspa
   if (commonDir !== realpathSync(text(workspace, ['rev-parse', '--path-format=absolute', '--git-common-dir']))) throw new Error('Worktree belongs to a different repository.');
   let parentBranch: string;
   try { parentBranch = text(root, ['symbolic-ref', '--quiet', '--short', 'HEAD']); }
-  catch { throw new Error('The parent checkout must have an attached branch before review or delivery.'); }
+  catch (error) { throw new Error('The parent checkout must have an attached branch before review or delivery.', { cause: error }); }
   const parentOid = text(root, ['rev-parse', '--verify', 'HEAD^{commit}']);
   const workspaceHead = text(workspace, ['rev-parse', '--verify', 'HEAD^{commit}']);
   return { root, workspace, parentBranch, parentOid, workspaceHead, commonDir, rootIdentity: directoryIdentity(root), workspaceIdentity: directoryIdentity(workspace), commonDirIdentity: directoryIdentity(commonDir) };
@@ -74,6 +75,7 @@ function decodePaths(bytes: Buffer): string {
 function captureTree(workspace: string, evidenceDir: string): string {
   canonicalDirectory(evidenceDir);
   const index = join(evidenceDir, `review-index-${randomUUID()}`);
+  let failure: unknown;
   try {
     git(workspace, ['read-tree', '--empty'], undefined, index);
     const tracked = decodePaths(git(workspace, ['ls-tree', '-r', '-z', 'HEAD'])).split('\0').filter(Boolean);
@@ -103,7 +105,8 @@ function captureTree(workspace: string, evidenceDir: string): string {
     }
     git(workspace, ['update-index', '-z', '--index-info'], records.join(''), index);
     return text(workspace, ['write-tree'], undefined, index);
-  } finally { rmSync(index, { force: true }); rmSync(`${index}.lock`, { force: true }); }
+  } catch (error) { failure = error; throw error; }
+  finally { if (workspaceCleanupConfirmed(failure)) { rmSync(index, { force: true }); rmSync(`${index}.lock`, { force: true }); } }
 }
 function sameIdentity(actual: GitWorkspace, expected: GitWorkspace, allowDeliveredOid?: string): void {
   if (actual.root !== expected.root || actual.workspace !== expected.workspace || actual.commonDir !== expected.commonDir || actual.rootIdentity !== expected.rootIdentity || actual.workspaceIdentity !== expected.workspaceIdentity || actual.commonDirIdentity !== expected.commonDirIdentity || actual.parentBranch !== expected.parentBranch || actual.workspaceHead !== expected.workspaceHead || (actual.parentOid !== expected.parentOid && actual.parentOid !== allowDeliveredOid)) throw new Error('Review is stale: the parent branch or worktree identity changed. Request a new review.');
@@ -123,7 +126,7 @@ export function createGitReview(root: string, workspace: string, evidenceDir: st
   let diff: Buffer; let truncated = false;
   try { diff = git(workspace, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--binary', inspection.parentOid, treeOid, '--']); }
   catch (error) {
-    if (!(error instanceof Error) || !/ENOBUFS|maxBuffer/.test(error.message)) throw error;
+    if (!workspaceCleanupConfirmed(error) || !(error instanceof Error) || !/ENOBUFS|maxBuffer/.test(error.message)) throw error;
     diff = Buffer.from('Diff exceeds the display limit. Review individual files externally.'); truncated = true;
   }
   truncated ||= diff.length > MAX_DIFF;
@@ -137,7 +140,7 @@ function requireCleanParent(root: string, workspace: string): void {
     try {
       canonicalDirectory(path);
       return text(path, ['rev-parse', '--show-toplevel']) === path && realpathSync(text(path, ['rev-parse', '--path-format=absolute', '--git-common-dir'])) === common;
-    } catch { return false; }
+    } catch (error) { if (!workspaceCleanupConfirmed(error)) throw error; return false; }
   }).map(path => `:(exclude)${relative(root, path).split(sep).join('/')}`);
   if (!registered.includes(workspace)) throw new Error('Conversation workspace registration changed.');
   if (git(root, ['status', '--porcelain=v1', '--untracked-files=all', '-z', '--', '.', ...exclusions]).length) throw new Error('The parent checkout has uncommitted changes. Preserve or commit them outside Randolph, then request delivery again.');
@@ -155,9 +158,10 @@ function assertReviewedTree(root: string, workspace: string, review: GitReview):
 function identity(root: string): string {
   const get = (key: string): string => {
     try { return text(root, ['config', '--get', key]); }
-    catch {
+    catch (error) {
+      if (!workspaceCleanupConfirmed(error)) throw error;
       try { return text(root, ['config', '--file', join(homedir(), '.gitconfig'), '--includes', '--get', key]); }
-      catch { throw new Error('Configure Git user.name and user.email before delivery.'); }
+      catch (error) { throw new Error('Configure Git user.name and user.email before delivery.', { cause: error }); }
     }
   };
   const name = get('user.name'); const email = get('user.email');
@@ -189,10 +193,10 @@ export function reconcileGitDelivery(root: string, workspace: string, plan: GitD
   const actual = recoveryWorkspace(root, workspace, plan.review);
   sameIdentity({ ...actual, parentOid: plan.review.parentOid }, plan.review);
   let commitCreated = false;
-  try { commitCreated = text(root, ['cat-file', 'commit', plan.commitOid]) === plan.commitContent.trim(); } catch { /* The intended object was not created. */ }
+  try { commitCreated = text(root, ['cat-file', 'commit', plan.commitOid]) === plan.commitContent.trim(); } catch (error) { if (!workspaceCleanupConfirmed(error)) throw error; /* The intended object was not created. */ }
   let merged = false;
   if (commitCreated) {
-    try { git(root, ['merge-base', '--is-ancestor', plan.commitOid, actual.parentOid]); merged = true; } catch { /* The approved commit is not in the target branch. */ }
+    try { git(root, ['merge-base', '--is-ancestor', plan.commitOid, actual.parentOid]); merged = true; } catch (error) { if (!workspaceCleanupConfirmed(error)) throw error; /* The approved commit is not in the target branch. */ }
   }
   return { commitCreated, merged };
 }

@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test } from '@playwright/test';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -72,10 +72,11 @@ createInterface({ input: process.stdin }).on('line', line => {
   delete env.ELECTRON_RUN_AS_NODE;
   const launch = () => electron.launch({ executablePath: process.env.RANDOLPH_TEST_EXECUTABLE, args: process.env.RANDOLPH_TEST_EXECUTABLE ? [] : [resolve('.')], env });
   let app = await launch();
+  let page;
   if (process.env.RANDOLPH_TEST_EXECUTABLE) expect(await app.evaluate(({ app: electronApp }) => electronApp.getPath('exe'))).toBe(process.env.RANDOLPH_TEST_EXECUTABLE);
 
   try {
-    let page = await app.firstWindow();
+    page = await app.firstWindow();
     const pageErrors: string[] = [];
     page.on('pageerror', error => pageErrors.push(error.message));
     await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, project);
@@ -128,7 +129,13 @@ createInterface({ input: process.stdin }).on('line', line => {
     expect(readFileSync(turns, 'utf8')).toBe('1\n2\n3\n');
     expect(pageErrors).toEqual([]);
   } finally {
-    await app.close();
-    rmSync(root, { recursive: true, force: true });
+    // A failed assertion can leave the first fixture turn waiting forever. Let the
+    // app's ordinary shutdown own process cleanup; the dialog stub guarantees it
+    // can choose Stop instead of leaving the Electron close confirmation pending.
+    if (!existsSync(releaseFirst)) writeFileSync(releaseFirst, 'release');
+    try {
+      await app.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 1 }); });
+      await app.close();
+    } finally { rmSync(root, { recursive: true, force: true }); }
   }
 });

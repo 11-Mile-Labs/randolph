@@ -4,7 +4,8 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
 export type WorkspaceIdentity = { device: number; inode: number };
 export type WorkspaceLeaseState = 'active' | 'cleanup-unconfirmed';
-export type WorkspaceLease = { reservationId: string; runId?: string; ownerId?: string; workspace: string; identity?: WorkspaceIdentity; generation: number; state: WorkspaceLeaseState; cleanupEvidence?: Record<string, unknown> };
+export type WorkspaceProvenance = { kind: string; id: string; projectId?: string; conversationId?: string; origin?: Record<string, unknown> };
+export type WorkspaceLease = { access?: 'read' | 'write'; provenance?: WorkspaceProvenance; phase?: string; reservationId: string; runId?: string; ownerId?: string; workspace: string; identity?: WorkspaceIdentity; generation: number; state: WorkspaceLeaseState; cleanupEvidence?: Record<string, unknown> };
 export type WorkspaceLeasePort = Pick<WorkspaceLeases, 'snapshot' | 'acquire' | 'bind' | 'release'>;
 export type WorkspaceLeaseAcquire = { status: 'acquired'; lease: WorkspaceLease; replayed: boolean } | { status: 'blocked'; reason: { kind: 'workspace-lease' | 'cleanup-unconfirmed'; workspace: string; reservationId: string } };
 export type WorkspaceLeaseRelease = { status: 'released' | 'cleanup-unconfirmed'; lease: WorkspaceLease | (Omit<WorkspaceLease, 'state'> & { state: 'released' }) };

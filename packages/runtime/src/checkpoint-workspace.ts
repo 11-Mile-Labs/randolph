@@ -1,3 +1,4 @@
+import { workspaceCleanupConfirmed } from './workspace-operation.js';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -110,7 +111,7 @@ export function importCheckpointObjects(projectRoot: string, commonDirectory: st
     const fd = openSync(packDirectory, constants.O_RDONLY | constants.O_NOFOLLOW);
     try { fsyncSync(fd); } finally { closeSync(fd); }
   } catch (error) {
-    for (const path of created) rmSync(path, { force: true });
+    if (workspaceCleanupConfirmed(error)) for (const path of created) rmSync(path, { force: true });
     throw error;
   }
 }
@@ -170,7 +171,7 @@ export function restoreCheckpointWorktree(directory: string, expectedDigest: str
   if (registered) throw new Error('Linked checkpoint destination is already registered; reconcile it before retrying.');
   let parentBranch: string;
   try { parentBranch = gitText(root, ['symbolic-ref', '--quiet', '--short', 'HEAD']); }
-  catch { throw restoreLimitation('The original project parent branch is detached.'); }
+  catch (error) { if (!workspaceCleanupConfirmed(error)) throw error; throw restoreLimitation('The original project parent branch is detached.'); }
   const parentOid = gitText(root, ['rev-parse', '--verify', 'HEAD^{commit}']);
   const commonDirectory = canonicalDirectory(gitText(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']), 'Git common directory');
   const rootIdentity = directoryIdentity(root);
@@ -178,7 +179,7 @@ export function restoreCheckpointWorktree(directory: string, expectedDigest: str
   if (gitText(root, ['rev-parse', '--show-object-format']) !== manifest.objectFormat) throw restoreLimitation('The original project uses a different Git object format.');
   importCheckpointObjects(root, commonDirectory, manifest);
   try { runSafeGit(root, ['merge-base', '--is-ancestor', manifest.baseCommitOid, parentOid]); }
-  catch { throw restoreLimitation('The checkpoint base is not an ancestor of the current parent branch.'); }
+  catch (error) { if (!workspaceCleanupConfirmed(error)) throw error; throw restoreLimitation('The checkpoint base is not an ancestor of the current parent branch.'); }
   let created = false;
   let workspaceIdentity = '';
   try {
@@ -192,10 +193,10 @@ export function restoreCheckpointWorktree(directory: string, expectedDigest: str
     if (captureGitTree(workspace, gitDirectory) !== manifest.snapshotTreeOid || captureGitTree(workspace, gitDirectory) !== manifest.snapshotTreeOid || gitText(workspace, ['rev-parse', '--verify', 'HEAD^{commit}']) !== manifest.baseCommitOid) throw new Error('Linked checkpoint worktree does not match the retained snapshot.');
     return { workspace, manifest };
   } catch (error) {
-    if (created) {
+    if (created && workspaceCleanupConfirmed(error)) {
       try {
         if (directoryIdentity(workspace) === workspaceIdentity && directoryIdentity(root) === rootIdentity && directoryIdentity(commonDirectory) === commonIdentity) runSafeGit(root, ['worktree', 'remove', '--force', workspace]);
-      } catch { /* Preserve unknown replacement paths; Git registration requires manual reconciliation. */ }
+      } catch (cleanupError) { if (!workspaceCleanupConfirmed(cleanupError)) throw new Error("Linked restore cleanup could not be confirmed.", { cause: cleanupError }); /* Preserve unknown replacement paths. */ }
     }
     throw error;
   }
