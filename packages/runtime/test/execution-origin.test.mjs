@@ -25,17 +25,35 @@ test('fails closed when execution-origin system output is unsupported or malform
     ['darwin', '"IOPlatformUUID" = "not-a-uuid"\n', validBoot],
     ['darwin', `${validIoreg}${validIoreg}`, validBoot],
     ['darwin', validIoreg, 'not-a-uuid\n'],
-  ]) assert.equal(parseExecutionOrigin(platform, ioreg, session), undefined);
+  ])
+    assert.equal(parseExecutionOrigin(platform, ioreg, session), undefined);
 });
 
 test('permits cleanup reconciliation only after a verified reboot on the same host', () => {
-  const recorded = { version: 1, hostIdHash: hostHash, bootSessionId: '01234567-89ab-cdef-0123-456789abcdef' };
+  const recorded = {
+    version: 1,
+    hostIdHash: hostHash,
+    bootSessionId: '01234567-89ab-cdef-0123-456789abcdef',
+  };
   const current = { version: 1, hostIdHash: hostHash, bootSessionId: boot };
 
   assert.equal(cleanupReconciliationReason(recorded, current), null);
-  assert.match(cleanupReconciliationReason(undefined, current), /original Mac.*missing.*malformed/i);
+  assert.match(
+    cleanupReconciliationReason(undefined, current),
+    /original Mac.*missing.*malformed/i,
+  );
   assert.match(cleanupReconciliationReason(recorded, undefined), /current.*unavailable/i);
-  assert.match(cleanupReconciliationReason(recorded, { ...current, hostIdHash: '0'.repeat(64) }), /original Mac/i);
+  assert.match(
+    cleanupReconciliationReason(recorded, { ...current, hostIdHash: '0'.repeat(64) }),
+    /original Mac/i,
+  );
   assert.match(cleanupReconciliationReason(recorded, { ...recorded }), /Restart.*original Mac/i);
-  assert.match(cleanupReconciliationReason(recorded, { version: 2, hostIdHash: hostHash, bootSessionId: boot }), /current Mac.*malformed/i);
+  assert.match(
+    cleanupReconciliationReason(recorded, {
+      version: 2,
+      hostIdHash: hostHash,
+      bootSessionId: boot,
+    }),
+    /current Mac.*malformed/i,
+  );
 });

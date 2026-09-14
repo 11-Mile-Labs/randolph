@@ -1,7 +1,18 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -9,11 +20,27 @@ import { createCheckpoint, readCheckpoint } from '../dist/checkpoint-storage.js'
 import { restoreCheckpointWorktree } from '../dist/checkpoint-workspace.js';
 
 function git(directory, args) {
-  return execFileSync('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-C', directory, ...args], {
-    encoding: 'utf8',
-    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  }).trim();
+  return execFileSync(
+    '/usr/bin/git',
+    [
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-c',
+      'commit.gpgsign=false',
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      '-C',
+      directory,
+      ...args,
+    ],
+    {
+      encoding: 'utf8',
+      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  ).trim();
 }
 
 function fixture(t) {
@@ -34,7 +61,7 @@ function fixture(t) {
   return { directory, evidence, project };
 }
 
-test('restores a deleted checkpoint workspace under a new identity without changing its parent or siblings', t => {
+test('restores a deleted checkpoint workspace under a new identity without changing its parent or siblings', (t) => {
   const paths = fixture(t);
   const oldWorkspace = join(paths.project, '.worktrees', `randolph-${randomUUID()}`);
   const sibling = join(paths.project, '.worktrees', `randolph-${randomUUID()}`);
@@ -50,7 +77,10 @@ test('restores a deleted checkpoint workspace under a new identity without chang
   writeFileSync(join(oldWorkspace, 'untracked.txt'), 'retained\n');
   symlinkSync('untracked.txt', join(oldWorkspace, 'link'));
   const manifest = createCheckpoint(oldWorkspace, paths.evidence, { saved: true });
-  assert.equal(readCheckpoint(manifest.directory, manifest.digest).snapshotTreeOid, manifest.snapshotTreeOid);
+  assert.equal(
+    readCheckpoint(manifest.directory, manifest.digest).snapshotTreeOid,
+    manifest.snapshotTreeOid,
+  );
   const retainedPack = readFileSync(join(manifest.directory, 'objects.pack'));
   git(paths.project, ['worktree', 'remove', '--force', oldWorkspace]);
 
@@ -64,7 +94,12 @@ test('restores a deleted checkpoint workspace under a new identity without chang
   const parentIndex = readFileSync(join(paths.project, '.git', 'index'));
 
   const workspaceId = randomUUID();
-  const restored = restoreCheckpointWorktree(manifest.directory, manifest.digest, paths.project, workspaceId);
+  const restored = restoreCheckpointWorktree(
+    manifest.directory,
+    manifest.digest,
+    paths.project,
+    workspaceId,
+  );
   assert.equal(restored.workspace, join(paths.project, '.worktrees', `randolph-${workspaceId}`));
   assert.equal(git(restored.workspace, ['rev-parse', 'HEAD']), checkpointBase);
   assert.throws(() => git(restored.workspace, ['symbolic-ref', '-q', 'HEAD']));
@@ -79,12 +114,16 @@ test('restores a deleted checkpoint workspace under a new identity without chang
   assert.equal(readFileSync(join(sibling, 'sibling.txt'), 'utf8'), 'untouched\n');
 
   writeFileSync(join(restored.workspace, 'changed.txt'), 'do not overwrite\n');
-  assert.throws(() => restoreCheckpointWorktree(manifest.directory, manifest.digest, paths.project, workspaceId), /exists|registered|new/i);
+  assert.throws(
+    () =>
+      restoreCheckpointWorktree(manifest.directory, manifest.digest, paths.project, workspaceId),
+    /exists|registered|new/i,
+  );
   assert.equal(readFileSync(join(restored.workspace, 'changed.txt'), 'utf8'), 'do not overwrite\n');
   assert.deepEqual(readFileSync(join(manifest.directory, 'objects.pack')), retainedPack);
 });
 
-test('blocks missing and unrelated projects without consuming or changing the checkpoint', t => {
+test('blocks missing and unrelated projects without consuming or changing the checkpoint', (t) => {
   const paths = fixture(t);
   const sourceWorkspace = join(paths.project, '.worktrees', `randolph-${randomUUID()}`);
   git(paths.project, ['worktree', 'add', '--detach', sourceWorkspace, 'HEAD']);
@@ -93,7 +132,16 @@ test('blocks missing and unrelated projects without consuming or changing the ch
   const retainedManifest = readFileSync(join(manifest.directory, 'manifest.json'));
   const retainedPack = readFileSync(join(manifest.directory, 'objects.pack'));
 
-  assert.throws(() => restoreCheckpointWorktree(manifest.directory, manifest.digest, join(paths.directory, 'missing'), randomUUID()), /Restore files to a new folder first/i);
+  assert.throws(
+    () =>
+      restoreCheckpointWorktree(
+        manifest.directory,
+        manifest.digest,
+        join(paths.directory, 'missing'),
+        randomUUID(),
+      ),
+    /Restore files to a new folder first/i,
+  );
 
   const unrelated = join(paths.directory, 'unrelated');
   mkdirSync(unrelated);
@@ -103,14 +151,20 @@ test('blocks missing and unrelated projects without consuming or changing the ch
   git(unrelated, ['commit', '-m', 'unrelated']);
   mkdirSync(join(unrelated, '.worktrees'));
   const workspaceId = randomUUID();
-  assert.throws(() => restoreCheckpointWorktree(manifest.directory, manifest.digest, unrelated, workspaceId), /ancestor.*Restore files to a new folder first/i);
+  assert.throws(
+    () => restoreCheckpointWorktree(manifest.directory, manifest.digest, unrelated, workspaceId),
+    /ancestor.*Restore files to a new folder first/i,
+  );
   assert.equal(git(unrelated, ['rev-parse', 'HEAD']), git(unrelated, ['rev-parse', 'main']));
-  assert.throws(() => readFileSync(join(unrelated, '.worktrees', `randolph-${workspaceId}`, 'changed.txt')), { code: 'ENOENT' });
+  assert.throws(
+    () => readFileSync(join(unrelated, '.worktrees', `randolph-${workspaceId}`, 'changed.txt')),
+    { code: 'ENOENT' },
+  );
   assert.deepEqual(readFileSync(join(manifest.directory, 'manifest.json')), retainedManifest);
   assert.deepEqual(readFileSync(join(manifest.directory, 'objects.pack')), retainedPack);
 });
 
-test('recreates a deleted app worktree directory under the surviving project', t => {
+test('recreates a deleted app worktree directory under the surviving project', (t) => {
   const paths = fixture(t);
   const sourceWorkspace = join(paths.project, '.worktrees', `randolph-${randomUUID()}`);
   git(paths.project, ['worktree', 'add', '--detach', sourceWorkspace, 'HEAD']);
@@ -120,7 +174,15 @@ test('recreates a deleted app worktree directory under the surviving project', t
   rmSync(join(paths.project, '.worktrees'), { recursive: true });
 
   const workspaceId = randomUUID();
-  const restored = restoreCheckpointWorktree(manifest.directory, manifest.digest, paths.project, workspaceId);
+  const restored = restoreCheckpointWorktree(
+    manifest.directory,
+    manifest.digest,
+    paths.project,
+    workspaceId,
+  );
   assert.equal(restored.workspace, join(paths.project, '.worktrees', `randolph-${workspaceId}`));
-  assert.equal(readFileSync(join(restored.workspace, 'changed.txt'), 'utf8'), 'saved after workspace cleanup\n');
+  assert.equal(
+    readFileSync(join(restored.workspace, 'changed.txt'), 'utf8'),
+    'saved after workspace cleanup\n',
+  );
 });

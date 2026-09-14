@@ -9,14 +9,23 @@ import test from 'node:test';
 import { prepareWorkspace } from '../dist/workspace.js';
 
 function git(root, args) {
-  return execFileSync('/usr/bin/git', [
-    '-c', 'user.name=Test',
-    '-c', 'user.email=test@example.invalid',
-    '-c', 'commit.gpgsign=false',
-    '-c', 'core.hooksPath=/dev/null',
-    '-C', root,
-    ...args,
-  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  return execFileSync(
+    '/usr/bin/git',
+    [
+      '-c',
+      'user.name=Test',
+      '-c',
+      'user.email=test@example.invalid',
+      '-c',
+      'commit.gpgsign=false',
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-C',
+      root,
+      ...args,
+    ],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+  ).trim();
 }
 
 async function repository(t) {
@@ -27,11 +36,13 @@ async function repository(t) {
   await writeFile(join(root, 'README.md'), '# Synthetic project\n');
   git(root, ['add', 'README.md']);
   git(root, ['commit', '-m', 'seed']);
-  t.after(async () => { await rm(temporary, { recursive: true, force: true }); });
+  t.after(async () => {
+    await rm(temporary, { recursive: true, force: true });
+  });
   return { temporary, root: realpathSync(root) };
 }
 
-test('a saved conversation workspace is rejected after symlink redirection', async t => {
+test('a saved conversation workspace is rejected after symlink redirection', async (t) => {
   const { temporary, root } = await repository(t);
   const conversationId = randomUUID();
   const workspace = prepareWorkspace(root, conversationId);
@@ -46,7 +57,7 @@ test('a saved conversation workspace is rejected after symlink redirection', asy
   );
 });
 
-test('an existing registered workspace at the exact conversation path is reused after an orphaned launch', async t => {
+test('an existing registered workspace at the exact conversation path is reused after an orphaned launch', async (t) => {
   const { root } = await repository(t);
   const conversationId = randomUUID();
   const created = prepareWorkspace(root, conversationId);
@@ -56,15 +67,16 @@ test('an existing registered workspace at the exact conversation path is reused 
   assert.equal(reused, created);
   const registered = git(root, ['worktree', 'list', '--porcelain'])
     .split('\n')
-    .filter(line => line.startsWith('worktree '))
-    .map(line => line.slice('worktree '.length));
-  assert.equal(registered.filter(path => path === created).length, 1);
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice('worktree '.length));
+  assert.equal(registered.filter((path) => path === created).length, 1);
 });
 
-test('worktree preparation never executes repository checkout filters', async t => {
+test('worktree preparation never executes repository checkout filters', async (t) => {
   const { temporary, root } = await repository(t);
   await writeFile(join(root, '.gitattributes'), '*.md filter=probe\n');
-  git(root, ['add', '.gitattributes']); git(root, ['commit', '-m', 'attributes']);
+  git(root, ['add', '.gitattributes']);
+  git(root, ['commit', '-m', 'attributes']);
   const marker = join(temporary, 'filter-executed');
   git(root, ['config', 'filter.probe.smudge', `touch '${marker}'; cat`]);
   git(root, ['config', 'filter.probe.required', 'true']);
@@ -73,13 +85,17 @@ test('worktree preparation never executes repository checkout filters', async t 
   assert.equal(readFileSync(join(workspace, 'README.md'), 'utf8'), '# Synthetic project\n');
 });
 
-test('worktree-conditional filters cannot execute during initial checkout', async t => {
+test('worktree-conditional filters cannot execute during initial checkout', async (t) => {
   const { temporary, root } = await repository(t);
   await writeFile(join(root, '.gitattributes'), '*.md filter=late\n');
-  git(root, ['add', '.gitattributes']); git(root, ['commit', '-m', 'conditional attributes']);
+  git(root, ['add', '.gitattributes']);
+  git(root, ['commit', '-m', 'conditional attributes']);
   const marker = join(temporary, 'conditional-filter-executed');
   const config = join(temporary, 'conditional.gitconfig');
-  await writeFile(config, `[filter "late"]\n  smudge = "touch '${marker}'; cat"\n  required = true\n`);
+  await writeFile(
+    config,
+    `[filter "late"]\n  smudge = "touch '${marker}'; cat"\n  required = true\n`,
+  );
   git(root, ['config', 'includeIf.gitdir:*/worktrees/*.path', config]);
   const workspace = prepareWorkspace(root, randomUUID());
   assert.equal(existsSync(marker), false);

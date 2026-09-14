@@ -6,15 +6,33 @@ test('IPC accepts only scoped message commands, never arbitrary paths or oversiz
   const conversationId = '10000000-0000-0000-0000-000000000001';
   const message = { conversationId, text: 'Review this project', model: 'model', effort: 'low' };
   assert.deepEqual(parseSend(message), message);
-  for (const value of [null, [], { ...message, conversationId: '../other' }, { ...message, text: 'x'.repeat(64001) }, { ...message, model: {} }]) assert.throws(() => parseSend(value));
+  for (const value of [
+    null,
+    [],
+    { ...message, conversationId: '../other' },
+    { ...message, text: 'x'.repeat(64001) },
+    { ...message, model: {} },
+  ])
+    assert.throws(() => parseSend(value));
   assert.throws(() => parseId('/tmp/repo'));
 });
 
 test('chat event IPC validates scoped IDs and nonnegative integer cursors', () => {
   const conversationId = '10000000-0000-0000-0000-000000000001';
   const runId = '10000000-0000-0000-0000-000000000002';
-  assert.deepEqual(parseChatEvents({ conversationId, runId, afterSequence: 12 }), { conversationId, runId, afterSequence: 12 });
-  for (const value of [null, { conversationId, runId, afterSequence: -1 }, { conversationId, runId, afterSequence: 1.5 }, { conversationId, runId, afterSequence: '12' }, { conversationId: '/tmp/run', runId, afterSequence: 0 }]) assert.throws(() => parseChatEvents(value));
+  assert.deepEqual(parseChatEvents({ conversationId, runId, afterSequence: 12 }), {
+    conversationId,
+    runId,
+    afterSequence: 12,
+  });
+  for (const value of [
+    null,
+    { conversationId, runId, afterSequence: -1 },
+    { conversationId, runId, afterSequence: 1.5 },
+    { conversationId, runId, afterSequence: '12' },
+    { conversationId: '/tmp/run', runId, afterSequence: 0 },
+  ])
+    assert.throws(() => parseChatEvents(value));
 });
 
 test('project setup approval IPC validates a complete context without loading YAML persistence', () => {
@@ -25,7 +43,11 @@ test('project setup approval IPC validates a complete context without loading YA
     runId: '10000000-0000-0000-0000-000000000002',
     proposalRevision: revision,
     expectedContextRevision: null,
-    value: { purpose: 'Keep project evidence local.', instructions: 'Inspect before writing.', documents: [{ path: 'docs/spec.md', description: 'Product specification' }] },
+    value: {
+      purpose: 'Keep project evidence local.',
+      instructions: 'Inspect before writing.',
+      documents: [{ path: 'docs/spec.md', description: 'Product specification' }],
+    },
   };
   assert.deepEqual(parseSetupApproval(input), input);
 });
@@ -35,57 +57,143 @@ test('settings IPC validates scoped identities, paired selections and expected r
   const defaults = { harness: 'codex', model: 'model-a', effort: 'low' };
   const save = { projectId, defaults, expectedRevision: null };
   assert.deepEqual(validation.parseProjectDefaults(save), save);
-  assert.deepEqual(validation.parseConversationSelection({ conversationId: projectId, selection: null }), { conversationId: projectId, selection: null });
-  assert.deepEqual(parseSend({ conversationId: projectId, text: 'Use saved settings' }), { conversationId: projectId, text: 'Use saved settings' });
-  for (const value of [null, [], { ...save, projectId: '/tmp/project' }, { ...save, expectedRevision: 'stale' }, { ...save, defaults: { ...defaults, harness: 'other' } }, { ...save, defaults: { ...defaults, model: '' } }]) {
+  assert.deepEqual(
+    validation.parseConversationSelection({ conversationId: projectId, selection: null }),
+    { conversationId: projectId, selection: null },
+  );
+  assert.deepEqual(parseSend({ conversationId: projectId, text: 'Use saved settings' }), {
+    conversationId: projectId,
+    text: 'Use saved settings',
+  });
+  for (const value of [
+    null,
+    [],
+    { ...save, projectId: '/tmp/project' },
+    { ...save, expectedRevision: 'stale' },
+    { ...save, defaults: { ...defaults, harness: 'other' } },
+    { ...save, defaults: { ...defaults, model: '' } },
+  ]) {
     assert.throws(() => validation.parseProjectDefaults(value));
   }
-  for (const selection of [undefined, {}, { ...defaults, effort: 'x'.repeat(33) }, { ...defaults, model: [] }]) {
-    assert.throws(() => validation.parseConversationSelection({ conversationId: projectId, selection }));
+  for (const selection of [
+    undefined,
+    {},
+    { ...defaults, effort: 'x'.repeat(33) },
+    { ...defaults, model: [] },
+  ]) {
+    assert.throws(() =>
+      validation.parseConversationSelection({ conversationId: projectId, selection }),
+    );
   }
-  assert.throws(() => parseSend({ conversationId: projectId, text: 'Partial selection', model: 'model-a' }));
+  assert.throws(() =>
+    parseSend({ conversationId: projectId, text: 'Partial selection', model: 'model-a' }),
+  );
 });
 
 test('coding IPC accepts only explicit execution modes and review-scoped approval messages', () => {
   const id = '10000000-0000-0000-0000-000000000001';
-  assert.deepEqual(validation.parseMode({ conversationId: id, executionMode: 'code' }), { conversationId: id, executionMode: 'code' });
-  assert.deepEqual(validation.parseReviewApproval({ reviewId: id, message: 'Apply reviewed changes' }), { reviewId: id, message: 'Apply reviewed changes' });
-  for (const input of [{ conversationId: id, executionMode: 'yolo' }, { conversationId: '/tmp/repo', executionMode: 'code' }]) assert.throws(() => validation.parseMode(input));
-  for (const input of [{ reviewId: id, message: '' }, { reviewId: id, message: 'x'.repeat(16001) }, { reviewId: id, message: 'nul\0byte' }, { reviewId: '../review', message: 'message' }]) assert.throws(() => validation.parseReviewApproval(input));
+  assert.deepEqual(validation.parseMode({ conversationId: id, executionMode: 'code' }), {
+    conversationId: id,
+    executionMode: 'code',
+  });
+  assert.deepEqual(
+    validation.parseReviewApproval({ reviewId: id, message: 'Apply reviewed changes' }),
+    { reviewId: id, message: 'Apply reviewed changes' },
+  );
+  for (const input of [
+    { conversationId: id, executionMode: 'yolo' },
+    { conversationId: '/tmp/repo', executionMode: 'code' },
+  ])
+    assert.throws(() => validation.parseMode(input));
+  for (const input of [
+    { reviewId: id, message: '' },
+    { reviewId: id, message: 'x'.repeat(16001) },
+    { reviewId: id, message: 'nul\0byte' },
+    { reviewId: '../review', message: 'message' },
+  ])
+    assert.throws(() => validation.parseReviewApproval(input));
 });
 
-
 test('project CLI IPC preserves explicit choices and rejects relative paths', () => {
-  const input = { projectId: '10000000-0000-0000-0000-000000000001', defaults: { harness: 'codex', model: 'm', effort: 'low', executable: '/opt/example/codex' }, expectedRevision: null };
+  const input = {
+    projectId: '10000000-0000-0000-0000-000000000001',
+    defaults: { harness: 'codex', model: 'm', effort: 'low', executable: '/opt/example/codex' },
+    expectedRevision: null,
+  };
   assert.deepEqual(validation.parseProjectDefaults(input), input);
-  assert.throws(() => validation.parseProjectDefaults({ ...input, defaults: { ...input.defaults, executable: 'relative/codex' } }));
-  assert.deepEqual(validation.parseProjectDefaults({ ...input, defaults: { ...input.defaults, executable: null } }).defaults.executable, null);
+  assert.throws(() =>
+    validation.parseProjectDefaults({
+      ...input,
+      defaults: { ...input.defaults, executable: 'relative/codex' },
+    }),
+  );
+  assert.deepEqual(
+    validation.parseProjectDefaults({ ...input, defaults: { ...input.defaults, executable: null } })
+      .defaults.executable,
+    null,
+  );
 });
 
 test('harness IPC accepts only the bounded Codex and Grok catalog', () => {
   assert.equal(validation.parseHarnessId('codex'), 'codex');
   assert.equal(validation.parseHarnessId('grok'), 'grok');
   assert.deepEqual(validation.parseHarnessRequest({ harness: 'grok' }), { harness: 'grok' });
-  for (const value of ['claude', '', null, 42]) assert.throws(() => validation.parseHarnessId(value));
+  for (const value of ['claude', '', null, 42])
+    assert.throws(() => validation.parseHarnessId(value));
   assert.throws(() => validation.parseHarnessRequest({ harness: 'claude' }));
 });
 
-test('project setup IPC binds inspection and approval to bounded identities, revisions, and context',()=>{
- const projectId='10000000-0000-0000-0000-000000000001';const runId='10000000-0000-0000-0000-000000000002';
- const input={projectId,selection:{harness:'codex',model:'fixture',effort:'low'},brief:'Inspect this idea.'};
- assert.deepEqual(validation.parseInspectProject(input),input);
- assert.throws(()=>validation.parseInspectProject({...input,brief:'x'.repeat(8001)}));
- assert.throws(()=>validation.parseInspectProject({...input,executable:'../cli'}));
- const approval={projectId,runId,proposalRevision:'a'.repeat(64),expectedContextRevision:null,value:{purpose:'Approved purpose',instructions:'Line one\nLine two',documents:[]}};
- assert.deepEqual(validation.parseSetupApproval(approval),approval);
- assert.throws(()=>validation.parseSetupApproval({...approval,proposalRevision:'latest'}));
- assert.throws(()=>validation.parseSetupApproval({...approval,expectedContextRevision:'new'}));
- assert.throws(()=>validation.parseSetupApproval({...approval,value:{...approval.value,documents:[{path:'../outside',description:''}]}}));
+test('project setup IPC binds inspection and approval to bounded identities, revisions, and context', () => {
+  const projectId = '10000000-0000-0000-0000-000000000001';
+  const runId = '10000000-0000-0000-0000-000000000002';
+  const input = {
+    projectId,
+    selection: { harness: 'codex', model: 'fixture', effort: 'low' },
+    brief: 'Inspect this idea.',
+  };
+  assert.deepEqual(validation.parseInspectProject(input), input);
+  assert.throws(() => validation.parseInspectProject({ ...input, brief: 'x'.repeat(8001) }));
+  assert.throws(() => validation.parseInspectProject({ ...input, executable: '../cli' }));
+  const approval = {
+    projectId,
+    runId,
+    proposalRevision: 'a'.repeat(64),
+    expectedContextRevision: null,
+    value: { purpose: 'Approved purpose', instructions: 'Line one\nLine two', documents: [] },
+  };
+  assert.deepEqual(validation.parseSetupApproval(approval), approval);
+  assert.throws(() => validation.parseSetupApproval({ ...approval, proposalRevision: 'latest' }));
+  assert.throws(() =>
+    validation.parseSetupApproval({ ...approval, expectedContextRevision: 'new' }),
+  );
+  assert.throws(() =>
+    validation.parseSetupApproval({
+      ...approval,
+      value: { ...approval.value, documents: [{ path: '../outside', description: '' }] },
+    }),
+  );
 });
 
 test('project CLI permissions reject malformed IPC routes and retain exact explicit choices', () => {
-  const input = { projectId: '10000000-0000-0000-0000-000000000001', defaults: { harness: 'codex', model: 'm', effort: 'low' }, expectedRevision: null };
+  const input = {
+    projectId: '10000000-0000-0000-0000-000000000001',
+    defaults: { harness: 'codex', model: 'm', effort: 'low' },
+    expectedRevision: null,
+  };
   const route = { harness: 'codex', executable: '/opt/codex' };
-  for (const enabledRoutes of [[], [route]]) assert.deepEqual(validation.parseProjectDefaults({ ...input, enabledRoutes }), { ...input, enabledRoutes });
-  for (const enabledRoutes of [null, {}, [route, route], [{ ...route, executable: 'relative' }], [{ ...route, executable: null }], [{ ...route, harness: 'other' }], Array(33).fill(route)]) assert.throws(() => validation.parseProjectDefaults({ ...input, enabledRoutes }));
+  for (const enabledRoutes of [[], [route]])
+    assert.deepEqual(validation.parseProjectDefaults({ ...input, enabledRoutes }), {
+      ...input,
+      enabledRoutes,
+    });
+  for (const enabledRoutes of [
+    null,
+    {},
+    [route, route],
+    [{ ...route, executable: 'relative' }],
+    [{ ...route, executable: null }],
+    [{ ...route, harness: 'other' }],
+    Array(33).fill(route),
+  ])
+    assert.throws(() => validation.parseProjectDefaults({ ...input, enabledRoutes }));
 });

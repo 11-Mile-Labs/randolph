@@ -6,9 +6,11 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { Store } from '../dist/index.js';
 
-test('a future SQLite user_version is rejected without rewriting the database', async t => {
+test('a future SQLite user_version is rejected without rewriting the database', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'randolph-store-test-'));
-  t.after(async () => { await rm(root, { recursive: true, force: true }); });
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
   const path = join(root, 'app.sqlite');
   const database = new DatabaseSync(path);
   database.exec('PRAGMA user_version=6');
