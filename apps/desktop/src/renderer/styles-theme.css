@@ -1,0 +1,285 @@
+/* Shared application palette. The variables retain the existing light values;
+   app-navigation.css replaces them only for an explicit or system dark theme. */
+html[data-theme='dark'] .workspace,
+html[data-theme='system'] .workspace {
+  background: var(--ui-canvas);
+}
+html[data-theme='dark'] .conversation-header,
+html[data-theme='system'] .conversation-header {
+  border-color: var(--nav-line);
+  background: color-mix(in srgb, var(--ui-canvas) 92%, transparent);
+}
+html[data-theme='dark'] .conversation-header h1,
+html[data-theme='dark'] .message header strong,
+html[data-theme='dark'] .message p,
+html[data-theme='dark'] .conversation-empty h2,
+html[data-theme='dark'] .welcome h1,
+html[data-theme='dark'] .activity-heading h2,
+html[data-theme='system'] .conversation-header h1,
+html[data-theme='system'] .message header strong,
+html[data-theme='system'] .message p,
+html[data-theme='system'] .conversation-empty h2,
+html[data-theme='system'] .welcome h1,
+html[data-theme='system'] .activity-heading h2 {
+  color: var(--ui-text);
+}
+html[data-theme='dark'] .conversation-header p,
+html[data-theme='dark'] .message time,
+html[data-theme='dark'] .conversation-empty p,
+html[data-theme='dark'] .welcome p,
+html[data-theme='dark'] .welcome small,
+html[data-theme='dark'] .composer-caption,
+html[data-theme='dark'] .activity-empty p,
+html[data-theme='dark'] .muted-copy,
+html[data-theme='dark'] .status-row,
+html[data-theme='dark'] .event-item small,
+html[data-theme='dark'] .storage-detail,
+html[data-theme='dark'] .storage-detail code,
+html[data-theme='system'] .conversation-header p,
+html[data-theme='system'] .message time,
+html[data-theme='system'] .conversation-empty p,
+html[data-theme='system'] .welcome p,
+html[data-theme='system'] .welcome small,
+html[data-theme='system'] .composer-caption,
+html[data-theme='system'] .activity-empty p,
+html[data-theme='system'] .muted-copy,
+html[data-theme='system'] .status-row,
+html[data-theme='system'] .event-item small,
+html[data-theme='system'] .storage-detail,
+html[data-theme='system'] .storage-detail code {
+  color: var(--ui-subtle);
+}
+html[data-theme='dark'] .message + .message,
+html[data-theme='dark'] .composer-area,
+html[data-theme='dark'] .activity-panel,
+html[data-theme='dark'] .storage-detail,
+html[data-theme='system'] .message + .message,
+html[data-theme='system'] .composer-area,
+html[data-theme='system'] .activity-panel,
+html[data-theme='system'] .storage-detail {
+  border-color: var(--nav-line);
+}
+html[data-theme='dark'] .composer-area,
+html[data-theme='system'] .composer-area {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--ui-canvas) 12%, transparent),
+    var(--ui-canvas) 18%
+  );
+}
+html[data-theme='dark'] .composer,
+html[data-theme='dark'] .status-card,
+html[data-theme='dark'] .project-settings,
+html[data-theme='dark'] .review-panel,
+html[data-theme='system'] .composer,
+html[data-theme='system'] .status-card {
+  border-color: var(--nav-line);
+  color: var(--ui-text);
+  background: var(--ui-control);
+}
+html[data-theme='dark'] .project-settings,
+html[data-theme='dark'] .review-panel,
+html[data-theme='dark'] .memory-panel,
+html[data-theme='dark'] .history-dialog,
+html[data-theme='system'] .project-settings,
+html[data-theme='system'] .review-panel,
+html[data-theme='system'] .memory-panel,
+html[data-theme='system'] .history-dialog {
+  border-color: var(--nav-line);
+  color: var(--ui-text);
+  background: var(--ui-canvas);
+}
+html[data-theme='dark'] .composer textarea,
+html[data-theme='dark'] .selector-group select,
+html[data-theme='dark'] .header-actions select,
+html[data-theme='dark'] .settings-fields select,
+html[data-theme='dark'] .commit-message-label textarea,
+html[data-theme='system'] .composer textarea,
+html[data-theme='system'] .selector-group select,
+html[data-theme='system'] .header-actions select,
+html[data-theme='system'] .settings-fields select,
+html[data-theme='system'] .commit-message-label textarea {
+  border-color: var(--nav-line);
+  color: var(--ui-text);
+  background: var(--ui-control);
+}
+html[data-theme='dark'] .activity-panel,
+html[data-theme='dark'] .message-avatar,
+html[data-theme='dark'] .review-content aside,
+html[data-theme='dark'] .event-detail,
+html[data-theme='system'] .activity-panel,
+html[data-theme='system'] .message-avatar,
+html[data-theme='system'] .review-content aside,
+html[data-theme='system'] .event-detail {
+  background: var(--ui-panel);
+}
+html[data-theme='dark'] .status-card,
+html[data-theme='dark'] .event-item summary:hover,
+html[data-theme='system'] .status-card,
+html[data-theme='system'] .event-item summary:hover {
+  background: color-mix(in srgb, var(--ui-control) 65%, transparent);
+}
+html[data-theme='dark'] .secondary-button,
+html[data-theme='dark'] .stop-button,
+html[data-theme='dark'] .version-chip,
+html[data-theme='dark'] .review-diff,
+html[data-theme='system'] .secondary-button,
+html[data-theme='system'] .stop-button,
+html[data-theme='system'] .version-chip,
+html[data-theme='system'] .review-diff {
+  border-color: var(--nav-line);
+  color: var(--ui-text);
+  background: var(--ui-raised);
+}
+html[data-theme='dark'] .inline-error,
+html[data-theme='dark'] .composer-error,
+html[data-theme='dark'] .global-error,
+html[data-theme='system'] .inline-error,
+html[data-theme='system'] .composer-error,
+html[data-theme='system'] .global-error {
+  border-color: color-mix(in srgb, var(--ui-error-text) 50%, var(--nav-line));
+  color: var(--ui-error-text);
+  background: var(--ui-error-bg);
+}
+html[data-theme='dark'] .project-settings p,
+html[data-theme='dark'] .review-target,
+html[data-theme='dark'] .review-approval-copy,
+html[data-theme='system'] .project-settings p,
+html[data-theme='system'] .review-target,
+html[data-theme='system'] .review-approval-copy {
+  color: var(--ui-subtle);
+}
+html[data-theme='dark'] .review-content,
+html[data-theme='dark'] .review-content aside,
+html[data-theme='dark'] .review-checks,
+html[data-theme='system'] .review-content,
+html[data-theme='system'] .review-content aside,
+html[data-theme='system'] .review-checks {
+  border-color: var(--nav-line);
+}
+html[data-theme='dark'] .activity-empty strong,
+html[data-theme='dark'] .status-row strong,
+html[data-theme='dark'] .event-item strong,
+html[data-theme='dark'] .event-detail,
+html[data-theme='system'] .activity-empty strong,
+html[data-theme='system'] .status-row strong,
+html[data-theme='system'] .event-item strong,
+html[data-theme='system'] .event-detail {
+  color: var(--ui-text);
+}
+.history-dialog > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--line);
+}
+.history-dialog h2 {
+  margin: 4px 0;
+}
+.history-body {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  min-height: 0;
+}
+.history-body > nav {
+  overflow-y: auto;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+}
+.history-body > nav button {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  text-align: left;
+  padding: 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+.history-body > nav button.selected {
+  background: var(--surface-muted);
+  border-color: var(--line);
+}
+.history-body > nav span,
+.checkpoint-card > span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.history-detail {
+  padding: 16px 24px 28px;
+  overflow-y: auto;
+}
+.history-detail pre,
+.history-message p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.history-detail pre {
+  font-size: 12px;
+}
+.checkpoint-card {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin: 12px 0;
+}
+.checkpoint-card code {
+  align-self: center;
+  font-size: 12px;
+}
+.history-message {
+  border-top: 1px solid var(--line);
+  padding: 16px 0;
+}
+.history-timeline {
+  list-style: none;
+  padding: 0;
+}
+.history-timeline li {
+  border-left: 2px solid var(--line);
+  padding: 0 0 20px 16px;
+}
+.history-timeline time {
+  font-size: 12px;
+  color: var(--muted);
+}
+.history-timeline p {
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+.history-timeline summary {
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.history-delivery article {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 12px 0;
+  padding: 12px;
+}
+.history-delivery code {
+  overflow-wrap: anywhere;
+}
+.checkpoint-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+.recovery-confirmation {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+}
+.recovery-confirmation .checkpoint-actions {
+  margin-top: 14px;
+}
+.recovery-confirmation .primary-button {
+  padding: 8px 14px;
+}

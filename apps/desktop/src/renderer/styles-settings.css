@@ -1,0 +1,95 @@
+.project-settings {
+  width: min(520px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  padding: 25px;
+  overflow-y: auto;
+  border: 1px solid #d6d1c8;
+  border-radius: 14px;
+  color: #303a3f;
+  background: #fbfaf7;
+  box-shadow: 0 22px 80px rgb(35 30 24 / 25%);
+}
+.project-settings::backdrop {
+  background: rgb(30 34 32 / 35%);
+}
+.project-settings header,
+.project-settings footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.project-settings h2 {
+  margin: 6px 0;
+  font:
+    500 23px Georgia,
+    serif;
+}
+.project-settings p {
+  font-size: 12px;
+  line-height: 1.65;
+  color: #6c7473;
+}
+.route-permissions {
+  min-inline-size: 0;
+  margin: 20px 0 0;
+  padding: 14px;
+  border: 1px solid #d6d1c8;
+  border-radius: 7px;
+}
+.route-permissions legend {
+  padding: 0 5px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.route-permissions label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.route-permissions input {
+  flex: none;
+  margin: 3px 0 0;
+}
+.route-permissions span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.settings-fields {
+  display: grid;
+  gap: 16px;
+  margin: 22px 0;
+}
+.settings-fields label {
+  display: grid;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.settings-fields select {
+  width: 100%;
+  padding: 9px;
+  border: 1px solid #d6d1c8;
+  border-radius: 7px;
+  color: #303a3f;
+  background: #fffefa;
+}
+.settings-value {
+  color: #767c7c;
+  font-weight: 400;
+}
+.project-settings .settings-location {
+  font-size: 11px;
+}
+.project-settings .settings-saved {
+  color: #41674c;
+}
+.project-settings footer {
+  margin-top: 22px;
+}
+.project-settings .primary-button {
+  padding: 9px 13px;
+}
