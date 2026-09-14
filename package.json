@@ -1,13 +1,9 @@
 {
   "name": "randolph",
   "version": "0.1.0",
-  "license": "MIT",
   "private": true,
+  "license": "MIT",
   "type": "module",
-  "packageManager": "pnpm@11.8.0",
-  "engines": {
-    "node": ">=24.16.0"
-  },
   "scripts": {
     "lint": "pnpm -r lint",
     "format": "oxfmt",
@@ -26,7 +22,11 @@
     "oxlint": "1.82.0",
     "typescript": "7.0.2"
   },
+  "engines": {
+    "node": ">=24.16.0"
+  },
   "volta": {
     "node": "24.18.0"
-  }
+  },
+  "packageManager": "pnpm@11.8.0"
 }
