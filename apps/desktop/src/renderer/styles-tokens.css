@@ -1,0 +1,49 @@
+:root {
+  --surface: #faf9f6;
+  --surface-muted: #eeebe4;
+  --line: #d6d0c4;
+  --ink: #263039;
+  --muted: #66726a;
+  color: #263039;
+  background: #eceae5;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 960px;
+  height: 100%;
+  margin: 0;
+}
+
+button,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+button:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid #a95732;
+  outline-offset: 2px;
+}
