@@ -38,6 +38,15 @@ For contributions, push to your fork and open a pull request against `main`. Kee
 
 Use TypeScript/ES modules, two-space indentation, semicolons, and async/await. Prefer small changes with clear names. Keep private integrations and operator-specific settings out of the public core.
 
+Format TypeScript, JavaScript, and JSON with [Oxfmt](https://oxc.rs/docs/guide/usage/formatter) (same Oxc toolchain as `oxlint`). Print width is 100 characters; quotes stay single in JS/TS. The documented commands are:
+
+```sh
+pnpm format
+pnpm format:check
+```
+
+VS Code / Cursor format-on-save uses the Oxc extension (`oxc.oxc-vscode`) via `.vscode/settings.json`. Do not mix formatting commits with behavior changes. The first rollout formats dense state-transition files; remaining files follow in later formatting-only changes. `pnpm format:check` is not a CI gate until that rollout is complete.
+
 ## Verify a change
 
 For application code, run the repository checks:
