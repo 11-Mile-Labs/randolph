@@ -37,6 +37,8 @@ Open **Memory** to review and pin project/global lessons. After local delivery, 
 Git projects use a per-conversation worktree under `.worktrees/`, starting from committed HEAD. Uncommitted source edits are not copied in this slice. Non-Git folders are read in place. Durable state lives in `~/.randolph/app.sqlite`, with readable and JSONL run logs below `~/.randolph/projects/`. `RANDOLPH_DATA_DIR` selects a separate app-data directory for development/testing. Run logs can contain project content; they are private local data, not repository files.
 
 ```sh
+pnpm format
+pnpm format:check
 pnpm lint
 pnpm typecheck
 pnpm build

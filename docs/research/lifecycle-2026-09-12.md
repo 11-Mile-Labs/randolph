@@ -6,14 +6,14 @@
 
 Recorded on 2026-09-12 UTC using Codex CLI 0.149.0, Node 24.18.0 and macOS arm64. Scripted local Responses messages launched real native shell tools under the previously verified isolated workspace policy.
 
-| Case | Corrected attempt | Evidence |
-| --- | --- | --- |
-| Explicit Stop | Passed, 4.349 seconds from request to result | Dispatch closed; native cancellation requested; harness and observed tool descendants exited; no later heartbeat growth or canary write |
-| Controller SIGKILL | Passed, 4.354 seconds from fault to result | Independent supervisor detected IPC loss and stopped owned work before any reopening or watchdog rescue |
-| Harness SIGKILL | Unverified | Process enumeration failed during setup, before this native case started |
-| Rapid detached child | Unverified | Not reached after setup failure |
-| Read-only reopen | Passed for both completed cases | A fresh reader process showed `stopped` or `interrupted`; the journal retained exactly one scripted turn per case |
-| Protected refs and unrelated process | Passed for both completed cases | Worktree/parent/remote refs unchanged; unrelated sentinel remained alive during each assessment |
+| Case                                 | Corrected attempt                            | Evidence                                                                                                                                |
+| ------------------------------------ | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Explicit Stop                        | Passed, 4.349 seconds from request to result | Dispatch closed; native cancellation requested; harness and observed tool descendants exited; no later heartbeat growth or canary write |
+| Controller SIGKILL                   | Passed, 4.354 seconds from fault to result   | Independent supervisor detected IPC loss and stopped owned work before any reopening or watchdog rescue                                 |
+| Harness SIGKILL                      | Unverified                                   | Process enumeration failed during setup, before this native case started                                                                |
+| Rapid detached child                 | Unverified                                   | Not reached after setup failure                                                                                                         |
+| Read-only reopen                     | Passed for both completed cases              | A fresh reader process showed `stopped` or `interrupted`; the journal retained exactly one scripted turn per case                       |
+| Protected refs and unrelated process | Passed for both completed cases              | Worktree/parent/remote refs unchanged; unrelated sentinel remained alive during each assessment                                         |
 
 Each active tool created an ordinary child and wrote recurring heartbeat bytes. Both processes were independently confirmed alive before the fault, with the exact native tool call recorded. The observer waited past the six-second delayed canary point and checked file stability. It recorded verdicts before any watchdog action. The observed native shutdown did not depend on reopening the controller.
 

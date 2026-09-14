@@ -1,39 +1,65 @@
-import assert from "node:assert/strict";
-import { after, test } from "node:test";
-import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { compileSnapshot, descendants, sameIdentity, signalOwned, snapshot, type ProcessIdentity } from "../src/process-identity.js";
+import assert from 'node:assert/strict';
+import { after, test } from 'node:test';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import {
+  compileSnapshot,
+  descendants,
+  sameIdentity,
+  signalOwned,
+  snapshot,
+  type ProcessIdentity,
+} from '../src/process-identity.js';
 
-const dir = mkdtempSync(join(tmpdir(), "randolph-process-"));
+const dir = mkdtempSync(join(tmpdir(), 'randolph-process-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
-const one: ProcessIdentity = { pid: 10, ppid: 1, pgid: 10, uid: 501, start: "20.000001", zombie: false };
+const one: ProcessIdentity = {
+  pid: 10,
+  ppid: 1,
+  pgid: 10,
+  uid: 501,
+  start: '20.000001',
+  zombie: false,
+};
 
-test("matches identity fields and walks only matching roots", () => {
+test('matches identity fields and walks only matching roots', () => {
   assert.equal(sameIdentity(one, { ...one, pgid: 99 }), true);
-  assert.equal(sameIdentity(one, { ...one, start: "20.000002" }), false);
+  assert.equal(sameIdentity(one, { ...one, start: '20.000002' }), false);
   const child = { ...one, pid: 11, ppid: 10 };
   const grandchild = { ...one, pid: 12, ppid: 11 };
   assert.deepEqual(descendants([child, grandchild], [one]), []);
-  assert.deepEqual(descendants([one, child, grandchild], [{ ...one, start: "old" }, one]), [one, child, grandchild]);
+  assert.deepEqual(descendants([one, child, grandchild], [{ ...one, start: 'old' }, one]), [
+    one,
+    child,
+    grandchild,
+  ]);
 });
 
-test("parses helper output and reports enumeration failure", () => {
-  const ok = join(dir, "ok.sh");
-  writeFileSync(ok, "#!/bin/sh\nprintf '%s\\n' '[{\"pid\":1,\"ppid\":0,\"pgid\":1,\"uid\":501,\"start\":\"1.000001\",\"zombie\":false}]'\n");
+test('parses helper output and reports enumeration failure', () => {
+  const ok = join(dir, 'ok.sh');
+  writeFileSync(
+    ok,
+    '#!/bin/sh\nprintf \'%s\\n\' \'[{"pid":1,"ppid":0,"pgid":1,"uid":501,"start":"1.000001","zombie":false}]\'\n',
+  );
   chmodSync(ok, 0o755);
   assert.equal(snapshot(ok)[0]?.pid, 1);
-  const bad = join(dir, "bad.sh");
-  writeFileSync(bad, "#!/bin/sh\nexit 7\n");
+  const bad = join(dir, 'bad.sh');
+  writeFileSync(bad, '#!/bin/sh\nexit 7\n');
   chmodSync(bad, 0o755);
   assert.throws(() => snapshot(bad), /process enumeration failed/);
 });
 
-test("C helper emits a process after a transient first lookup", { skip: process.platform !== "darwin" }, () => {
-  const wrapper = join(dir, "retry-wrapper.c");
-  const binary = join(dir, "retry-wrapper");
-  writeFileSync(wrapper, `#include <libproc.h>
+test(
+  'C helper emits a process after a transient first lookup',
+  { skip: process.platform !== 'darwin' },
+  () => {
+    const wrapper = join(dir, 'retry-wrapper.c');
+    const binary = join(dir, 'retry-wrapper');
+    writeFileSync(
+      wrapper,
+      `#include <libproc.h>
 #include <sys/proc_info.h>
 #include <signal.h>
 static int lookups = 0;
@@ -45,50 +71,75 @@ int fake_kill(pid_t pid, int signal) { (void)pid; (void)signal; return 0; }
 #define kill fake_kill
 #define nanosleep(a, b) ((void)(a), 0)
 #define main snapshot_main
-#include "${resolve(process.cwd(), "src/process-snapshot.c")}"
+#include "${resolve(process.cwd(), 'src/process-snapshot.c')}"
 #undef main
 int main(void) { return snapshot_main(1, (char *[]){"snapshot"}); }
-`);
-  execFileSync("clang", ["-O2", "-Wall", "-Wextra", "-Werror", wrapper, "-o", binary], { timeout: 10000 });
-  const output = execFileSync(binary, [], { encoding: "utf8" });
-  assert.match(output, /"pid":42/);
-});
+`,
+    );
+    execFileSync('clang', ['-O2', '-Wall', '-Wextra', '-Werror', wrapper, '-o', binary], {
+      timeout: 10000,
+    });
+    const output = execFileSync(binary, [], { encoding: 'utf8' });
+    assert.match(output, /"pid":42/);
+  },
+);
 
-test("compiles and observes owned process identities on macOS", { skip: process.platform !== "darwin" }, () => {
-  const binary = compileSnapshot(join(dir, "snapshot"));
-  const selfPid = process.pid;
-  const processes = snapshot(binary, [selfPid, process.ppid]);
-  const self = processes.find((entry) => entry.pid === selfPid);
-  assert.ok(self);
-  assert.equal(self.uid, process.getuid?.());
-  assert.equal(snapshot(binary, [selfPid]).some((entry) => entry.pid === selfPid), true);
-  assert.deepEqual(snapshot(binary, [999999999]), []);
-  assert.ok(processes.some((entry) => entry.pid === self.ppid));
-});
+test(
+  'compiles and observes owned process identities on macOS',
+  { skip: process.platform !== 'darwin' },
+  () => {
+    const binary = compileSnapshot(join(dir, 'snapshot'));
+    const selfPid = process.pid;
+    const processes = snapshot(binary, [selfPid, process.ppid]);
+    const self = processes.find((entry) => entry.pid === selfPid);
+    assert.ok(self);
+    assert.equal(self.uid, process.getuid?.());
+    assert.equal(
+      snapshot(binary, [selfPid]).some((entry) => entry.pid === selfPid),
+      true,
+    );
+    assert.deepEqual(snapshot(binary, [999999999]), []);
+    assert.ok(processes.some((entry) => entry.pid === self.ppid));
+  },
+);
 
-test("whole-table observation returns identities or reports native uncertainty", { skip: process.platform !== "darwin" }, (context) => {
-  const binary = compileSnapshot(join(dir, "whole-table"));
-  let processes: ProcessIdentity[];
-  try {
-    processes = snapshot(binary);
-  } catch (error) {
-    // Hosted Macs can deny libproc access even when a PID is still live.
-    // The observer must report uncertainty, never certify a partial snapshot.
-    assert.match(String(error), /process enumeration failed:.*proc_pidinfo failed for pid \d+/s);
-    context.diagnostic("Full process-table visibility is unavailable on this host; native observation failed closed.");
-    return;
-  }
-  assert.ok(processes.some((entry) => entry.pid === process.pid));
-  try {
-    const psRows = execFileSync("ps", ["-axo", "pid="], { encoding: "utf8" }).trim().split(/\s+/).filter(Boolean);
-    assert.ok(psRows.includes("1"));
-    assert.ok(processes.length <= psRows.length);
-  } catch { /* ps is an optional tolerant cross-check */ }
-});
+test(
+  'whole-table observation returns identities or reports native uncertainty',
+  { skip: process.platform !== 'darwin' },
+  (context) => {
+    const binary = compileSnapshot(join(dir, 'whole-table'));
+    let processes: ProcessIdentity[];
+    try {
+      processes = snapshot(binary);
+    } catch (error) {
+      // Hosted Macs can deny libproc access even when a PID is still live.
+      // The observer must report uncertainty, never certify a partial snapshot.
+      assert.match(String(error), /process enumeration failed:.*proc_pidinfo failed for pid \d+/s);
+      context.diagnostic(
+        'Full process-table visibility is unavailable on this host; native observation failed closed.',
+      );
+      return;
+    }
+    assert.ok(processes.some((entry) => entry.pid === process.pid));
+    try {
+      const psRows = execFileSync('ps', ['-axo', 'pid='], { encoding: 'utf8' })
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+      assert.ok(psRows.includes('1'));
+      assert.ok(processes.length <= psRows.length);
+    } catch {
+      /* ps is an optional tolerant cross-check */
+    }
+  },
+);
 
-test("never signals a reused PID", () => {
-  const binary = join(dir, "identity.sh");
-  writeFileSync(binary, `#!/bin/sh\nprintf '%s\\n' '[{"pid":99,"ppid":1,"pgid":99,"uid":501,"start":"new","zombie":false}]'\n`);
+test('never signals a reused PID', () => {
+  const binary = join(dir, 'identity.sh');
+  writeFileSync(
+    binary,
+    `#!/bin/sh\nprintf '%s\\n' '[{"pid":99,"ppid":1,"pgid":99,"uid":501,"start":"new","zombie":false}]'\n`,
+  );
   chmodSync(binary, 0o755);
-  assert.equal(signalOwned({ ...one, pid: 99 }, "SIGTERM", binary), "identity-changed");
+  assert.equal(signalOwned({ ...one, pid: 99 }, 'SIGTERM', binary), 'identity-changed');
 });

@@ -9,7 +9,9 @@ export type WelcomeProps = {
 };
 
 export default function Welcome({ hasProjects, busy, harness, onAddProject }: WelcomeProps) {
-  const harnessReady = Boolean(harness?.available && harness.authenticated && harness.models.length > 0);
+  const harnessReady = Boolean(
+    harness?.available && harness.authenticated && harness.models.length > 0,
+  );
   return (
     <div className="welcome">
       <LogoMark />
@@ -28,9 +30,15 @@ export default function Welcome({ hasProjects, busy, harness, onAddProject }: We
       ) : null}
       <span className={`harness-readiness${harnessReady ? ' ready' : ''}`} role="status">
         <span aria-hidden="true" />
-        {!harness ? 'Checking native harness…' : harnessReady ? 'Native harness ready' : 'Native harness unavailable'}
+        {!harness
+          ? 'Checking native harness…'
+          : harnessReady
+            ? 'Native harness ready'
+            : 'Native harness unavailable'}
       </span>
-      <small>Code mode edits an isolated Git worktree and requires final review before delivery.</small>
+      <small>
+        Code mode edits an isolated Git worktree and requires final review before delivery.
+      </small>
     </div>
   );
 }

@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { HarnessId, HarnessInfo, RunExecutionSnapshot, WorkspaceSnapshot, AppSettingsSnapshot } from '@randolph/runtime/contracts';
+import type {
+  HarnessId,
+  HarnessInfo,
+  RunExecutionSnapshot,
+  WorkspaceSnapshot,
+  AppSettingsSnapshot,
+} from '@randolph/runtime/contracts';
 import { EMPTY_SNAPSHOT, displayError, latestSequence } from './workspace-helpers';
 
 export type AppScreen = 'workspace' | 'chat' | 'settings';
@@ -31,7 +37,8 @@ export function useWorkspaceSession() {
       const next = await window.randolph.snapshot();
       if (version === loadVersion.current) setSnapshot(next);
     } catch (loadError) {
-      if (version === loadVersion.current) setError(`Could not load workspace: ${displayError(loadError)}`);
+      if (version === loadVersion.current)
+        setError(`Could not load workspace: ${displayError(loadError)}`);
     } finally {
       if (version === loadVersion.current) setLoading(false);
     }
@@ -60,17 +67,25 @@ export function useWorkspaceSession() {
         const info = await window.randolph.harness(undefined, undefined, 'codex');
         if (!disposed) setDefaultHarness(info);
       } catch (harnessError) {
-        if (!disposed) setError(`Could not inspect the native harness: ${displayError(harnessError)}`);
+        if (!disposed)
+          setError(`Could not inspect the native harness: ${displayError(harnessError)}`);
       }
     };
     void loadHarness();
     const unsubscribe = window.randolph.onChanged(() => void reloadSnapshot());
-    const unsubscribeNavigation = window.randolph.onNavigate(destination => setScreen(destination));
+    const unsubscribeNavigation = window.randolph.onNavigate((destination) =>
+      setScreen(destination),
+    );
     const onShortcut = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === ',') { event.preventDefault(); setScreen('settings'); }
+      if ((event.metaKey || event.ctrlKey) && event.key === ',') {
+        event.preventDefault();
+        setScreen('settings');
+      }
     };
     window.addEventListener('keydown', onShortcut);
-    const onFocus = () => { void reloadSnapshot(); };
+    const onFocus = () => {
+      void reloadSnapshot();
+    };
     window.addEventListener('focus', onFocus);
     return () => {
       disposed = true;
@@ -86,21 +101,38 @@ export function useWorkspaceSession() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const selectedConversation = snapshot.conversations.find((item) => item.id === selectedConversationId);
+  const selectedConversation = snapshot.conversations.find(
+    (item) => item.id === selectedConversationId,
+  );
   const selectedProject = selectedConversation
     ? snapshot.projects.find((item) => item.id === selectedConversation.projectId)
     : undefined;
-  const selectedHarnessId: HarnessId = selectedConversation?.harness ?? (selectedConversation?.model || selectedConversation?.effort ? 'codex' : selectedProject?.harnessSettings?.defaults?.harness ?? 'codex');
+  const selectedHarnessId: HarnessId =
+    selectedConversation?.harness ??
+    (selectedConversation?.model || selectedConversation?.effort
+      ? 'codex'
+      : (selectedProject?.harnessSettings?.defaults?.harness ?? 'codex'));
   const harness = selectedProject ? projectHarness : defaultHarness;
 
   useEffect(() => {
     let disposed = false;
     setProjectHarness(undefined);
-    if (selectedProject) void (async () => {
-      try { const info = await window.randolph.harness(selectedProject.id, undefined, selectedHarnessId); if (!disposed) setProjectHarness(info); }
-      catch (cause) { if (!disposed) setError(`Could not inspect this project's CLI: ${displayError(cause)}`); }
-    })();
-    return () => { disposed = true; };
+    if (selectedProject)
+      void (async () => {
+        try {
+          const info = await window.randolph.harness(
+            selectedProject.id,
+            undefined,
+            selectedHarnessId,
+          );
+          if (!disposed) setProjectHarness(info);
+        } catch (cause) {
+          if (!disposed) setError(`Could not inspect this project's CLI: ${displayError(cause)}`);
+        }
+      })();
+    return () => {
+      disposed = true;
+    };
   }, [selectedProject?.id, selectedProject?.harnessSettings?.revision, selectedHarnessId]);
 
   const conversationEvents = useMemo(
@@ -119,28 +151,56 @@ export function useWorkspaceSession() {
   );
   const latestRun = conversationRuns[0];
   const execution = runExecution?.runId === latestRun?.id ? runExecution : undefined;
-  const integration = conversationRuns.find(run => run.integration)?.integration;
-  const runEvents = latestRun ? conversationEvents.filter((event) => event.runId === latestRun.id) : [];
+  const integration = conversationRuns.find((run) => run.integration)?.integration;
+  const runEvents = latestRun
+    ? conversationEvents.filter((event) => event.runId === latestRun.id)
+    : [];
   const messages = snapshot.messages
     .filter((message) => message.conversationId === selectedConversationId)
     .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
   const historyRuns = historyProjectId
-    ? snapshot.runs.filter(run => run.projectId === historyProjectId).toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
+    ? snapshot.runs
+        .filter((run) => run.projectId === historyProjectId)
+        .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
     : conversationRuns;
   const historyMessages = historyProjectId
-    ? snapshot.messages.filter(message => historyRuns.some(run => run.id === message.runId)).toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
+    ? snapshot.messages
+        .filter((message) => historyRuns.some((run) => run.id === message.runId))
+        .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
     : messages;
   const selectedDraft = selectedConversationId ? (drafts[selectedConversationId] ?? '') : '';
-  const hasOverride = Boolean(selectedConversation?.harness || selectedConversation?.model || selectedConversation?.effort);
+  const hasOverride = Boolean(
+    selectedConversation?.harness || selectedConversation?.model || selectedConversation?.effort,
+  );
   const selectedModelChoice = hasOverride
-    ? { harness: selectedConversation!.harness ?? 'codex' as HarnessId, model: selectedConversation!.model, effort: selectedConversation!.effort }
-    : selectedProject?.harnessSettings?.defaults ?? { harness: selectedHarnessId, model: harness?.models[0]?.id ?? '', effort: harness?.models[0]?.defaultEffort ?? '' };
+    ? {
+        harness: selectedConversation!.harness ?? ('codex' as HarnessId),
+        model: selectedConversation!.model,
+        effort: selectedConversation!.effort,
+      }
+    : (selectedProject?.harnessSettings?.defaults ?? {
+        harness: selectedHarnessId,
+        model: harness?.models[0]?.id ?? '',
+        effort: harness?.models[0]?.defaultEffort ?? '',
+      });
   const settingsError = selectedProject?.harnessSettings?.error;
-  const selectionAvailable = Boolean(harness?.models.some(item => item.id === selectedModelChoice.model && item.efforts.includes(selectedModelChoice.effort)));
-  const modeAvailable = Boolean(harness && (harness.executionModes === undefined ? (selectedConversation?.executionMode ?? 'read-only') === 'read-only' : harness.executionModes.includes(selectedConversation?.executionMode ?? 'read-only')));
-  const settingsProject = snapshot.projects.find(item => item.id === settingsProjectId);
-  const currentReview = snapshot.reviews.findLast(item => item.conversationId === selectedConversationId);
-  const selectedReview = snapshot.reviews.find(item => item.id === selectedReviewId);
+  const selectionAvailable = Boolean(
+    harness?.models.some(
+      (item) =>
+        item.id === selectedModelChoice.model && item.efforts.includes(selectedModelChoice.effort),
+    ),
+  );
+  const modeAvailable = Boolean(
+    harness &&
+    (harness.executionModes === undefined
+      ? (selectedConversation?.executionMode ?? 'read-only') === 'read-only'
+      : harness.executionModes.includes(selectedConversation?.executionMode ?? 'read-only')),
+  );
+  const settingsProject = snapshot.projects.find((item) => item.id === settingsProjectId);
+  const currentReview = snapshot.reviews.findLast(
+    (item) => item.conversationId === selectedConversationId,
+  );
+  const selectedReview = snapshot.reviews.find((item) => item.id === selectedReviewId);
   const checking = currentReview?.status === 'checking';
 
   useEffect(() => {
@@ -152,7 +212,8 @@ export function useWorkspaceSession() {
       try {
         await window.randolph.markRead(selectedConversation.id);
       } catch (markError) {
-        if (!disposed) setError(`Could not mark the conversation as read: ${displayError(markError)}`);
+        if (!disposed)
+          setError(`Could not mark the conversation as read: ${displayError(markError)}`);
       }
     };
     void markRead();

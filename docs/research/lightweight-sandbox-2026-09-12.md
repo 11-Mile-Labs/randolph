@@ -16,11 +16,11 @@ Do not substitute another reassuring label for measurements. In the same tagged 
 
 ## Measure three costs separately
 
-| Layer | What to measure | Why it matters |
-| --- | --- | --- |
-| Execution boundary | Kernel/init disk bytes; host physical footprint while idle; cold boot to usable control channel; warm start; stop latency | Establishes the overhead Randolph adds before useful work. |
-| Harness | Additional installed bytes and idle/active memory for the exact Codex, Claude or Grok binary; guest-owned subscription login | A tiny guest with an incompatible CLI is not a viable result. |
-| Project workload | Toolchain/dependency bytes, build/test peak memory, writable changes | Builds and browsers may require gigabytes even when the boundary itself is lightweight. |
+| Layer              | What to measure                                                                                                              | Why it matters                                                                          |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Execution boundary | Kernel/init disk bytes; host physical footprint while idle; cold boot to usable control channel; warm start; stop latency    | Establishes the overhead Randolph adds before useful work.                              |
+| Harness            | Additional installed bytes and idle/active memory for the exact Codex, Claude or Grok binary; guest-owned subscription login | A tiny guest with an incompatible CLI is not a viable result.                           |
+| Project workload   | Toolchain/dependency bytes, build/test peak memory, writable changes                                                         | Builds and browsers may require gigabytes even when the boundary itself is lightweight. |
 
 Measure one, two and four simultaneous active runs, with host memory pressure and aggregate physical footprint. Keep configured guest RAM, host physical memory, compressed download size, expanded image size, and writable disk allocation separate. Record cold/warm states and sample count; never publish a single best-case latency as the result.
 

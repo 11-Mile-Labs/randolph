@@ -1,5 +1,17 @@
 import { execFile } from 'node:child_process';
-import { cp, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm } from 'node:fs/promises';
+import {
+  cp,
+  copyFile,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  rename,
+  rm,
+} from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -12,12 +24,18 @@ const outputRoot = join(repositoryRoot, 'dist', 'macos');
 const finalApp = join(outputRoot, 'Randolph.app');
 const sourceIcon = join(repositoryRoot, 'randolph.png');
 
-if (process.platform !== 'darwin') throw new Error('The macOS application must be packaged on macOS.');
-if (process.arch !== 'arm64' && process.arch !== 'x64') throw new Error(`Unsupported macOS architecture: ${process.arch}`);
+if (process.platform !== 'darwin')
+  throw new Error('The macOS application must be packaged on macOS.');
+if (process.arch !== 'arm64' && process.arch !== 'x64')
+  throw new Error(`Unsupported macOS architecture: ${process.arch}`);
 
 async function run(command, args, options = {}) {
   try {
-    return await runFile(command, args, { cwd: repositoryRoot, maxBuffer: 16 * 1024 * 1024, ...options });
+    return await runFile(command, args, {
+      cwd: repositoryRoot,
+      maxBuffer: 16 * 1024 * 1024,
+      ...options,
+    });
   } catch (error) {
     const detail = error.stderr?.trim() || error.stdout?.trim() || error.message;
     throw new Error(`${command} failed: ${detail}`);
@@ -27,7 +45,8 @@ async function run(command, args, options = {}) {
 async function runPnpm(args, extra = {}) {
   const options = { env: { ...process.env, CI: 'true' } };
   Object.assign(options, extra);
-  if (process.env.npm_execpath) return await run(process.execPath, [process.env.npm_execpath, ...args], options);
+  if (process.env.npm_execpath)
+    return await run(process.execPath, [process.env.npm_execpath, ...args], options);
   return await run('pnpm', args, options);
 }
 
@@ -46,7 +65,17 @@ async function createMacIcon(iconset, destination) {
     ['icon_512x512@2x.png', 1024],
   ];
   for (const [name, pixels] of sizes) {
-    await run('/usr/bin/sips', ['-s', 'format', 'png', '-z', String(pixels), String(pixels), sourceIcon, '--out', join(iconset, name)]);
+    await run('/usr/bin/sips', [
+      '-s',
+      'format',
+      'png',
+      '-z',
+      String(pixels),
+      String(pixels),
+      sourceIcon,
+      '--out',
+      join(iconset, name),
+    ]);
   }
   await run('/usr/bin/iconutil', ['-c', 'icns', iconset, '-o', destination]);
 }
@@ -66,14 +95,21 @@ async function createDeployStage(temporary, stage) {
     await mkdir(workspace, { recursive: true });
     await copyFile(join(repositoryRoot, name), join(workspace, name));
   }
-  for (const packagePath of ['apps/desktop', 'packages/runtime', 'packages/harness-codex', 'packages/harness-grok']) {
+  for (const packagePath of [
+    'apps/desktop',
+    'packages/runtime',
+    'packages/harness-codex',
+    'packages/harness-grok',
+  ]) {
     const source = join(repositoryRoot, packagePath);
     const destination = join(workspace, packagePath);
     await mkdir(destination, { recursive: true });
     await copyFile(join(source, 'package.json'), join(destination, 'package.json'));
     await cp(join(source, 'dist'), join(destination, 'dist'), { recursive: true });
   }
-  await runPnpm(['--filter', '@randolph/desktop', 'deploy', '--prod', '--legacy', stage], { cwd: workspace });
+  await runPnpm(['--filter', '@randolph/desktop', 'deploy', '--prod', '--legacy', stage], {
+    cwd: workspace,
+  });
 }
 
 async function assertContainedSymlinks(root, directory = root) {
@@ -82,7 +118,10 @@ async function assertContainedSymlinks(root, directory = root) {
     if (entry.isSymbolicLink()) {
       const target = await readlink(path);
       const resolved = await realpath(isAbsolute(target) ? target : resolve(dirname(path), target));
-      if (resolved !== root && !resolved.startsWith(root + sep)) throw new Error(`Packaging dependency escapes its staging directory: ${relative(root, path)}`);
+      if (resolved !== root && !resolved.startsWith(root + sep))
+        throw new Error(
+          `Packaging dependency escapes its staging directory: ${relative(root, path)}`,
+        );
     } else if (entry.isDirectory()) {
       await assertContainedSymlinks(root, path);
     }
@@ -100,15 +139,19 @@ try {
 
   const desktopPackage = JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8'));
   const electronVersion = desktopPackage.devDependencies?.electron;
-  if (typeof electronVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(electronVersion)) throw new Error('Desktop package must pin an exact Electron version.');
-  for (const path of ['dist/main.js', 'dist/preload.cjs', 'dist/renderer/index.html', 'dist/renderer/randolph.png']) {
-    if (!(await lstat(join(desktopRoot, path))).isFile()) throw new Error(`Desktop build output is missing: ${path}`);
+  if (typeof electronVersion !== 'string' || !/^\d+\.\d+\.\d+$/.test(electronVersion))
+    throw new Error('Desktop package must pin an exact Electron version.');
+  for (const path of [
+    'dist/main.js',
+    'dist/preload.cjs',
+    'dist/renderer/index.html',
+    'dist/renderer/randolph.png',
+  ]) {
+    if (!(await lstat(join(desktopRoot, path))).isFile())
+      throw new Error(`Desktop build output is missing: ${path}`);
   }
 
-  await Promise.all([
-    createMacIcon(iconset, icon),
-    createDeployStage(temporary, stage),
-  ]);
+  await Promise.all([createMacIcon(iconset, icon), createDeployStage(temporary, stage)]);
   await removeWorkspaceSelfLink(stage);
   await assertContainedSymlinks(stage);
   // ASAR cannot preserve pnpm's nested dependency links reliably. Materialize
@@ -117,8 +160,14 @@ try {
   // Workspace packages are copied out of pnpm's virtual store by deploy.
   // Their external imports therefore need ordinary top-level resolution.
   const dependencies = new Set();
-  for (const packagePath of ['packages/runtime', 'packages/harness-codex', 'packages/harness-grok']) {
-    const manifest = JSON.parse(await readFile(join(repositoryRoot, packagePath, 'package.json'), 'utf8'));
+  for (const packagePath of [
+    'packages/runtime',
+    'packages/harness-codex',
+    'packages/harness-grok',
+  ]) {
+    const manifest = JSON.parse(
+      await readFile(join(repositoryRoot, packagePath, 'package.json'), 'utf8'),
+    );
     for (const [name, version] of Object.entries(manifest.dependencies ?? {})) {
       if (!String(version).startsWith('workspace:')) dependencies.add(name);
     }
@@ -149,11 +198,20 @@ try {
     appVersion: desktopPackage.version,
     buildVersion: desktopPackage.version,
   });
-  if (outputs.length !== 1) throw new Error(`Expected one packaged application, received ${outputs.length}.`);
+  if (outputs.length !== 1)
+    throw new Error(`Expected one packaged application, received ${outputs.length}.`);
   const packagedApp = join(outputs[0], 'Randolph.app');
-  if (!(await lstat(packagedApp)).isDirectory()) throw new Error('Electron Packager did not produce Randolph.app.');
+  if (!(await lstat(packagedApp)).isDirectory())
+    throw new Error('Electron Packager did not produce Randolph.app.');
 
-  await run('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', '--timestamp=none', packagedApp]);
+  await run('/usr/bin/codesign', [
+    '--force',
+    '--deep',
+    '--sign',
+    '-',
+    '--timestamp=none',
+    packagedApp,
+  ]);
   await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', packagedApp]);
   await rm(finalApp, { recursive: true, force: true });
   await rename(packagedApp, finalApp);

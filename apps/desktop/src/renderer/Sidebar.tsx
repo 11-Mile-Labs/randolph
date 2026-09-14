@@ -53,8 +53,22 @@ export default function Sidebar({
       </button>
 
       <nav className="app-navigation" aria-label="Application">
-        <button className={screen === 'workspace' ? 'selected' : ''} type="button" onClick={onOpenWorkspace} aria-current={screen === 'workspace' ? 'page' : undefined}>Workspace</button>
-        <button className={screen === 'settings' ? 'selected' : ''} type="button" onClick={onOpenSettings} aria-current={screen === 'settings' ? 'page' : undefined}>Settings</button>
+        <button
+          className={screen === 'workspace' ? 'selected' : ''}
+          type="button"
+          onClick={onOpenWorkspace}
+          aria-current={screen === 'workspace' ? 'page' : undefined}
+        >
+          Workspace
+        </button>
+        <button
+          className={screen === 'settings' ? 'selected' : ''}
+          type="button"
+          onClick={onOpenSettings}
+          aria-current={screen === 'settings' ? 'page' : undefined}
+        >
+          Settings
+        </button>
       </nav>
 
       <nav className="project-list" aria-label="Project conversations">
@@ -85,10 +99,18 @@ export default function Sidebar({
                 </div>
                 <div className="conversation-list">
                   <div className="project-links" aria-label={`${project.name} tools`}>
-                    <button type="button" onClick={() => onOpenProjectMemory(project.id)}>Memory</button>
-                    <button type="button" onClick={() => onOpenProjectHistory(project.id)}>Run history</button>
-                    <button type="button" onClick={() => onOpenProjectSetup(project.id)}>Project setup</button>
-                    <button type="button" onClick={() => onOpenProjectSettings(project.id)}>Project settings</button>
+                    <button type="button" onClick={() => onOpenProjectMemory(project.id)}>
+                      Memory
+                    </button>
+                    <button type="button" onClick={() => onOpenProjectHistory(project.id)}>
+                      Run history
+                    </button>
+                    <button type="button" onClick={() => onOpenProjectSetup(project.id)}>
+                      Project setup
+                    </button>
+                    <button type="button" onClick={() => onOpenProjectSettings(project.id)}>
+                      Project settings
+                    </button>
                   </div>
                   {projectConversations.length === 0 ? (
                     <button
@@ -108,7 +130,9 @@ export default function Sidebar({
                           type="button"
                           key={conversation.id}
                           onClick={() => onSelectConversation(conversation.id)}
-                          aria-current={selectedConversationId === conversation.id ? 'page' : undefined}
+                          aria-current={
+                            selectedConversationId === conversation.id ? 'page' : undefined
+                          }
                         >
                           <span>{conversation.title}</span>
                           {unread > 0 ? (

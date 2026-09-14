@@ -6,16 +6,16 @@ The probes ran on macOS with installed CLIs and existing subscription authentica
 
 ## Results
 
-| Capability | Codex CLI 0.149.0 | Claude CLI 2.1.268 | Grok CLI 1.0.25 |
-| --- | --- | --- | --- |
-| Native connection | App Server initialized | Structured CLI streaming worked | ACP initialized; session created |
-| Subscription path | ChatGPT account observed | First-party claude.ai subscription observed | CLI-owned cached browser token accepted |
-| Model and effort | Native catalog returned; lightweight model and low effort used | Lightweight alias and low effort accepted | Current model reported; low effort requested |
-| Visible work | Assistant deltas and command lifecycle events observed | Assistant deltas and Read-tool events observed | File created, but no useful progress stream or terminal prompt result before timeout |
-| Protected Git operation | Tight host-command sandbox blocked commit; two model-driven attempts committed without approval | Restricted Bash commit/push denied before execution | No permission callback observed; local remote unchanged |
-| Explicit stop | Host command termination stopped parent and child | Running-child cancellation unverified | Live-tool cancellation unverified; timeout cleanup of owned process groups succeeded |
-| Abrupt harness death | App Server SIGKILL left command descendants running | Unverified | Unverified |
-| Continuation | Fresh session recalled explicitly supplied context marker | Native resume recalled prior marker | Session load timed out |
+| Capability              | Codex CLI 0.149.0                                                                               | Claude CLI 2.1.268                                  | Grok CLI 1.0.25                                                                      |
+| ----------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Native connection       | App Server initialized                                                                          | Structured CLI streaming worked                     | ACP initialized; session created                                                     |
+| Subscription path       | ChatGPT account observed                                                                        | First-party claude.ai subscription observed         | CLI-owned cached browser token accepted                                              |
+| Model and effort        | Native catalog returned; lightweight model and low effort used                                  | Lightweight alias and low effort accepted           | Current model reported; low effort requested                                         |
+| Visible work            | Assistant deltas and command lifecycle events observed                                          | Assistant deltas and Read-tool events observed      | File created, but no useful progress stream or terminal prompt result before timeout |
+| Protected Git operation | Tight host-command sandbox blocked commit; two model-driven attempts committed without approval | Restricted Bash commit/push denied before execution | No permission callback observed; local remote unchanged                              |
+| Explicit stop           | Host command termination stopped parent and child                                               | Running-child cancellation unverified               | Live-tool cancellation unverified; timeout cleanup of owned process groups succeeded |
+| Abrupt harness death    | App Server SIGKILL left command descendants running                                             | Unverified                                          | Unverified                                                                           |
+| Continuation            | Fresh session recalled explicitly supplied context marker                                       | Native resume recalled prior marker                 | Session load timed out                                                               |
 
 ## Interpretation and limits
 

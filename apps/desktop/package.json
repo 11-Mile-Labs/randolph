@@ -1,8 +1,8 @@
 {
   "name": "@randolph/desktop",
   "version": "0.1.0",
-  "license": "MIT",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
@@ -16,11 +16,11 @@
   "dependencies": {
     "@ai-sdk/react": "4.0.100",
     "@randolph/harness-codex": "workspace:*",
+    "@randolph/harness-grok": "workspace:*",
     "@randolph/runtime": "workspace:*",
     "ai": "7.0.97",
     "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "@randolph/harness-grok": "workspace:*"
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

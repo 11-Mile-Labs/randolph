@@ -53,7 +53,18 @@ export default function Composer({
       />
       <div className="composer-toolbar">
         <div className="selector-group">
-          <label><span className="sr-only">Harness</span><select aria-label="Conversation harness" value={harnessId} disabled={settingsDisabled} onChange={event => onHarnessChange(event.target.value as HarnessId)}><option value="codex">Codex</option><option value="grok">Grok (compatibility pending)</option></select></label>
+          <label>
+            <span className="sr-only">Harness</span>
+            <select
+              aria-label="Conversation harness"
+              value={harnessId}
+              disabled={settingsDisabled}
+              onChange={(event) => onHarnessChange(event.target.value as HarnessId)}
+            >
+              <option value="codex">Codex</option>
+              <option value="grok">Grok (compatibility pending)</option>
+            </select>
+          </label>
           <label>
             <span className="sr-only">Model</span>
             <select
@@ -64,7 +75,11 @@ export default function Composer({
                 if (next) onModelChange(next);
               }}
             >
-              {!selectedModel ? <option value={model}>{model ? `${model} (unavailable)` : 'No models available'}</option> : null}
+              {!selectedModel ? (
+                <option value={model}>
+                  {model ? `${model} (unavailable)` : 'No models available'}
+                </option>
+              ) : null}
               {harness?.models.map((item) => (
                 <option value={item.id} key={item.id}>
                   {item.name}
@@ -79,7 +94,11 @@ export default function Composer({
               disabled={settingsDisabled || !selectedModel}
               onChange={(event) => onEffortChange(event.target.value)}
             >
-              {!selectedModel?.efforts.includes(effort) ? <option value={effort}>{effort ? `${effort} (unavailable)` : 'No effort available'}</option> : null}
+              {!selectedModel?.efforts.includes(effort) ? (
+                <option value={effort}>
+                  {effort ? `${effort} (unavailable)` : 'No effort available'}
+                </option>
+              ) : null}
               {selectedModel?.efforts.map((item) => (
                 <option value={item} key={item}>
                   {item} effort
@@ -92,7 +111,9 @@ export default function Composer({
           className="send-button"
           type="submit"
           aria-label="Send message"
-          disabled={disabled || sendBlocked || sending || value.trim().length === 0 || !model || !effort}
+          disabled={
+            disabled || sendBlocked || sending || value.trim().length === 0 || !model || !effort
+          }
         >
           {sending ? (
             <span className="button-spinner" aria-hidden="true" />

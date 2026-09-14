@@ -17,7 +17,8 @@ function shared(runtime: RuntimeBindings) {
     active: runtime.active,
     conversation: (id: string) => runtime.conversation(id),
     project: (id: string) => runtime.project(id),
-    planWorkspace: (...args: Parameters<RuntimeBindings['planWorkspace']>) => runtime.planWorkspace(...args),
+    planWorkspace: (...args: Parameters<RuntimeBindings['planWorkspace']>) =>
+      runtime.planWorkspace(...args),
     execute: (...args: Parameters<RuntimeBindings['execute']>) => runtime.execute(...args),
     finish: (...args: Parameters<RuntimeBindings['finish']>) => runtime.finish(...args),
     changed: () => runtime.changed(),
@@ -60,8 +61,8 @@ export function setupHost(runtime: RuntimeBindings): ProjectSetupHost {
     admission: runtime.admission,
     setupAdmission: runtime.setupAdmission,
     active: runtime.active,
-    project: id => runtime.project(id),
-    createConversation: projectId => runtime.createConversation(projectId),
+    project: (id) => runtime.project(id),
+    createConversation: (projectId) => runtime.createConversation(projectId),
     send: (input, setup) => runtime.prepareSend(input, setup),
     changed: () => runtime.changed(),
   };

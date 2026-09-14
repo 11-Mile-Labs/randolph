@@ -16,7 +16,9 @@ test('evidence ownership rejects existing directories and permits only a sealed 
     EvidenceOwner.open(dir, true);
     writeFileSync(join(dir, 'events.jsonl'), 'tampered\n');
     assert.throws(() => EvidenceOwner.open(dir, true), /ownership/);
-  } finally { rmSync(parent, { recursive: true }); }
+  } finally {
+    rmSync(parent, { recursive: true });
+  }
 });
 test('correction rejects symlink and regular-file replacement without touching their targets', () => {
   const parent = mkdtempSync(join(tmpdir(), 'randolph-owner-'));
@@ -33,5 +35,7 @@ test('correction rejects symlink and regular-file replacement without touching t
     symlinkSync(join(parent, 'original'), path);
     assert.throws(() => EvidenceOwner.open(dir, true), /regular/);
     assert.equal(readFileSync(join(parent, 'original'), 'utf8'), 'original');
-  } finally { rmSync(parent, { recursive: true }); }
+  } finally {
+    rmSync(parent, { recursive: true });
+  }
 });
