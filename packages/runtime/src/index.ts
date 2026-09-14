@@ -5,17 +5,19 @@ import { readProjectContext, writeProjectContext, parseProjectContext, type Proj
 import { AppSettings, type AppSettingsSnapshot, type SaveAppSettingsInput, type SaveGlobalMemoryInput } from './app-settings.js';
 import { randomUUID } from 'node:crypto';
 import { basename, resolve, join } from 'node:path';
-import { statSync, mkdirSync, realpathSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { Store } from './store.js';
 import { reconstructLegacyWorkspaceOwnership } from './workspace-recovery.js';
 import { WorkspaceOwnership } from './workspace-ownership.js';
 import type { WorkspaceLease, WorkspaceProvenance } from './workspace-leases.js';
 import { workspaceCleanupConfirmed } from './workspace-operation.js';
+import { RunWorkspace } from './run-workspace.js';
+import { recoverLinkedCheckpoint, type RecoveryHost } from './checkpoint-recovery.js';
 import { NativeAdmission } from './native-admission.js';
 import { canonicalProject, prepareWorkspace, plannedConversationWorkspace } from './workspace.js';
 import { assertHarnessRoute, readHarnessSettings, writeHarnessSettings } from './harness-settings.js';
 import { inspectGitWorkspace } from './git-review.js';
-import { ProjectMemory, type MemoryCommand, type MemorySnapshot, type PreparedMemory } from './memory.js';
+import { ProjectMemory, type MemoryCommand, type MemorySnapshot } from './memory.js';
 import type { LessonRef, LessonVersion } from './lessons.js';
 import { Integrations, type IntegrationState } from './integrations.js';
 import { Pushes, type ApprovePushInput } from './pushes.js';
@@ -35,92 +37,12 @@ import type { ApproveProjectSetupInput, InspectProjectInput, ProjectSetupSnapsho
 export type * from './contracts.js';
 export { Store } from './store.js';
 const activeStatuses = new Set(['starting', 'running', 'stopping', 'stop-unconfirmed']);
-const preDispatchRecoveryFailure = 'Linked checkpoint recovery failed before native dispatch. No harness was launched.';
 const now = (): string => new Date().toISOString();
-type RecoveryContext = {
-  projectContext?: ProjectContextSnapshot;
-  harness: HarnessId; executable?: string; executableVersion?: string;
-  model: string; effort: string; executionMode: NonNullable<Run['executionMode']>; settingsSource?: Run['settingsSource']; projectSettingsRevision?: string | null;
-  memory?: PreparedMemory; messages: Array<{ role: 'user' | 'assistant'; text: string }>; title: string;
-};
-
-function object(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('The retained checkpoint context is incomplete. Restore files to inspect it without execution.');
-  return value as Record<string, unknown>;
-}
-
-function plainMessages(values: unknown[]): Array<{ role: 'user' | 'assistant'; text: string }> {
-  return values.map(value => {
-    const message = object(value);
-    if ((message.role !== 'user' && message.role !== 'assistant') || typeof message.text !== 'string') throw new Error('The retained checkpoint contains invalid conversation context.');
-    return { role: message.role, text: message.text };
-  });
-}
-
-function recoveryContext(metadata: Record<string, unknown>, kind: 'restart' | 'rerun', sourceRunId: string): RecoveryContext {
-  const savedRun = object(metadata.run);
-  const savedConversation = object(metadata.conversation);
-  if (savedRun.id !== sourceRunId || typeof savedRun.model !== 'string' || typeof savedRun.effort !== 'string' || (savedRun.executionMode !== 'code' && savedRun.executionMode !== 'read-only')) throw new Error('The retained checkpoint does not contain a compatible run configuration. Restore files to inspect it without execution.');
-  let messages: RecoveryContext['messages'];
-  if (savedRun.recoveryMessages !== undefined) {
-    if (!Array.isArray(savedRun.recoveryMessages)) throw new Error('The retained checkpoint contains invalid recovery context.');
-    messages = plainMessages(savedRun.recoveryMessages);
-  } else {
-    if (!Array.isArray(metadata.messages)) throw new Error('The retained checkpoint does not contain restart context. Restore files to inspect it without execution.');
-    messages = metadata.messages.flatMap(value => {
-      const message = object(value);
-      if ((message.role !== 'user' && message.role !== 'assistant') || typeof message.text !== 'string' || typeof message.id !== 'string' || typeof message.runId !== 'string') throw new Error('The retained checkpoint contains invalid conversation context.');
-      const isSourceAnswer = kind === 'rerun' && message.role === 'assistant' && message.runId === sourceRunId && !message.id.startsWith(`${sourceRunId}:recovery:`);
-      return isSourceAnswer ? [] : [{ role: message.role as 'user' | 'assistant', text: message.text }];
-    });
-  }
-  if (!messages.length || typeof savedConversation.title !== 'string') throw new Error('The retained checkpoint does not contain restart context. Restore files to inspect it without execution.');
-  const harness = savedRun.harness === undefined ? 'codex' : savedRun.harness;
-  if (harness !== 'codex' && harness !== 'grok') throw new Error('The retained checkpoint contains an unknown harness route. Restore files to inspect it without execution.');
-  const settingsSource = savedRun.settingsSource;
-  if (settingsSource !== undefined && settingsSource !== 'project' && settingsSource !== 'conversation' && settingsSource !== 'native') throw new Error('The retained checkpoint contains invalid harness provenance.');
-  const projectSettingsRevision = savedRun.projectSettingsRevision;
-  if (projectSettingsRevision !== undefined && projectSettingsRevision !== null && typeof projectSettingsRevision !== 'string') throw new Error('The retained checkpoint contains invalid project settings provenance.');
-  let projectContext: ProjectContextSnapshot | undefined;
-  if (savedRun.projectContext !== undefined) {
-    const saved = savedRun.projectContext as Partial<ProjectContextSnapshot> | null;
-    if (!saved || typeof saved !== 'object' || saved.error !== undefined || (saved.revision !== null && (typeof saved.revision !== 'string' || !/^[a-f0-9]{64}$/u.test(saved.revision)))) throw new Error('The retained project context is invalid. Restore files without execution.');
-    if (saved.revision === null) {
-      const empty = object(saved.value);
-      if (Object.keys(empty).length !== 3 || empty.purpose !== '' || empty.instructions !== '' || !Array.isArray(empty.documents) || empty.documents.length !== 0) throw new Error('The retained empty project context is invalid.');
-      projectContext = { revision: null, value: { purpose: '', instructions: '', documents: [] } };
-    } else projectContext = { revision: saved.revision, value: parseProjectContext(saved.value) };
-  }
-  return {
-    projectContext,
-    harness,
-    executable: typeof savedRun.executable === 'string' ? savedRun.executable : undefined,
-    executableVersion: typeof savedRun.executableVersion === 'string' ? savedRun.executableVersion : undefined,
-    model: savedRun.model,
-    effort: savedRun.effort,
-    executionMode: savedRun.executionMode,
-    settingsSource,
-    projectSettingsRevision,
-    memory: savedRun.memory as PreparedMemory | undefined,
-    messages,
-    title: savedConversation.title,
-  };
-}
-
-function assertReconciledExternalActions(metadata: Record<string, unknown>): void {
-  if (!Array.isArray(metadata.externalActions)) throw new Error('The retained checkpoint lacks external-action reconciliation context. Restore files to inspect it without execution.');
-  for (const value of metadata.externalActions) {
-    const action = object(value);
-    const push = action.push && typeof action.push === 'object' ? action.push as Record<string, unknown> : undefined;
-    const result = push?.result && typeof push.result === 'object' ? push.result as Record<string, unknown> : undefined;
-    if (action.originOperation === 'active' || action.originOperation === 'cleanup-unconfirmed' || action.status === 'delivering' || action.status === 'interrupted' || action.status === 'stop-unconfirmed' || push?.status === 'pushing' || push?.status === 'uncertain' || result?.cleanupVerified === false) throw new Error('Reconcile the retained external action and process cleanup before linked execution.');
-  }
-}
 export class Runtime {
   readonly store: Store;
   private readonly nativeAdmission: NativeAdmission;
   private readonly workspaceOwnership: WorkspaceOwnership;
-  private readonly preparations = new Set<Promise<void>>();
+  private readonly workspaces: RunWorkspace;
   readonly adapter?: HarnessAdapter;
   private readonly adapters: Partial<Record<HarnessId, HarnessAdapter>>;
   private readonly preferences: AppSettings;
@@ -143,6 +65,7 @@ export class Runtime {
     this.adapter = this.adapters.codex;
     this.store = new Store(resolve(dataRoot));
     this.workspaceOwnership = new WorkspaceOwnership(this.store, this.executionOrigin);
+    this.workspaces = new RunWorkspace(this.store, this.workspaceOwnership, (run, status, error) => this.finish(run, status, error));
     this.workspaceOwnership.reconcileOnReopen();
     reconstructLegacyWorkspaceOwnership(this.store, this.workspaceOwnership);
     this.nativeAdmission = new NativeAdmission(this.store, this.executionOrigin ?? {}, undefined, () => this.changed());
@@ -205,65 +128,17 @@ export class Runtime {
     this.pushes = new Pushes(this.store, id => this.accepting && !this.admission.has(id) && !this.reviews.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed(), options.push, undefined, this.workspaceOwnership);
     this.reviews = new Reviews(this.store, (run, review, check) => this.nativeAdmission.adapter(run.harness ?? 'codex', this.adapterForRun(run), { owner: { kind: 'review', id: review.id }, runId: run.id, reviewId: review.id, checkId: check?.id, assertCurrent: check?.assertCurrent }), id => !this.admission.has(id) && !this.pushes.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (activeStatuses.has(run.status) || run.cleanupUnconfirmed)), () => this.changed(), true, this.workspaceOwnership);
   }
-  private preparation(): () => void {
-    let complete!: () => void;
-    const pending = new Promise<void>(resolve => { complete = resolve; });
-    this.preparations.add(pending);
-    return () => { this.preparations.delete(pending); complete(); };
-  }
+  private preparation(): () => void { return this.workspaces.preparation(); }
   private ownWorkspace(workspace: string, provenance: WorkspaceProvenance, held: Map<string, WorkspaceLease>, access: 'read' | 'write' = 'write'): WorkspaceLease {
-    const acquired = this.workspaceOwnership.acquire({ reservationId: randomUUID(), ownerId: provenance.id, workspace, provenance, phase: 'preparation', access });
-    if (acquired.status !== 'acquired') throw new Error('This workspace is owned by active work or unconfirmed cleanup. Reconcile the original operation before continuing.');
-    held.set(acquired.lease.reservationId, acquired.lease);
-    return acquired.lease;
+    return this.workspaces.own(workspace, provenance, held, access);
   }
   private planWorkspace(root: string, provenance: WorkspaceProvenance, plan: () => string, held: Map<string, WorkspaceLease>, readOnlyPlanning = false): { parent: WorkspaceLease; lease: WorkspaceLease; workspace: string } {
-    let parent = this.ownWorkspace(root, provenance, held, readOnlyPlanning ? 'read' : 'write');
-    let workspace = plan();
-    this.workspaceOwnership.assert(parent);
-    if (workspace === root) return { parent, lease: parent, workspace };
-    if (readOnlyPlanning) {
-      const promoted = this.store.transaction(() => {
-        this.workspaceOwnership.release({ ...parent, cleanupConfirmed: true, cleanupEvidence: { operation: 'workspace-planning', outcome: 'read-only-probe-returned' } });
-        const acquired = this.workspaceOwnership.acquire({ reservationId: randomUUID(), ownerId: provenance.id, workspace: root, provenance, phase: 'workspace-preparation', access: 'write' });
-        if (acquired.status !== 'acquired') throw new Error('Workspace preparation is waiting for other readers or writers to settle.');
-        return acquired.lease;
-      });
-      held.delete(parent.reservationId); held.set(promoted.reservationId, promoted); parent = promoted;
-      workspace = plan(); this.workspaceOwnership.assert(parent);
-      if (workspace === root) return { parent, lease: parent, workspace };
-    }
-    const base = join(root, '.worktrees');
-    mkdirSync(base, { recursive: true });
-    if (realpathSync(base) !== base) throw new Error('Project worktree directory was redirected.');
-    const lease = this.ownWorkspace(workspace, provenance, held);
-    return { parent, lease, workspace };
+    return this.workspaces.plan(root, provenance, plan, held, readOnlyPlanning);
   }
-  private releaseWorkspaces(held: Map<string, WorkspaceLease>, failure?: unknown): void {
-    const cleanupConfirmed = workspaceCleanupConfirmed(failure);
-    this.store.transaction(() => {
-      for (const lease of held.values()) this.workspaceOwnership.release({ reservationId: lease.reservationId, generation: lease.generation, cleanupConfirmed, cleanupEvidence: { operation: lease.provenance?.kind ?? 'runtime', phase: lease.phase ?? 'preparation', runtimeCleanupConfirmed: cleanupConfirmed, outcome: failure instanceof Error ? failure.message : failure ? 'failed' : 'returned' } });
-    });
-    held.clear();
-  }
-  private observeExecution(run: Run, work: Promise<void>): Promise<void> {
-    return (async () => {
-      try { await work; }
-      catch (error) {
-        run.cleanupUnconfirmed = true;
-        try { this.finish(run, 'stop-unconfirmed', `Workspace settlement failed: ${error instanceof Error ? error.message : 'unknown failure'}`); } catch { /* The retained ownership row continues to block admission if SQLite is unavailable. */ }
-      }
-    })();
-  }
+  private releaseWorkspaces(held: Map<string, WorkspaceLease>, failure?: unknown): void { this.workspaces.release(held, failure); }
+  private observeExecution(run: Run, work: Promise<void>): Promise<void> { return this.workspaces.observe(run, work); }
   private transferWorkspace(plan: { parent: WorkspaceLease; lease: WorkspaceLease }, held: Map<string, WorkspaceLease>): WorkspaceLease {
-    const lease = this.workspaceOwnership.bind(plan.lease);
-    this.workspaceOwnership.assert(plan.parent);
-    if (plan.parent.reservationId !== lease.reservationId) {
-      this.releaseWorkspaces(new Map([[plan.parent.reservationId, plan.parent]]));
-      held.delete(plan.parent.reservationId);
-    }
-    held.delete(lease.reservationId);
-    return lease;
+    return this.workspaces.transfer(plan, held);
   }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   runExecutionSnapshot(runId: string) { return runExecutionSnapshot(this.store, this.nativeAdmission, runId); }
@@ -551,126 +426,35 @@ export class Runtime {
     if (!conversation) throw new Error('Conversation does not exist.');
     return conversation;
   }
+  private recoveryHost(): RecoveryHost {
+    return {
+      isAccepting: () => this.accepting,
+      store: this.store,
+      checkpoints: this.checkpoints,
+      memory: this.memory,
+      reviews: this.reviews,
+      pushes: this.pushes,
+      integrations: this.integrations,
+      executionOrigin: this.executionOrigin,
+      admission: this.admission,
+      active: this.active,
+      conversation: id => this.conversation(id),
+      project: id => this.project(id),
+      inspectExecutable: (harness, executable) => this.inspectExecutable(harness, executable),
+      validateSelection: (selection, info) => this.validateSelection(selection, info),
+      validateExecutionMode: (mode, info) => this.validateExecutionMode(mode, info),
+      preparation: () => this.preparation(),
+      planWorkspace: (root, provenance, plan, held, readOnlyPlanning) => this.planWorkspace(root, provenance, plan, held, readOnlyPlanning),
+      transferWorkspace: (plan, held) => this.transferWorkspace(plan, held),
+      releaseWorkspaces: (held, failure) => this.releaseWorkspaces(held, failure),
+      observeExecution: (run, work) => this.observeExecution(run, work),
+      execute: (run, controller, lease) => this.execute(run, controller, lease),
+      finish: (run, status, error) => this.finish(run, status, error),
+      changed: () => this.changed(),
+    };
+  }
   private async recoverFromCheckpoint(kind: 'restart' | 'rerun', input: RestartCheckpointInput | RerunCheckpointInput): Promise<LinkedRunResult> {
-    if (!this.accepting) throw new Error('Application is closing.');
-    const selected = this.checkpoints.selected(input.runId, input.checkpointDigest);
-    const sourceRun = selected.run;
-    const sourceConversation = this.conversation(sourceRun.conversationId);
-    if (kind === 'restart') {
-      if (sourceRun.status !== 'interrupted') throw new Error('Only stopped or interrupted work can be restarted. Use rerun for a completed result.');
-      const sourceRuns = this.store.runs().filter(run => run.conversationId === sourceConversation.id);
-      const sourceIndex = sourceRuns.findIndex(run => run.id === sourceRun.id);
-      const laterRunBlocksRetry = sourceRuns.slice(sourceIndex + 1).some(run => run.recoveryKind !== 'restart' || run.sourceRunId !== sourceRun.id || run.sourceCheckpointDigest !== selected.checkpoint.digest || run.status !== 'failed' || run.error !== preDispatchRecoveryFailure);
-      if (laterRunBlocksRetry) throw new Error('Restart applies only to the latest run in this conversation; a newer run already exists.');
-      if (sourceRun.checkpoints?.at(-1)?.digest !== selected.checkpoint.digest) throw new Error('Restart requires the last safe completed checkpoint; partial work is never recovered silently.');
-    } else if (!['completed', 'failed', 'interrupted'].includes(sourceRun.status)) {
-      throw new Error('Rerun requires a retained checkpoint from completed, failed, or interrupted work.');
-    }
-    if (this.admission.has(sourceConversation.id) || this.reviews.hasActiveWork(sourceConversation.id) || this.pushes.hasActiveWork(sourceConversation.id) || this.store.runs().some(run => run.conversationId === sourceConversation.id && activeStatuses.has(run.status))) throw new Error('Wait for active source-conversation work to finish before linked execution.');
-    if (this.store.runs().some(run => run.conversationId === sourceConversation.id && run.cleanupUnconfirmed) || this.store.reviews().some(review => review.conversationId === sourceConversation.id && (review.originOperation === 'cleanup-unconfirmed' || review.push?.result?.cleanupVerified === false))) throw new Error('Reconcile process cleanup before linked execution.');
-    if (this.store.reviews().some(review => review.conversationId === sourceConversation.id && review.deliveryPlan && review.status !== 'delivered' && review.status !== 'stale')) throw new Error('Reconcile the prior delivery outcome before linked execution; approved effects are never replayed.');
-    if (this.integrations.blocksNewWork(sourceConversation.id)) throw new Error('Finish interrupted parent integration before linked execution.');
-    assertReconciledExternalActions(selected.manifest.metadata);
-    const context = recoveryContext(selected.manifest.metadata, kind, sourceRun.id);
-    this.admission.add(sourceConversation.id);
-    let targetConversationId: string | undefined;
-    let run: Run | undefined;
-    const prepared = this.preparation();
-    const held = new Map<string, WorkspaceLease>();
-    let preparationFailure: unknown;
-    try {
-      const project = this.project(sourceRun.projectId);
-      const settings = readHarnessSettings(project.root);
-      if (settings.error) throw new Error(settings.error);
-      const info = await this.inspectExecutable(context.harness, context.executable);
-      const freshSettings = readHarnessSettings(project.root);
-      if (freshSettings.error) throw new Error(freshSettings.error);
-      if (freshSettings.revision !== settings.revision) throw new Error('Project harness settings changed during discovery. Try again.');
-      assertHarnessRoute(settings, context.harness, info.executable);
-      if (context.executableVersion && info.version !== context.executableVersion) throw new Error('The checkpoint CLI version changed. Restore files to inspect it; this checkpoint cannot silently switch executables.');
-      if (!this.accepting) throw new Error('Application is closing.');
-      this.validateSelection({ harness: context.harness, model: context.model, effort: context.effort }, info);
-      this.validateExecutionMode(context.executionMode, info);
-      const createdAt = now();
-      const runId = randomUUID();
-      const targetConversation: Conversation = kind === 'restart'
-        ? { ...this.conversation(sourceConversation.id), harness: context.harness, model: context.model, effort: context.effort, executionMode: context.executionMode, updatedAt: createdAt }
-        : { id: randomUUID(), projectId: project.id, sourceConversationId: sourceConversation.id, title: `Rerun: ${context.title}`, harness: context.harness, model: context.model, effort: context.effort, executionMode: context.executionMode, createdAt, updatedAt: createdAt, lastReadSequence: 0 };
-      targetConversationId = targetConversation.id;
-      if (targetConversation.id !== sourceConversation.id) this.admission.add(targetConversation.id);
-      const planned = this.planWorkspace(project.root, { kind: 'run', id: runId, projectId: project.id, conversationId: targetConversation.id }, () => join(project.root, '.worktrees', `randolph-${runId}`), held);
-      const workspace = planned.workspace;
-      run = {
-        harnessAuthorizationRevision: settings.revision,
-        enabledHarnessRoutes: settings.enabledRoutes?.map(route => ({ ...route })) ?? (info.executable ? [{ harness: context.harness, executable: info.executable }] : []),
-        executionOrigin: this.executionOrigin,
-        projectContext: context.projectContext,
-        harness: context.harness,
-        executable: info.executable,
-        executableVersion: info.version,
-        id: runId,
-        projectId: project.id,
-        conversationId: targetConversation.id,
-        sourceRunId: sourceRun.id,
-        sourceCheckpointDigest: selected.checkpoint.digest,
-        recoveryKind: kind,
-        recoveryMessages: context.messages,
-        status: 'starting',
-        model: context.model,
-        effort: context.effort,
-        executionMode: context.executionMode,
-        settingsSource: context.settingsSource,
-        projectSettingsRevision: context.projectSettingsRevision,
-        memory: context.memory,
-        workspace,
-        createdAt,
-        updatedAt: createdAt,
-        lastActivityAt: createdAt,
-      };
-      run.logsPath = join(this.store.runDirectory(run), 'logs');
-      this.store.transaction(() => {
-        this.store.putConversation(targetConversation);
-        this.store.putRun(run!);
-        if (kind === 'rerun') for (const [index, message] of context.messages.entries()) this.store.putMessage({ ...message, id: `${runId}:recovery:${index}`, runId, conversationId: targetConversation.id, createdAt });
-        this.store.append(run!, kind === 'restart' ? 'run.restart-requested' : 'run.rerun-requested', kind === 'restart' ? 'Explicit restart requested from the last safe checkpoint' : 'Explicit rerun requested in a linked conversation', { sourceRunId: sourceRun.id, sourceConversationId: sourceConversation.id, checkpointDigest: selected.checkpoint.digest, harness: context.harness, executable: info.executable, executableVersion: info.version, workspace });
-      });
-      try {
-        if (context.memory) this.memory.retain(project.id, run.id, context.memory);
-        this.store.exportRun(run);
-        const restored = this.checkpoints.restoreWorktree(sourceRun.id, selected.checkpoint.digest, project.root, run.id);
-        if (restored.workspace !== run.workspace) throw new Error('Linked checkpoint restored to an unexpected workspace.');
-        run.workspaceIdentity = workspaceIdentity(run.workspace);
-        if (kind === 'restart') this.reviews.invalidate(sourceConversation.id);
-        this.checkpoints.capture(run, 'before-turn');
-      } catch (cause) {
-        preparationFailure = cause;
-        this.checkpoints.failed(run, cause);
-        run.cleanupUnconfirmed = !workspaceCleanupConfirmed(cause);
-        this.finish(run, 'failed', preDispatchRecoveryFailure);
-        throw cause;
-      }
-      const controller = new AbortController();
-      const state = { controller, done: Promise.resolve(), run };
-      const lease = this.transferWorkspace(planned, held);
-      this.active.set(run.id, state);
-      state.done = this.observeExecution(run, this.execute(run, controller, lease));
-      this.changed();
-      return { conversation: targetConversation, run: { ...run } };
-    } catch (error) {
-      if (workspaceCleanupConfirmed(preparationFailure)) preparationFailure = error;
-      if (run && !this.active.has(run.id) && this.store.runs().some(value => value.id === run!.id)) {
-        run.cleanupUnconfirmed ||= !workspaceCleanupConfirmed(preparationFailure);
-        if (run.status === 'starting') this.finish(run, 'failed', preDispatchRecoveryFailure);
-        else this.store.putRun(run);
-      }
-      throw error;
-    } finally {
-      try { this.releaseWorkspaces(held, preparationFailure); } finally {
-        this.admission.delete(sourceConversation.id);
-        if (targetConversationId) this.admission.delete(targetConversationId);
-        prepared();
-      }
-    }
+    return recoverLinkedCheckpoint(this.recoveryHost(), kind, input);
   }
   async send(input: SendInput): Promise<Run> { return this.#send(input); }
   async #send(input: SendInput, setup?: { executable?: string; expectedContextRevision: string | null }): Promise<Run> {
@@ -896,7 +680,7 @@ export class Runtime {
   async close(): Promise<void> {
     this.accepting = false;
     await this.nativeAdmission.close();
-    await Promise.all(this.preparations);
+    await this.workspaces.wait();
     await this.pushes.close();
     await this.reviews.close();
     await Promise.all([...this.active.keys()].map(id => this.stop(id)));
