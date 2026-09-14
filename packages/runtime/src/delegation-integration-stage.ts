@@ -174,9 +174,7 @@ export class DelegationIntegrationStage {
       throw new Error('Integration output checkpoint metadata does not bind its producer attempt.');
     return structuredClone(output.source);
   }
-  private inputs(
-    authority: Authority,
-  ): Array<{
+  private inputs(authority: Authority): Array<{
     assignmentId: string;
     source: DelegationSourceSnapshot;
     output: DelegationSourceSnapshot;

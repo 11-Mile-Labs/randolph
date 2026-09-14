@@ -305,19 +305,17 @@ test('reopen honors queued operation proof before legacy session reconciliation'
     status: 'starting',
     harness: 'codex',
   });
-  store.db
-    .prepare('INSERT INTO delegation_sessions(id, run_id, document) VALUES (?, ?, ?)')
-    .run(
-      'session',
-      'run',
-      JSON.stringify({
-        id: 'session',
-        runId: 'run',
-        role: 'main',
-        state: 'dispatch-intent',
-        harness: 'codex',
-      }),
-    );
+  store.db.prepare('INSERT INTO delegation_sessions(id, run_id, document) VALUES (?, ?, ?)').run(
+    'session',
+    'run',
+    JSON.stringify({
+      id: 'session',
+      runId: 'run',
+      role: 'main',
+      state: 'dispatch-intent',
+      harness: 'codex',
+    }),
+  );
   service.records.create({
     id: 'waiting',
     owner: { kind: 'run', id: 'run' },
@@ -351,20 +349,18 @@ function retainedRun(store, session) {
     harness: 'codex',
   });
   if (session)
-    store.db
-      .prepare('INSERT INTO delegation_sessions(id, run_id, document) VALUES (?, ?, ?)')
-      .run(
-        'session',
-        'run',
-        JSON.stringify({
-          id: 'session',
-          runId: 'run',
-          role: 'main',
-          state: 'running',
-          harness: 'codex',
-          native: { threadId: 'thread', turnId: 'turn' },
-        }),
-      );
+    store.db.prepare('INSERT INTO delegation_sessions(id, run_id, document) VALUES (?, ?, ?)').run(
+      'session',
+      'run',
+      JSON.stringify({
+        id: 'session',
+        runId: 'run',
+        role: 'main',
+        state: 'running',
+        harness: 'codex',
+        native: { threadId: 'thread', turnId: 'turn' },
+      }),
+    );
 }
 const retainedIntent = {
   owner: { kind: 'run', id: 'run' },

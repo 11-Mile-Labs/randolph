@@ -160,31 +160,29 @@ function fixture(t) {
     attemptId: workerAttempt.id,
     source: workerAttempt.source,
   });
-  store.db
-    .prepare('UPDATE delegation_tasks SET document=? WHERE id=?')
-    .run(
-      JSON.stringify({
-        ...worker,
-        state: 'completed',
-        attempts: [
-          {
-            ...workerAttempt,
-            result: {
-              summary: 'done',
-              artifacts: [],
-              success: true,
-              source: {
-                checkpointDirectory: output.directory,
-                checkpointDigest: output.digest,
-                treeOid: output.snapshotTreeOid,
-                producerTaskId: worker.id,
-              },
+  store.db.prepare('UPDATE delegation_tasks SET document=? WHERE id=?').run(
+    JSON.stringify({
+      ...worker,
+      state: 'completed',
+      attempts: [
+        {
+          ...workerAttempt,
+          result: {
+            summary: 'done',
+            artifacts: [],
+            success: true,
+            source: {
+              checkpointDirectory: output.directory,
+              checkpointDigest: output.digest,
+              treeOid: output.snapshotTreeOid,
+              producerTaskId: worker.id,
             },
           },
-        ],
-      }),
-      worker.id,
-    );
+        },
+      ],
+    }),
+    worker.id,
+  );
   const integration = records.tasks(run.id).find((item) => item.assignmentId === 'integrate'),
     attempt = {
       id: randomUUID(),

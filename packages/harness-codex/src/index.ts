@@ -598,9 +598,7 @@ export class CodexAdapter implements HarnessAdapter {
       };
     return info;
   }
-  async runCommand(
-    input: AdapterCommand,
-  ): Promise<{
+  async runCommand(input: AdapterCommand): Promise<{
     exitCode: number | null;
     output: string;
     truncated: boolean;
