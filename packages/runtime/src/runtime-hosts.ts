@@ -3,7 +3,7 @@ import type { DispatchHost } from './run-dispatch.js';
 import type { ProjectSetupHost } from './project-setup-runtime.js';
 import type { RuntimeBindings } from './runtime-bindings.js';
 
-export function recoveryHost(runtime: RuntimeBindings): RecoveryHost {
+function shared(runtime: RuntimeBindings) {
   return {
     isAccepting: () => runtime.accepting,
     store: runtime.store,
@@ -15,43 +15,36 @@ export function recoveryHost(runtime: RuntimeBindings): RecoveryHost {
     executionOrigin: runtime.executionOrigin,
     admission: runtime.admission,
     active: runtime.active,
-    conversation: id => runtime.conversation(id),
-    project: id => runtime.project(id),
-    inspectExecutable: (harness, executable) => runtime.inspectExecutable(harness, executable),
-    validateSelection: (selection, info) => runtime.validateSelection(selection, info),
-    validateExecutionMode: (mode, info) => runtime.validateExecutionMode(mode, info),
-    preparation: () => runtime.workspaces.preparation(),
-    planWorkspace: (root, provenance, plan, held, readOnlyPlanning) => runtime.planWorkspace(root, provenance, plan, held, readOnlyPlanning),
-    transferWorkspace: (plan, held) => runtime.workspaces.transfer(plan, held),
-    releaseWorkspaces: (held, failure) => runtime.workspaces.release(held, failure),
-    observeExecution: (run, work) => runtime.workspaces.observe(run, work),
-    execute: (run, controller, lease) => runtime.execute(run, controller, lease),
-    finish: (run, status, error) => runtime.finish(run, status, error),
+    conversation: (id: string) => runtime.conversation(id),
+    project: (id: string) => runtime.project(id),
+    planWorkspace: (...args: Parameters<RuntimeBindings['planWorkspace']>) => runtime.planWorkspace(...args),
+    execute: (...args: Parameters<RuntimeBindings['execute']>) => runtime.execute(...args),
+    finish: (...args: Parameters<RuntimeBindings['finish']>) => runtime.finish(...args),
     changed: () => runtime.changed(),
   };
 }
 
-export function dispatchHost(runtime: RuntimeBindings): DispatchHost {
+export function recoveryHost(runtime: RuntimeBindings): RecoveryHost {
+  const core = shared(runtime);
   return {
-    isAccepting: () => runtime.accepting,
-    store: runtime.store,
+    ...core,
+    inspectExecutable: (harness, executable) => runtime.inspectExecutable(harness, executable),
+    validateSelection: (selection, info) => runtime.validateSelection(selection, info),
+    validateExecutionMode: (mode, info) => runtime.validateExecutionMode(mode, info),
+    preparation: () => runtime.workspaces.preparation(),
+    transferWorkspace: (plan, held) => runtime.workspaces.transfer(plan, held),
+    releaseWorkspaces: (held, failure) => runtime.workspaces.release(held, failure),
+    observeExecution: (run, work) => runtime.workspaces.observe(run, work),
+  };
+}
+
+export function dispatchHost(runtime: RuntimeBindings): DispatchHost {
+  const core = shared(runtime);
+  return {
+    ...core,
     workspaces: runtime.workspaces,
     ownership: runtime.workspaceOwnership,
     harness: runtime.routes,
-    memory: runtime.memory,
-    checkpoints: runtime.checkpoints,
-    reviews: runtime.reviews,
-    pushes: runtime.pushes,
-    integrations: runtime.integrations,
-    executionOrigin: runtime.executionOrigin,
-    admission: runtime.admission,
-    active: runtime.active,
-    conversation: id => runtime.conversation(id),
-    project: id => runtime.project(id),
-    planWorkspace: (root, provenance, plan, held, readOnlyPlanning) => runtime.planWorkspace(root, provenance, plan, held, readOnlyPlanning),
-    execute: (run, controller, lease) => runtime.execute(run, controller, lease),
-    finish: (run, status, error) => runtime.finish(run, status, error),
-    changed: () => runtime.changed(),
   };
 }
 

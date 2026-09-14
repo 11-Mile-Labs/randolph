@@ -13,11 +13,9 @@ import type { Pushes } from './pushes.js';
 import type { Integrations } from './integrations.js';
 import type { ExecutionOrigin } from './execution-origin.js';
 import type { Conversation, HarnessId, HarnessInfo, HarnessSelection, LinkedRunResult, Project, RerunCheckpointInput, RestartCheckpointInput, Run } from './contracts.js';
+import { assertOpen, conversationHasActiveRun, now } from './runtime-status.js';
 
 export const PRE_DISPATCH_RECOVERY_FAILURE = 'Linked checkpoint recovery failed before native dispatch. No harness was launched.';
-
-const activeStatuses = new Set(['starting', 'running', 'stopping', 'stop-unconfirmed']);
-const now = (): string => new Date().toISOString();
 
 type RecoveryContext = {
   projectContext?: ProjectContextSnapshot;
@@ -126,7 +124,7 @@ export function assertReconciledExternalActions(metadata: Record<string, unknown
 }
 
 export async function recoverLinkedCheckpoint(host: RecoveryHost, kind: 'restart' | 'rerun', input: RestartCheckpointInput | RerunCheckpointInput): Promise<LinkedRunResult> {
-  if (!host.isAccepting()) throw new Error('Application is closing.');
+  assertOpen(host.isAccepting());
   const selected = host.checkpoints.selected(input.runId, input.checkpointDigest);
   const sourceRun = selected.run;
   const sourceConversation = host.conversation(sourceRun.conversationId);
@@ -140,7 +138,7 @@ export async function recoverLinkedCheckpoint(host: RecoveryHost, kind: 'restart
   } else if (!['completed', 'failed', 'interrupted'].includes(sourceRun.status)) {
     throw new Error('Rerun requires a retained checkpoint from completed, failed, or interrupted work.');
   }
-  if (host.admission.has(sourceConversation.id) || host.reviews.hasActiveWork(sourceConversation.id) || host.pushes.hasActiveWork(sourceConversation.id) || host.store.runs().some(run => run.conversationId === sourceConversation.id && activeStatuses.has(run.status))) throw new Error('Wait for active source-conversation work to finish before linked execution.');
+  if (host.admission.has(sourceConversation.id) || host.reviews.hasActiveWork(sourceConversation.id) || host.pushes.hasActiveWork(sourceConversation.id) || conversationHasActiveRun(host.store.runs(), sourceConversation.id)) throw new Error('Wait for active source-conversation work to finish before linked execution.');
   if (host.store.runs().some(run => run.conversationId === sourceConversation.id && run.cleanupUnconfirmed) || host.store.reviews().some(review => review.conversationId === sourceConversation.id && (review.originOperation === 'cleanup-unconfirmed' || review.push?.result?.cleanupVerified === false))) throw new Error('Reconcile process cleanup before linked execution.');
   if (host.store.reviews().some(review => review.conversationId === sourceConversation.id && review.deliveryPlan && review.status !== 'delivered' && review.status !== 'stale')) throw new Error('Reconcile the prior delivery outcome before linked execution; approved effects are never replayed.');
   if (host.integrations.blocksNewWork(sourceConversation.id)) throw new Error('Finish interrupted parent integration before linked execution.');
@@ -162,7 +160,7 @@ export async function recoverLinkedCheckpoint(host: RecoveryHost, kind: 'restart
     if (freshSettings.revision !== settings.revision) throw new Error('Project harness settings changed during discovery. Try again.');
     assertHarnessRoute(settings, context.harness, info.executable);
     if (context.executableVersion && info.version !== context.executableVersion) throw new Error('The checkpoint CLI version changed. Restore files to inspect it; this checkpoint cannot silently switch executables.');
-    if (!host.isAccepting()) throw new Error('Application is closing.');
+    assertOpen(host.isAccepting());
     host.validateSelection({ harness: context.harness, model: context.model, effort: context.effort }, info);
     host.validateExecutionMode(context.executionMode, info);
     const createdAt = now();

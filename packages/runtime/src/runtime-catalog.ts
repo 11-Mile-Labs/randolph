@@ -5,7 +5,7 @@ import { canonicalProject } from './workspace.js';
 import { readHarnessSettings } from './harness-settings.js';
 import type { CheckpointInput, CheckpointRestore, ChatEventsInput, ChatEventsResult, Conversation, Project, WorkspaceSnapshot } from './contracts.js';
 import type { WorkspaceLease } from './workspace-leases.js';
-import { now } from './runtime-status.js';
+import { assertOpen, now } from './runtime-status.js';
 import type { RuntimeBindings } from './runtime-bindings.js';
 
 export function workspaceSnapshot(host: Pick<RuntimeBindings, 'store'>): WorkspaceSnapshot {
@@ -19,7 +19,7 @@ export function chatEvents(host: Pick<RuntimeBindings, 'store'>, input: ChatEven
 }
 
 export function restoreCheckpoint(host: Pick<RuntimeBindings, 'accepting' | 'workspaces' | 'workspaceOwnership' | 'checkpoints'>, input: CheckpointInput, destination: string): CheckpointRestore {
-  if (!host.accepting) throw new Error('Application is closing.');
+  assertOpen(host.accepting);
   const held = new Map<string, WorkspaceLease>();
   let failure: unknown;
   try {
@@ -33,7 +33,7 @@ export function restoreCheckpoint(host: Pick<RuntimeBindings, 'accepting' | 'wor
 }
 
 export function addProject(host: Pick<RuntimeBindings, 'accepting' | 'store' | 'changed'>, path: string): Project {
-  if (!host.accepting) throw new Error('Application is closing.');
+  assertOpen(host.accepting);
   if (!statSync(path).isDirectory()) throw new Error('Choose a project folder.');
   const root = canonicalProject(path);
   const existing = host.store.projects().find(project => project.root === root);
@@ -43,7 +43,7 @@ export function addProject(host: Pick<RuntimeBindings, 'accepting' | 'store' | '
 }
 
 export function createConversation(host: Pick<RuntimeBindings, 'accepting' | 'store' | 'changed'>, projectId: string): Conversation {
-  if (!host.accepting) throw new Error('Application is closing.');
+  assertOpen(host.accepting);
   if (!host.store.projects().some(project => project.id === projectId)) throw new Error('Project does not exist.');
   const conversation: Conversation = { id: randomUUID(), projectId, title: 'New conversation', model: '', effort: '', createdAt: now(), updatedAt: now(), lastReadSequence: 0 };
   host.store.putConversation(conversation); host.changed(); return conversation;

@@ -4,10 +4,10 @@ import type { WorkspaceIdentity } from './contracts.js';
 import type { DelegationAssignment } from './delegation-plan.js';
 import { DelegationRecords, type DelegationAttempt, type DelegationAttemptResult, type DelegationAttemptWorkspace, type DelegationSession, type DelegationSourceSnapshot, type DelegationTask } from './delegation-records.js';
 import { Store } from './store.js';
+import { now } from './runtime-status.js';
 
 type SessionIntent = Omit<DelegationSession, 'runId' | 'taskId' | 'state' | 'createdAt' | 'updatedAt' | 'native' | 'cleanupConfirmed' | 'cleanupEvidence' | 'error'>;
 type FinishStatus = 'completed' | 'failed' | 'interrupted';
-const now = (): string => new Date().toISOString();
 const terminal = (task: DelegationTask): boolean => ['completed', 'failed', 'cancelled', 'cleanup-unconfirmed'].includes(task.state) || (task.state === 'blocked' && task.blockedReason !== undefined);
 const text = (value: unknown, label: string, maximum = 500): string => {
   if (typeof value !== 'string' || !value || value.length > maximum || value.trim() !== value || Array.from(value).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) throw new Error(`${label} must be bounded nonempty text.`);

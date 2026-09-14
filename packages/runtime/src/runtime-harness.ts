@@ -5,7 +5,7 @@ import type { RunWorkspace } from './run-workspace.js';
 import type { WorkspaceOwnership } from './workspace-ownership.js';
 import type { WorkspaceLease } from './workspace-leases.js';
 import { assertHarnessRoute, readHarnessSettings, writeHarnessSettings } from './harness-settings.js';
-import { now } from './runtime-status.js';
+import { assertOpen, now } from './runtime-status.js';
 import type { Conversation, ConversationModeInput, ConversationSelectionInput, HarnessAdapter, HarnessId, HarnessInfo, HarnessInstallation, HarnessSelection, Project, ProjectHarnessSettings, Run, SaveProjectDefaultsInput } from './contracts.js';
 
 export class RuntimeHarness {
@@ -70,7 +70,7 @@ export class RuntimeHarness {
   }
 
   async setExecutionMode(input: ConversationModeInput): Promise<Conversation> {
-    if (!this.isAccepting()) throw new Error('Application is closing.');
+    assertOpen(this.isAccepting());
     if (input.executionMode !== 'read-only' && input.executionMode !== 'code') throw new Error('Invalid execution mode.');
     if (this.conversation(input.conversationId).kind === 'project-setup' && input.executionMode !== 'read-only') throw new Error('Project setup is read-only.');
     if (input.executionMode === 'code') {
@@ -81,7 +81,7 @@ export class RuntimeHarness {
       const selection = this.selectionFor(conversation) ?? settings.defaults;
       const harness = selection?.harness ?? 'codex';
       const info = await this.inspectExecutable(harness, settings.defaults?.harness === harness ? settings.defaults.executable : undefined);
-      if (!this.isAccepting()) throw new Error('Application is closing.');
+      assertOpen(this.isAccepting());
       assertHarnessRoute(settings, harness, info.executable);
       if (!info.authenticated || !info.executionModes?.includes('code')) throw new Error('Code mode is not verified for this installed harness.');
     }
@@ -91,10 +91,10 @@ export class RuntimeHarness {
   }
 
   async saveProjectDefaults(input: SaveProjectDefaultsInput): Promise<ProjectHarnessSettings> {
-    if (!this.isAccepting()) throw new Error('Application is closing.');
+    assertOpen(this.isAccepting());
     const project = this.project(input.projectId);
     const info = await this.inspectExecutable(input.defaults.harness, input.defaults.executable);
-    if (!this.isAccepting()) throw new Error('Application is closing.');
+    assertOpen(this.isAccepting());
     this.validateSelection(input.defaults, info);
     const held = new Map<string, WorkspaceLease>();
     let failure: unknown;
@@ -109,7 +109,7 @@ export class RuntimeHarness {
   }
 
   async setConversationSelection(input: ConversationSelectionInput): Promise<Conversation> {
-    if (!this.isAccepting()) throw new Error('Application is closing.');
+    assertOpen(this.isAccepting());
     this.conversation(input.conversationId);
     if (input.selection) {
       const conversation = this.conversation(input.conversationId);
@@ -117,7 +117,7 @@ export class RuntimeHarness {
       const settings = readHarnessSettings(project.root);
       if (settings.error) throw new Error(settings.error);
       const info = await this.inspectExecutable(input.selection.harness, settings.defaults?.harness === input.selection.harness ? settings.defaults.executable : undefined);
-      if (!this.isAccepting()) throw new Error('Application is closing.');
+      assertOpen(this.isAccepting());
       assertHarnessRoute(settings, input.selection.harness, info.executable);
       this.validateSelection(input.selection, info);
     }

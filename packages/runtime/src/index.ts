@@ -29,8 +29,8 @@ import { RuntimeHarness } from './runtime-harness.js';
 import { reconcileInterruptedRuns } from './runtime-reopen.js';
 import { approveProjectSetup, inspectProject, projectSetupSnapshot, reconcileProjectSetupCleanup } from './project-setup-runtime.js';
 import { dispatchOrdinaryRun } from './run-dispatch.js';
-import { ACTIVE_RUN_STATUSES } from './runtime-status.js';
 import { addProject, chatEvents, createConversation, markRead, requireConversation, requireProject, restoreCheckpoint, workspaceSnapshot } from './runtime-catalog.js';
+import { assertOpen, conversationHasBlockingRun } from './runtime-status.js';
 import { recoveryHost, dispatchHost, setupHost } from './runtime-hosts.js';
 import { executeNativeTurn, finishRun, recordAdapterEvent } from './run-turn.js';
 import { closeRuntime, hasActiveWork, stopAllWork, stopRun } from './runtime-lifecycle.js';
@@ -72,13 +72,15 @@ export class Runtime {
     this.preferences = new AppSettings(this.store.root);
     this.checkpoints = new Checkpoints(this.store);
     this.memory = new ProjectMemory(this.store, () => this.changed());
-    this.routes = new RuntimeHarness(this.adapters, this.nativeAdmission, this.store, this.workspaces, this.workspaceOwnership, id => this.admission.has(id) || this.reviews.hasActiveWork(id) || this.store.runs().some(run => run.conversationId === id && (ACTIVE_RUN_STATUSES.has(run.status) || run.cleanupUnconfirmed)), () => this.accepting, () => this.changed(), id => this.project(id), id => this.conversation(id));
+    const blocking = (id: string) => conversationHasBlockingRun(this.store.runs(), id);
+    const workIdle = (id: string) => this.accepting && !this.admission.has(id) && !this.reviews.hasActiveWork(id) && !blocking(id);
+    this.routes = new RuntimeHarness(this.adapters, this.nativeAdmission, this.store, this.workspaces, this.workspaceOwnership, id => this.admission.has(id) || this.reviews.hasActiveWork(id) || blocking(id), () => this.accepting, () => this.changed(), id => this.project(id), id => this.conversation(id));
     this.delegation = new DelegationCommands(this.store, {
       assertMutable: run => {
         if (!this.accepting || this.admission.has(run.conversationId) || this.active.has(run.id) || this.reviews?.hasActiveWork(run.conversationId) || this.pushes?.hasActiveWork(run.conversationId)) throw new Error('Wait for current work to settle before changing this proposal.');
         const runs = this.store.runs().filter(candidate => candidate.conversationId === run.conversationId);
         if (runs.at(-1)?.id !== run.id) throw new Error('A newer conversation request superseded this proposal.');
-        if (runs.some(candidate => ACTIVE_RUN_STATUSES.has(candidate.status) || candidate.cleanupUnconfirmed) || this.delegation.records.sessions(run.id).some(session => ['prepared', 'dispatch-intent', 'running', 'cleanup-unconfirmed'].includes(session.state))) throw new Error('Native work and cleanup must settle before a proposal decision.');
+        if (conversationHasBlockingRun(runs, run.conversationId) || this.delegation.records.sessions(run.id).some(session => ['prepared', 'dispatch-intent', 'running', 'cleanup-unconfirmed'].includes(session.state))) throw new Error('Native work and cleanup must settle before a proposal decision.');
       },
       assertBasis: (run, plan) => assertDelegationBasis(this.store, run, plan),
       availability: async (run, plan) => {
@@ -103,9 +105,9 @@ export class Runtime {
     new DelegationChecks(this.store).reconcileOnReopen();
     new DelegationTasks(this.store).reconcileOnReopen();
     reconcileInterruptedRuns(this.store, this.delegation, this.delegationControls);
-    this.integrations = new Integrations(this.store, id => this.accepting && !this.admission.has(id) && !this.reviews.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (ACTIVE_RUN_STATUSES.has(run.status) || run.cleanupUnconfirmed)), () => this.changed(), this.workspaceOwnership);
-    this.pushes = new Pushes(this.store, id => this.accepting && !this.admission.has(id) && !this.reviews.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (ACTIVE_RUN_STATUSES.has(run.status) || run.cleanupUnconfirmed)), () => this.changed(), options.push, undefined, this.workspaceOwnership);
-    this.reviews = new Reviews(this.store, (run, review, check) => this.nativeAdmission.adapter(run.harness ?? 'codex', this.routes.adapterForRun(run), { owner: { kind: 'review', id: review.id }, runId: run.id, reviewId: review.id, checkId: check?.id, assertCurrent: check?.assertCurrent }), id => !this.admission.has(id) && !this.pushes.hasActiveWork(id) && !this.store.runs().some(run => run.conversationId === id && (ACTIVE_RUN_STATUSES.has(run.status) || run.cleanupUnconfirmed)), () => this.changed(), true, this.workspaceOwnership);
+    this.integrations = new Integrations(this.store, workIdle, () => this.changed(), this.workspaceOwnership);
+    this.pushes = new Pushes(this.store, workIdle, () => this.changed(), options.push, undefined, this.workspaceOwnership);
+    this.reviews = new Reviews(this.store, (run, review, check) => this.nativeAdmission.adapter(run.harness ?? 'codex', this.routes.adapterForRun(run), { owner: { kind: 'review', id: review.id }, runId: run.id, reviewId: review.id, checkId: check?.id, assertCurrent: check?.assertCurrent }), id => !this.admission.has(id) && !this.pushes.hasActiveWork(id) && !blocking(id), () => this.changed(), true, this.workspaceOwnership);
   }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   changed(): void { for (const listener of this.listeners) listener(); }
@@ -126,11 +128,11 @@ export class Runtime {
   restoreCheckpoint(input: CheckpointInput, destination: string): CheckpointRestore { return restoreCheckpoint(this, input, destination); }
   appSettings(): AppSettingsSnapshot { return this.preferences.read(); }
   saveAppSettings(input: SaveAppSettingsInput): AppSettingsSnapshot {
-    if (!this.accepting) throw new Error('Application is closing.');
+    assertOpen(this.accepting);
     const result = this.preferences.save(input); this.changed(); return result;
   }
   saveGlobalMemory(input: SaveGlobalMemoryInput): AppSettingsSnapshot {
-    if (!this.accepting) throw new Error('Application is closing.');
+    assertOpen(this.accepting);
     const result = this.preferences.saveGlobalMemory(input); this.changed(); return result;
   }
   restartRun(input: RestartCheckpointInput): Promise<LinkedRunResult> { return recoverLinkedCheckpoint(recoveryHost(this), 'restart', input); }
@@ -138,7 +140,7 @@ export class Runtime {
   memorySnapshot(projectId: string): MemorySnapshot { return this.memory.snapshot(projectId); }
   memoryHistory(projectId: string, reference: LessonRef): LessonVersion[] { return this.memory.history(projectId, reference); }
   memoryCommand(input: MemoryCommand): MemorySnapshot {
-    if (!this.accepting) throw new Error('Application is closing.');
+    assertOpen(this.accepting);
     return this.memory.command(input);
   }
   async harnessInstallations(harnessId: HarnessId = 'codex'): Promise<HarnessInstallation[]> { return this.routes.installations(harnessId); }

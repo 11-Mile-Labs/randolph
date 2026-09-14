@@ -8,6 +8,7 @@ import type { DelegationAssignment } from './delegation-plan.js';
 import { DelegationRecords, type DelegationAttempt, type DelegationAuthorization, type DelegationPlanRevision, type DelegationSourceSnapshot, type DelegationTask } from './delegation-records.js';
 import { DelegationTasks } from './delegation-tasks.js';
 import { Store } from './store.js';
+import { canonicalJson } from './canonical-json.js';
 import { assertWorkspaceIdentity, workspaceIdentity } from './workspace-identity.js';
 
 export type DelegationOutputResolution = { attemptId: string; source: DelegationSourceSnapshot };
@@ -21,12 +22,7 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const sha256 = /^[0-9a-f]{64}$/;
 const oid = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, canonical(item)]));
-  return value;
-}
-function same(left: unknown, right: unknown): boolean { return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right)); }
+function same(left: unknown, right: unknown): boolean { return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right)); }
 
 function source(value: unknown, producerTaskId?: string): DelegationSourceSnapshot {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Delegation source descriptor is invalid.');

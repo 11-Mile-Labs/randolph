@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { Store } from './store.js';
 import { workspaceLeaseValidation as validate, type WorkspaceLease, type WorkspaceProvenance, type WorkspaceLeaseAcquire, type WorkspaceLeasePort, type WorkspaceLeaseRelease } from './workspace-leases.js';
+import { now } from './runtime-status.js';
 
 export type WorkspaceOwnershipRequest = { access?: 'read' | 'write'; provenance?: WorkspaceProvenance; phase?: string; reservationId: string; ownerId?: string; runId?: string; workspace: string };
 type OwnedLease = Omit<WorkspaceLease, 'state'> & { ownerId: string; state: 'active' | 'cleanup-unconfirmed' | 'released'; createdAt: string; updatedAt: string };
@@ -12,7 +13,6 @@ function provenance(value: WorkspaceProvenance): WorkspaceProvenance {
   if (saved.origin !== undefined) validate.evidence(saved.origin);
   return saved;
 }
-const now = () => new Date().toISOString();
 const access = (value: unknown): 'read' | 'write' => value === undefined || value === 'write' ? 'write' : value === 'read' ? 'read' : (() => { throw new Error('Workspace ownership access is invalid.'); })();
 const overlaps = (left: Pick<OwnedLease, 'workspace' | 'identity'>, right: Pick<OwnedLease, 'workspace' | 'identity'>): boolean => left.workspace === right.workspace || Boolean(left.identity && right.identity && validate.sameIdentity(left.identity, right.identity));
 const conflicts = (left: Pick<OwnedLease, 'state' | 'access' | 'workspace' | 'identity'>, right: Pick<OwnedLease, 'state' | 'access' | 'workspace' | 'identity'>): boolean => overlaps(left, right) && (left.state === 'cleanup-unconfirmed' && right.state === 'cleanup-unconfirmed' ? false : left.access !== 'read' || right.access !== 'read');

@@ -9,7 +9,7 @@ import type { WorkspaceLease } from './workspace-leases.js';
 import type { RunWorkspace } from './run-workspace.js';
 import type { DelegationCommands } from './delegation-commands.js';
 import type { NativeAdmission } from './native-admission.js';
-import { ACTIVE_RUN_STATUSES, now } from './runtime-status.js';
+import { ACTIVE_RUN_STATUSES, assertOpen, now } from './runtime-status.js';
 import type { ApproveProjectSetupInput, Conversation, InspectProjectInput, Project, ProjectSetupSnapshot, Run, SendInput } from './contracts.js';
 
 export type ProjectSetupHost = {
@@ -67,7 +67,7 @@ export function projectSetupSnapshot(host: ProjectSetupHost, projectId: string):
 }
 
 export function reconcileProjectSetupCleanup(host: ProjectSetupHost, projectId: string): ProjectSetupSnapshot {
-  if (!host.isAccepting()) throw new Error('Application is closing.');
+  assertOpen(host.isAccepting());
   const snapshot = projectSetupSnapshot(host, projectId);
   if (host.setupAdmission.has(projectId) || snapshot.inspections.some(item => host.active.has(item.run.id) || host.admission.has(item.conversationId))) throw new Error('Wait for active inspection work to finish before verifying cleanup.');
   if (!snapshot.cleanup) return snapshot;
@@ -98,7 +98,7 @@ export function reconcileProjectSetupCleanup(host: ProjectSetupHost, projectId: 
 }
 
 export async function inspectProject(host: ProjectSetupHost, input: InspectProjectInput): Promise<Run> {
-  if (!host.isAccepting()) throw new Error('Application is closing.');
+  assertOpen(host.isAccepting());
   const project = host.project(input.projectId);
   if (host.setupAdmission.has(project.id) || projectSetupSnapshot(host, project.id).inspections.some(item => ACTIVE_RUN_STATUSES.has(item.run.status) || item.run.cleanupUnconfirmed)) throw new Error('Project inspection is already active or awaiting cleanup.');
   host.setupAdmission.add(project.id);
@@ -116,7 +116,7 @@ export async function inspectProject(host: ProjectSetupHost, input: InspectProje
 }
 
 export function approveProjectSetup(host: ProjectSetupHost, input: ApproveProjectSetupInput): ProjectContextSnapshot {
-  if (!host.isAccepting()) throw new Error('Application is closing.');
+  assertOpen(host.isAccepting());
   const snapshot = projectSetupSnapshot(host, input.projectId);
   const inspection = snapshot.inspections.find(item => item.run.id === input.runId);
   if (!inspection?.canApprove || inspection.proposal?.revision !== input.proposalRevision || inspection.run.projectContext?.revision !== input.expectedContextRevision) throw new Error('This proposal or approved context changed. Reload project setup before approving.');

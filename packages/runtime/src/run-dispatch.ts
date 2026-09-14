@@ -17,7 +17,7 @@ import type { Pushes } from './pushes.js';
 import type { Integrations } from './integrations.js';
 import type { ExecutionOrigin } from './execution-origin.js';
 import type { RuntimeHarness } from './runtime-harness.js';
-import { ACTIVE_RUN_STATUSES, now } from './runtime-status.js';
+import { assertOpen, conversationHasBlockingRun, now } from './runtime-status.js';
 import type { Conversation, HarnessSelection, Project, Run, SendInput } from './contracts.js';
 
 export type DispatchHost = {
@@ -43,11 +43,11 @@ export type DispatchHost = {
 };
 
 export async function dispatchOrdinaryRun(host: DispatchHost, input: SendInput, setup?: { executable?: string; expectedContextRevision: string | null }): Promise<Run> {
-  if (!host.isAccepting()) throw new Error('Application is closing.');
+  assertOpen(host.isAccepting());
   if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 64_000) throw new Error('Enter a message of at most 64,000 characters.');
   let conversation = host.conversation(input.conversationId);
   if (conversation.kind === 'project-setup' && !setup) throw new Error('Use the dedicated project inspection action for setup conversations.');
-  if (host.admission.has(conversation.id) || host.reviews.hasActiveWork(conversation.id) || host.pushes.hasActiveWork(conversation.id) || host.store.runs().some(run => run.conversationId === conversation.id && (ACTIVE_RUN_STATUSES.has(run.status) || run.cleanupUnconfirmed))) throw new Error('This conversation already has active work.');
+  if (host.admission.has(conversation.id) || host.reviews.hasActiveWork(conversation.id) || host.pushes.hasActiveWork(conversation.id) || conversationHasBlockingRun(host.store.runs(), conversation.id)) throw new Error('This conversation already has active work.');
   if (host.integrations.blocksNewWork(conversation.id)) throw new Error('Finish interrupted parent integration before starting new work.');
   host.admission.add(conversation.id);
   const prepared = host.workspaces.preparation();
@@ -68,7 +68,7 @@ export async function dispatchOrdinaryRun(host: DispatchHost, input: SendInput, 
       ? { harness: selectedHarness, model: input.model ?? sameHarnessSelection?.model ?? '', effort: input.effort ?? sameHarnessSelection?.effort ?? '' }
       : savedSelection ?? settings.defaults ?? { harness: defaultHarness, model: '', effort: '' };
     const info = await host.harness.inspectExecutable(selection.harness, setup?.executable ?? (settings.defaults?.harness === selection.harness ? settings.defaults.executable : undefined));
-    if (!host.isAccepting()) throw new Error('Application is closing.');
+    assertOpen(host.isAccepting());
     conversation = host.conversation(input.conversationId);
     assertWorkspaceIdentity(project.root, rootIdentity);
     const freshSettings = readHarnessSettings(project.root);

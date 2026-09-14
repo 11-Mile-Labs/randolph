@@ -4,6 +4,8 @@ import { delegationPlanDigest, parseDelegationDraft, parseDelegationPlan } from 
 import { Store } from './store.js';
 import type { Conversation, Run } from './contracts.js';
 import { cleanupReconciliationReason } from './execution-origin.js';
+import { now } from './runtime-status.js';
+import { canonicalJson } from './canonical-json.js';
 
 type Row = Record<string, string | number | null>;
 export type PlanDisposition = 'draft' | 'ready' | 'superseded' | 'authorized' | 'rejected';
@@ -27,16 +29,14 @@ export type DelegationSession = { admissionClaim?: string; id: string; runId: st
 export type ToolCallIdentity = { sessionId: string; threadId: string; turnId: string; callId: string; requestId: string | number };
 export type ToolReceipt = { identity: ToolCallIdentity; tool: string; payloadDigest: string; receipt: Record<string, unknown>; createdAt: string };
 
-const now = (): string => new Date().toISOString();
-const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, canonical(entry)])) : value;
-const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
+const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(canonicalJson(value))).digest('hex');
 const text = (value: string, label: string): string => { if (!value || value.length > 500 || value.trim() !== value || Array.from(value).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) throw new Error(`${label} must be bounded nonempty text.`); return value; };
 const ids = (items: string[], label: string): string[] => { if (!Array.isArray(items) || items.length > 32 || new Set(items).size !== items.length) throw new Error(`${label} must be a bounded unique list.`); return items.map(item => text(item, label)); };
 function boundedRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object.`);
   let cloned: Record<string, unknown>;
   try { cloned = structuredClone(value as Record<string, unknown>); } catch { throw new Error(`${label} must contain cloneable data.`); }
-  if (Buffer.byteLength(JSON.stringify(canonical(cloned)), 'utf8') > 64 * 1024) throw new Error(`${label} exceeds the 64 KB limit.`);
+  if (Buffer.byteLength(JSON.stringify(canonicalJson(cloned)), 'utf8') > 64 * 1024) throw new Error(`${label} exceeds the 64 KB limit.`);
   return cloned;
 }
 const activeSession = (state: DelegationSession['state']): boolean => ['prepared', 'dispatch-intent', 'running'].includes(state);

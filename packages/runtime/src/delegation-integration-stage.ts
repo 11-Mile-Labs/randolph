@@ -9,13 +9,13 @@ import { DelegationTasks } from './delegation-tasks.js';
 import { Store } from './store.js';
 import { assertWorkspaceIdentity, workspaceIdentity } from './workspace-identity.js';
 import type { WorkspaceLeasePort } from './workspace-leases.js';
+import { now } from './runtime-status.js';
+import { canonicalJson } from './canonical-json.js';
 
 export type IntegrationReceipt = { state: 'intent' | 'prepared' | 'applied'; generation: number; plan?: DelegationIntegrationPlan; createdAt: string; updatedAt: string };
 type Attempt = DelegationAttempt & { integration?: IntegrationReceipt };
 type Authority = { task: DelegationTask; authorization: DelegationAuthorization; plan: DelegationPlanRevision };
-const now = (): string => new Date().toISOString();
-const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, canonical(entry)])) : value;
-const same = (left: unknown, right: unknown): boolean => JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
+const same = (left: unknown, right: unknown): boolean => JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
 
 /** Durable candidate receipt for the main-integration task. It prepares data only; native dispatch remains the runner's authority. */
 export class DelegationIntegrationStage {
