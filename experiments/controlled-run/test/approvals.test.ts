@@ -15,7 +15,12 @@ test('missing, denied, automated, or different-action approval cannot deliver', 
 });
 
 test('all review-basis changes invalidate approval', () => {
-  for (const change of [{ runId: 'different' }, { revision: 2 }, { parentOid: 'new-parent' }, { contentDigest: 'new-content' }]) {
+  for (const change of [
+    { runId: 'different' },
+    { revision: 2 },
+    { parentOid: 'new-parent' },
+    { contentDigest: 'new-content' },
+  ]) {
     assert.throws(() => requireApproval('final', { ...basis, ...change }, approval));
   }
 });

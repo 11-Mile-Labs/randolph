@@ -4,19 +4,52 @@ import type { Journal } from './evidence.js';
 import { hash } from './codex.js';
 
 type Json = Record<string, any>;
-export type ScriptedCall = { id: string; command: string; cwd: string; escalated: boolean; timeoutMs?: number };
+export type ScriptedCall = {
+  id: string;
+  command: string;
+  cwd: string;
+  escalated: boolean;
+  timeoutMs?: number;
+};
 export function scriptedToolResponse(call: ScriptedCall): string {
-  const args = { command: call.command, workdir: call.cwd, timeout_ms: call.timeoutMs ?? 5_000,
-    ...(call.escalated ? { sandbox_permissions: 'require_escalated', justification: 'Authorized disposable fixture permission test' } : {}) };
-  return sse(call.id, { type: 'function_call', call_id: call.id, name: 'shell_command', arguments: JSON.stringify(args) });
+  const args = {
+    command: call.command,
+    workdir: call.cwd,
+    timeout_ms: call.timeoutMs ?? 5_000,
+    ...(call.escalated
+      ? {
+          sandbox_permissions: 'require_escalated',
+          justification: 'Authorized disposable fixture permission test',
+        }
+      : {}),
+  };
+  return sse(call.id, {
+    type: 'function_call',
+    call_id: call.id,
+    name: 'shell_command',
+    arguments: JSON.stringify(args),
+  });
 }
 function sse(id: string, item: Json): string {
   return [
     { type: 'response.created', response: { id: `response-${id}` } },
     { type: 'response.output_item.done', item },
-    { type: 'response.completed', response: { id: `response-${id}`, usage: {
-      input_tokens: 0, input_tokens_details: null, output_tokens: 0, output_tokens_details: null, total_tokens: 0 } } },
-  ].map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('');
+    {
+      type: 'response.completed',
+      response: {
+        id: `response-${id}`,
+        usage: {
+          input_tokens: 0,
+          input_tokens_details: null,
+          output_tokens: 0,
+          output_tokens_details: null,
+          total_tokens: 0,
+        },
+      },
+    },
+  ]
+    .map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+    .join('');
 }
 
 export class ScriptedServer {
@@ -31,7 +64,12 @@ export class ScriptedServer {
   async start(): Promise<void> {
     this.server = createServer(async (request, response) => {
       try {
-        if (request.method !== 'POST' || request.url !== '/v1/responses' || request.headers.authorization || request.headers['api-key']) {
+        if (
+          request.method !== 'POST' ||
+          request.url !== '/v1/responses' ||
+          request.headers.authorization ||
+          request.headers['api-key']
+        ) {
           throw new Error('Unexpected request route or authentication header');
         }
         let text = '';
@@ -40,16 +78,33 @@ export class ScriptedServer {
           if (Buffer.byteLength(text) > 2_000_000) throw new Error('Request exceeds fixture limit');
         }
         const body = JSON.parse(text);
-        if (!this.call || this.phase > 1 || body.model !== 'mock-model') throw new Error('Unscheduled response request');
-        const output = Array.isArray(body.input) ? body.input.findLast((item: Json) => item.type === 'function_call_output' && item.call_id === this.call?.id) : undefined;
+        if (!this.call || this.phase > 1 || body.model !== 'mock-model')
+          throw new Error('Unscheduled response request');
+        const output = Array.isArray(body.input)
+          ? body.input.findLast(
+              (item: Json) =>
+                item.type === 'function_call_output' && item.call_id === this.call?.id,
+            )
+          : undefined;
         if (this.phase === 1 && !output) throw new Error('Missing correlated real tool result');
-        const receipt = { callId: this.call.id, phase: this.phase, authorizationPresent: false,
-          inputDigest: hash(text), toolResult: output ? { callId: output.call_id, output: output.output } : null };
+        const receipt = {
+          callId: this.call.id,
+          phase: this.phase,
+          authorizationPresent: false,
+          inputDigest: hash(text),
+          toolResult: output ? { callId: output.call_id, output: output.output } : null,
+        };
         this.requests.push(receipt);
         this.journal.append('scripted.http', 'Loopback Responses exchange', receipt);
-        const bodyText = this.phase === 0 ? scriptedToolResponse(this.call) : sse(`${this.call.id}-final`, {
-          id: `message-${this.call.id}`, type: 'message', role: 'assistant',
-          content: [{ type: 'output_text', text: 'Scripted fixture response complete.' }] });
+        const bodyText =
+          this.phase === 0
+            ? scriptedToolResponse(this.call)
+            : sse(`${this.call.id}-final`, {
+                id: `message-${this.call.id}`,
+                type: 'message',
+                role: 'assistant',
+                content: [{ type: 'output_text', text: 'Scripted fixture response complete.' }],
+              });
         this.phase++;
         response.writeHead(200, { 'content-type': 'text/event-stream', connection: 'close' });
         response.end(bodyText);
@@ -73,12 +128,19 @@ export class ScriptedServer {
     if (this.call && this.phase !== 2) throw new Error('Previous scripted exchange incomplete');
     this.call = call;
     this.phase = 0;
-    this.journal.append('scripted.call', 'Prepared exact native tool call', { ...call, tool: 'shell_command' });
+    this.journal.append('scripted.call', 'Prepared exact native tool call', {
+      ...call,
+      tool: 'shell_command',
+    });
   }
-  complete(): boolean { return this.phase === 2 && this.errors.length === 0; }
+  complete(): boolean {
+    return this.phase === 2 && this.errors.length === 0;
+  }
   async close(): Promise<void> {
     if (!this.server) return;
     this.server.closeAllConnections();
-    await new Promise<void>((resolve, reject) => this.server!.close(error => error ? reject(error) : resolve()));
+    await new Promise<void>((resolve, reject) =>
+      this.server!.close((error) => (error ? reject(error) : resolve())),
+    );
   }
 }
