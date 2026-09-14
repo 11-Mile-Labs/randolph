@@ -1,14 +1,14 @@
 import { Store } from './store.js';
+import { now } from './runtime-status.js';
+import { canonicalJson } from './canonical-json.js';
 
 export type NativeOperationOwner = { kind: 'app-discovery' | 'run' | 'review' | 'delegation'; id: string };
 export type NativeOperationPurpose = 'discovery' | 'installation-discovery' | 'model-turn' | 'command';
 export type NativeOperationState = 'queued' | 'admitted' | 'settled' | 'quarantined' | 'interrupted';
 export type NativeOperation = { id: string; owner: NativeOperationOwner; runId?: string; sessionId?: string; reviewId?: string; checkId?: string; harness: 'codex' | 'grok'; purpose: NativeOperationPurpose; requestedExecutable?: string; capacity: { role: 'main' | 'worker' | 'main-integration' | 'runtime-verification' | 'review' | 'main-synthesis' | 'discovery' | 'installation-discovery' | 'command'; authorizationId?: string; workerParallelLimit?: number }; resolvedIdentity?: { executable: string; version: string }; generation: number; origin: Record<string, unknown>; state: NativeOperationState; terminalStatus?: 'completed' | 'failed' | 'interrupted'; cleanupConfirmed?: boolean; cleanupEvidence?: Record<string, unknown>; createdAt: string; updatedAt: string };
 export type NativeOperationEvent = { sequence: number; operationId: string; at: string; type: string; data: Record<string, unknown> };
-const now = () => new Date().toISOString();
 const text = (value: unknown, label: string, max = 1000): string => { if (typeof value !== 'string' || !value || value.length > max || value.trim() !== value) throw new Error(`${label} is invalid.`); return value; };
-const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, canonical(item)])) : value;
-const same = (a: unknown, b: unknown) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+const same = (a: unknown, b: unknown) => JSON.stringify(canonicalJson(a)) === JSON.stringify(canonicalJson(b));
 const validOwner = new Set(['app-discovery', 'run', 'review', 'delegation']);
 const validPurpose = new Set(['discovery', 'installation-discovery', 'model-turn', 'command']);
 

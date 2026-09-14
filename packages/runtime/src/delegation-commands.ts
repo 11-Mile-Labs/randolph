@@ -4,6 +4,7 @@ import { DelegationRecords, type DelegationPlanRevision } from './delegation-rec
 import { parseDelegationDraft, parseDelegationPlan, readDelegationSettings, validateDelegationPlan, writeDelegationSettings, type DelegationAvailability } from './delegation-plan.js';
 import { Store } from './store.js';
 import { createHash } from 'node:crypto';
+import { canonicalJson } from './canonical-json.js';
 
 export type DelegationCommandPolicy = {
   assertMutable: (run: Run) => void;
@@ -13,8 +14,7 @@ export type DelegationCommandPolicy = {
   execution?: { assertReady: (run: Run) => void; queued: (runId: string) => void };
 };
 const failure = (cause: unknown): string => cause instanceof Error ? cause.message : 'Delegation validation failed.';
-const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, canonical(item)])) : value;
-const settingsDigest = (value: unknown): string => createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
+const settingsDigest = (value: unknown): string => createHash('sha256').update(JSON.stringify(canonicalJson(value))).digest('hex');
 
 export class DelegationCommands {
   readonly records: DelegationRecords;

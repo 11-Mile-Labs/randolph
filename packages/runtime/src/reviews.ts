@@ -9,8 +9,7 @@ import { cleanupGitDelivery, commitGitDelivery, createGitDeliveryPlan, createGit
 import { detectVerificationCommands, runVerification } from './verification.js';
 import { WorkspaceOwnership } from './workspace-ownership.js';
 import { workspaceCleanupConfirmed } from './workspace-operation.js';
-
-const now = (): string => new Date().toISOString();
+import { assertOpen, now } from './runtime-status.js';
 const errorText = (error: unknown): string => error instanceof Error ? error.message : 'Review operation failed.';
 
 export class Reviews {
@@ -52,7 +51,7 @@ export class Reviews {
     this.changed();
   }
   private assertIdle(conversationId: string): void {
-    if (!this.accepting) throw new Error('Application is closing.');
+    assertOpen(this.accepting);
     if (!this.canWork(conversationId) || this.hasActiveWork(conversationId)) throw new Error('Wait for active conversation work or checks to finish.');
   }
   invalidate(conversationId: string): void {

@@ -2,8 +2,7 @@ import { createHash } from 'node:crypto';
 import { DelegationRecords, type DelegationCheck, type DelegationSession, type DelegationSourceSnapshot, type DelegationTask, type DelegationVerification } from './delegation-records.js';
 import { DelegationTasks } from './delegation-tasks.js';
 import { Store } from './store.js';
-
-const now = (): string => new Date().toISOString();
+import { now } from './runtime-status.js';
 const text = (value: unknown, label: string, max = 500): string => { if (typeof value !== 'string' || !value || value.length > max || value.trim() !== value || Array.from(value).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) throw new Error(`${label} must be bounded nonempty text.`); return value; };
 const argv = (value: unknown): string[] => { if (!Array.isArray(value) || !value.length || value.length > 100 || value.some(item => typeof item !== 'string' || !item || item.includes('\0')) || value.join('').length > 65_536) throw new Error('Verification command must be a bounded argv vector.'); return [...value]; };
 const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');

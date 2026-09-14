@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
+import { now } from './runtime-status.js';
 
 export type LessonScope = { kind: 'global' } | { kind: 'project'; projectId: string };
 export type LessonRef = { lessonId: string; version: number };
@@ -20,7 +21,6 @@ export type LessonRetrieval = {
   blockedPins: { reference: LessonRef; reason: string }[]; blockedSelections: { reference: LessonRef; reason: string }[]; limitExceeded: boolean;
 };
 export type LessonUse = { projectId: string; runId: string; agentId: string; at: string; frameworks: Record<string, string>; lessons: LessonVersion[] };
-const now = (): string => new Date().toISOString();
 const reference = (lesson: LessonVersion): LessonRef => ({ lessonId: lesson.lessonId, version: lesson.version });
 const key = (ref: LessonRef): string => `${ref.lessonId}:${ref.version}`;
 function bounded(value: unknown, max: number, label: string): string {
