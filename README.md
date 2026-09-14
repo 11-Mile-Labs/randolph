@@ -38,6 +38,7 @@ Git projects use a per-conversation worktree under `.worktrees/`, starting from 
 
 ```sh
 pnpm format
+pnpm format:check
 pnpm lint
 pnpm typecheck
 pnpm build

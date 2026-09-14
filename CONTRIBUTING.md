@@ -45,13 +45,14 @@ pnpm format
 pnpm format:check
 ```
 
-VS Code / Cursor format-on-save uses the Oxc extension (`oxc.oxc-vscode`) via `.vscode/settings.json`. Do not mix formatting commits with behavior changes. The first rollout formats dense state-transition files; remaining files follow in later formatting-only changes. `pnpm format:check` is not a CI gate until that rollout is complete.
+VS Code / Cursor format-on-save uses the Oxc extension (`oxc.oxc-vscode`) via `.vscode/settings.json`. Do not mix formatting commits with behavior changes. `pnpm format:check` is part of the repository checks.
 
 ## Verify a change
 
 For application code, run the repository checks:
 
 ```sh
+pnpm format:check
 pnpm lint
 pnpm typecheck
 pnpm build
