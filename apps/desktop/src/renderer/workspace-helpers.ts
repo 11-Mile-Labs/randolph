@@ -10,8 +10,23 @@ export const EMPTY_SNAPSHOT: WorkspaceSnapshot = {
   dataRoot: '',
 };
 
-export const BLOCKING_STATUSES = new Set<Run['status']>(['starting', 'running', 'stopping', 'stop-unconfirmed']);
-export const NATIVE_EVENT_TYPES = new Set(['activity', 'session.started', 'message.delta', 'approval.denied', 'command.completed', 'file.changed', 'verification.check-started', 'verification.check-finished', 'verification.output']);
+export const BLOCKING_STATUSES = new Set<Run['status']>([
+  'starting',
+  'running',
+  'stopping',
+  'stop-unconfirmed',
+]);
+export const NATIVE_EVENT_TYPES = new Set([
+  'activity',
+  'session.started',
+  'message.delta',
+  'approval.denied',
+  'command.completed',
+  'file.changed',
+  'verification.check-started',
+  'verification.check-finished',
+  'verification.output',
+]);
 
 export function displayError(error: unknown): string {
   return error instanceof Error ? error.message : 'An unexpected error occurred.';
@@ -28,7 +43,8 @@ export function latestSequence(events: RunEvent[], conversationId: string): numb
 export function unreadCount(events: RunEvent[], conversation: Conversation): number {
   let count = 0;
   for (const event of events) {
-    if (event.conversationId === conversation.id && event.sequence > conversation.lastReadSequence) count += 1;
+    if (event.conversationId === conversation.id && event.sequence > conversation.lastReadSequence)
+      count += 1;
   }
   return count;
 }

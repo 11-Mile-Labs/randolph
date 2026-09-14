@@ -6,7 +6,11 @@ import type { useWorkspaceSession } from './useWorkspaceSession';
 
 type Session = ReturnType<typeof useWorkspaceSession>;
 
-export function useConversationActions(session: Session, chatSession: NativeChatSession, nearMessageEnd: MutableRefObject<boolean>) {
+export function useConversationActions(
+  session: Session,
+  chatSession: NativeChatSession,
+  nearMessageEnd: MutableRefObject<boolean>,
+) {
   const {
     action,
     setAction,
@@ -72,7 +76,17 @@ export function useConversationActions(session: Session, chatSession: NativeChat
     const conversationId = selectedConversation?.id;
     const text = selectedDraft.trim();
     const { model, effort } = selectedModelChoice;
-    if (!conversationId || !text || !model || !effort || action || !selectionAvailable || !modeAvailable || settingsError) return;
+    if (
+      !conversationId ||
+      !text ||
+      !model ||
+      !effort ||
+      action ||
+      !selectionAvailable ||
+      !modeAvailable ||
+      settingsError
+    )
+      return;
     setAction('send');
     setError(undefined);
     try {
@@ -91,39 +105,69 @@ export function useConversationActions(session: Session, chatSession: NativeChat
 
   const changeSelection = async (selection: HarnessSelection | null) => {
     if (!selectedConversationId || action) return;
-    setAction('settings'); setError(undefined);
+    setAction('settings');
+    setError(undefined);
     try {
-      await window.randolph.setConversationSelection({ conversationId: selectedConversationId, selection });
+      await window.randolph.setConversationSelection({
+        conversationId: selectedConversationId,
+        selection,
+      });
       await reloadSnapshot();
-    } catch (cause) { setError(`Could not save conversation settings: ${displayError(cause)}`); }
-    finally { setAction(undefined); }
+    } catch (cause) {
+      setError(`Could not save conversation settings: ${displayError(cause)}`);
+    } finally {
+      setAction(undefined);
+    }
   };
   const changeMode = async (executionMode: ExecutionMode) => {
     if (!selectedConversationId || action) return;
-    setAction('settings'); setError(undefined);
-    try { await window.randolph.setExecutionMode({ conversationId: selectedConversationId, executionMode }); await reloadSnapshot(); }
-    catch (cause) { setError(displayError(cause)); }
-    finally { setAction(undefined); }
+    setAction('settings');
+    setError(undefined);
+    try {
+      await window.randolph.setExecutionMode({
+        conversationId: selectedConversationId,
+        executionMode,
+      });
+      await reloadSnapshot();
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setAction(undefined);
+    }
   };
   const openReview = async (fresh = false) => {
     if (!selectedConversationId || action) return;
-    if (!fresh && currentReview && currentReview.status !== 'stale') { setSelectedReviewId(currentReview.id); return; }
-    setAction('review'); setError(undefined);
+    if (!fresh && currentReview && currentReview.status !== 'stale') {
+      setSelectedReviewId(currentReview.id);
+      return;
+    }
+    setAction('review');
+    setError(undefined);
     try {
       const review = await window.randolph.prepareReview(selectedConversationId);
-      await reloadSnapshot(); setSelectedReviewId(review.id);
-    } catch (cause) { if (fresh) throw cause; setError(displayError(cause)); }
-    finally { setAction(undefined); }
+      await reloadSnapshot();
+      setSelectedReviewId(review.id);
+    } catch (cause) {
+      if (fresh) throw cause;
+      setError(displayError(cause));
+    } finally {
+      setAction(undefined);
+    }
   };
 
   const integrate = async (resolveConflicts = false) => {
     if (!selectedConversationId || action) return;
-    setAction('review'); setError(undefined);
+    setAction('review');
+    setError(undefined);
     try {
       if (resolveConflicts) await window.randolph.confirmIntegration(selectedConversationId);
       else await window.randolph.integrateConversation(selectedConversationId);
-    } catch (cause) { setError(displayError(cause)); }
-    finally { await reloadSnapshot(); setAction(undefined); }
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      await reloadSnapshot();
+      setAction(undefined);
+    }
   };
 
   const stopRun = async (runId: string) => {
@@ -141,17 +185,35 @@ export function useConversationActions(session: Session, chatSession: NativeChat
 
   const changeHarness = (nextHarness: HarnessId) => {
     void (async () => {
-      setAction('settings'); setError(undefined);
+      setAction('settings');
+      setError(undefined);
       try {
         const info = await window.randolph.harness(selectedProject?.id, undefined, nextHarness);
         const nextModel = info.models[0];
         if (!nextModel) throw new Error(info.reason ?? `${nextHarness} has no available models.`);
-        await window.randolph.setConversationSelection({ conversationId: selectedConversationId!, selection: { harness: nextHarness, model: nextModel.id, effort: nextModel.defaultEffort } });
+        await window.randolph.setConversationSelection({
+          conversationId: selectedConversationId!,
+          selection: { harness: nextHarness, model: nextModel.id, effort: nextModel.defaultEffort },
+        });
         await reloadSnapshot();
-      } catch (cause) { setError(`Could not select ${nextHarness}: ${displayError(cause)}`); }
-      finally { setAction(undefined); }
+      } catch (cause) {
+        setError(`Could not select ${nextHarness}: ${displayError(cause)}`);
+      } finally {
+        setAction(undefined);
+      }
     })();
   };
 
-  return { selectConversation, addProject, createConversation, sendMessage, changeSelection, changeMode, openReview, integrate, stopRun, changeHarness };
+  return {
+    selectConversation,
+    addProject,
+    createConversation,
+    sendMessage,
+    changeSelection,
+    changeMode,
+    openReview,
+    integrate,
+    stopRun,
+    changeHarness,
+  };
 }

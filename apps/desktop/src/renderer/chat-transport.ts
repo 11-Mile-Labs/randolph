@@ -8,15 +8,30 @@ const LIVE = new Set<Run['status']>(['starting', 'running', 'stopping']);
 const assistantId = (runId: string) => `${runId}:assistant`;
 
 /** SQLite messages are authoritative; one SDK response groups a run's native text parts. */
-export function projectChatMessages(snapshot: WorkspaceSnapshot, conversationId: string): NativeChatMessage[] {
+export function projectChatMessages(
+  snapshot: WorkspaceSnapshot,
+  conversationId: string,
+): NativeChatMessage[] {
   const result: NativeChatMessage[] = [];
-  for (const message of snapshot.messages.filter(item => item.conversationId === conversationId).toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+  for (const message of snapshot.messages
+    .filter((item) => item.conversationId === conversationId)
+    .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))) {
     if (message.role === 'user' || message.id.startsWith(`${message.runId}:recovery:`)) {
-      result.push({ id: message.id, role: message.role, metadata: { runId: message.runId, createdAt: message.createdAt }, parts: [{ type: 'text', text: message.text }] });
+      result.push({
+        id: message.id,
+        role: message.role,
+        metadata: { runId: message.runId, createdAt: message.createdAt },
+        parts: [{ type: 'text', text: message.text }],
+      });
     } else {
-      let response = result.find(item => item.id === assistantId(message.runId));
+      let response = result.find((item) => item.id === assistantId(message.runId));
       if (!response) {
-        response = { id: assistantId(message.runId), role: 'assistant', metadata: { runId: message.runId, createdAt: message.createdAt }, parts: [] };
+        response = {
+          id: assistantId(message.runId),
+          role: 'assistant',
+          metadata: { runId: message.runId, createdAt: message.createdAt },
+          parts: [],
+        };
         result.push(response);
       }
       response.parts.push({ type: 'text', text: message.text });
@@ -28,61 +43,113 @@ export function projectChatMessages(snapshot: WorkspaceSnapshot, conversationId:
 export class RandolphChatTransport implements ChatTransport<NativeChatMessage> {
   private closed = false;
   private detach = new Set<() => void>();
-  constructor(private bridge: ChatBridge, private conversationId: string, private onAccepted?: (run: Run) => void) {}
+  constructor(
+    private bridge: ChatBridge,
+    private conversationId: string,
+    private onAccepted?: (run: Run) => void,
+  ) {}
 
   private checkConversation(id: string): void {
     if (this.closed) throw new Error('Chat view is closed. Reopen the conversation.');
-    if (id !== this.conversationId) throw new Error('Chat transport belongs to another conversation.');
+    if (id !== this.conversationId)
+      throw new Error('Chat transport belongs to another conversation.');
   }
 
-  async sendMessages(options: Parameters<ChatTransport<NativeChatMessage>['sendMessages']>[0]): Promise<ReadableStream<UIMessageChunk>> {
+  async sendMessages(
+    options: Parameters<ChatTransport<NativeChatMessage>['sendMessages']>[0],
+  ): Promise<ReadableStream<UIMessageChunk>> {
     this.checkConversation(options.chatId);
-    if (options.trigger !== 'submit-message') throw new Error('Use Run history for an explicit linked restart or rerun.');
+    if (options.trigger !== 'submit-message')
+      throw new Error('Use Run history for an explicit linked restart or rerun.');
     options.abortSignal?.throwIfAborted();
     const message = options.messages.at(-1);
-    if (message?.role !== 'user' || message.parts.some(part => part.type !== 'text')) throw new Error('Send a text message to this conversation.');
-    const text = message.parts.filter(part => part.type === 'text').map(part => part.text).join('\n');
+    if (message?.role !== 'user' || message.parts.some((part) => part.type !== 'text'))
+      throw new Error('Send a text message to this conversation.');
+    const text = message.parts
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+      .join('\n');
     // The runtime supplies history, configuration, permissions and identity. Never trust a UI transcript as execution context.
     const run = await this.bridge.send({ conversationId: this.conversationId, text });
     this.onAccepted?.(run);
     if (options.abortSignal?.aborted) {
       await this.bridge.stop(run.id);
-      return new ReadableStream({ start(controller) { controller.close(); } });
+      return new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      });
     }
     return this.watch(run, options.abortSignal);
   }
 
-  async reconnectToStream(options: Parameters<ChatTransport<NativeChatMessage>['reconnectToStream']>[0]): Promise<ReadableStream<UIMessageChunk> | null> {
+  async reconnectToStream(
+    options: Parameters<ChatTransport<NativeChatMessage>['reconnectToStream']>[0],
+  ): Promise<ReadableStream<UIMessageChunk> | null> {
     this.checkConversation(options.chatId);
     options.abortSignal?.throwIfAborted();
     const snapshot = await this.bridge.snapshot();
-    const run = snapshot.runs.findLast(item => item.conversationId === this.conversationId && LIVE.has(item.status));
+    const run = snapshot.runs.findLast(
+      (item) => item.conversationId === this.conversationId && LIVE.has(item.status),
+    );
     if (!run || this.closed) return null;
     return this.watch(run, options.abortSignal);
   }
 
   private watch(run: Run, signal?: AbortSignal): ReadableStream<UIMessageChunk> {
-    if (this.closed) return new ReadableStream({ start(controller) { controller.close(); } });
+    if (this.closed)
+      return new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      });
     let detach = () => {};
     let cancel = () => {};
     return new ReadableStream<UIMessageChunk>({
-      start: controller => {
+      start: (controller) => {
         let ended = false;
         let reading = false;
         let dirty = false;
         let cursor = 0;
         const parts = new Set<string>();
         let unsubscribe = () => {};
-        const cleanup = () => { unsubscribe(); signal?.removeEventListener('abort', abort); this.detach.delete(detach); };
-        cancel = () => { if (ended) return; ended = true; cleanup(); };
-        detach = () => { if (ended) return; cancel(); controller.close(); };
-        const fail = (error: unknown) => { if (ended) return; ended = true; cleanup(); controller.error(error); };
-        const abort = () => { void stop(); };
-        const stop = async () => {
-          try { await this.bridge.stop(run.id); detach(); }
-          catch (cause) { fail(cause); }
+        const cleanup = () => {
+          unsubscribe();
+          signal?.removeEventListener('abort', abort);
+          this.detach.delete(detach);
         };
-        controller.enqueue({ type: 'start', messageId: assistantId(run.id), messageMetadata: { runId: run.id, createdAt: run.createdAt } });
+        cancel = () => {
+          if (ended) return;
+          ended = true;
+          cleanup();
+        };
+        detach = () => {
+          if (ended) return;
+          cancel();
+          controller.close();
+        };
+        const fail = (error: unknown) => {
+          if (ended) return;
+          ended = true;
+          cleanup();
+          controller.error(error);
+        };
+        const abort = () => {
+          void stop();
+        };
+        const stop = async () => {
+          try {
+            await this.bridge.stop(run.id);
+            detach();
+          } catch (cause) {
+            fail(cause);
+          }
+        };
+        controller.enqueue({
+          type: 'start',
+          messageId: assistantId(run.id),
+          messageMetadata: { runId: run.id, createdAt: run.createdAt },
+        });
         const refresh = async () => {
           dirty = true;
           if (reading || ended) return;
@@ -90,41 +157,78 @@ export class RandolphChatTransport implements ChatTransport<NativeChatMessage> {
           try {
             while (dirty && !ended) {
               dirty = false;
-              const { run: current, events } = await this.bridge.chatEvents({ conversationId: this.conversationId, runId: run.id, afterSequence: cursor });
+              const { run: current, events } = await this.bridge.chatEvents({
+                conversationId: this.conversationId,
+                runId: run.id,
+                afterSequence: cursor,
+              });
               if (ended) break;
-              if (!current) throw new Error('The retained run is unavailable. Reopen Run history to inspect its state.');
+              if (!current)
+                throw new Error(
+                  'The retained run is unavailable. Reopen Run history to inspect its state.',
+                );
               // Each connection rebuilds this response from durable events. Sequence filtering makes duplicate notifications harmless.
               for (const event of events) {
-                if (event.runId !== run.id || event.conversationId !== this.conversationId || event.sequence <= cursor) continue;
+                if (
+                  event.runId !== run.id ||
+                  event.conversationId !== this.conversationId ||
+                  event.sequence <= cursor
+                )
+                  continue;
                 cursor = event.sequence;
-                if (event.type !== 'message.delta' || typeof event.data.messageId !== 'string' || typeof event.data.text !== 'string') continue;
+                if (
+                  event.type !== 'message.delta' ||
+                  typeof event.data.messageId !== 'string' ||
+                  typeof event.data.text !== 'string'
+                )
+                  continue;
                 const id = `${run.id}:${event.data.messageId}`;
-                if (!parts.has(id)) { parts.add(id); controller.enqueue({ type: 'text-start', id }); }
+                if (!parts.has(id)) {
+                  parts.add(id);
+                  controller.enqueue({ type: 'text-start', id });
+                }
                 controller.enqueue({ type: 'text-delta', id, delta: event.data.text });
               }
               if (!LIVE.has(current.status)) {
                 for (const id of parts) controller.enqueue({ type: 'text-end', id });
                 if (current.status === 'failed' || current.status === 'stop-unconfirmed') {
-                  controller.enqueue({ type: 'error', errorText: current.error ?? `Native run ${current.status}.` });
-                } else controller.enqueue({ type: 'finish', finishReason: current.status === 'completed' ? 'stop' : 'other' });
+                  controller.enqueue({
+                    type: 'error',
+                    errorText: current.error ?? `Native run ${current.status}.`,
+                  });
+                } else
+                  controller.enqueue({
+                    type: 'finish',
+                    finishReason: current.status === 'completed' ? 'stop' : 'other',
+                  });
                 detach();
               }
             }
-          } catch (cause) { fail(cause); }
-          finally { reading = false; }
+          } catch (cause) {
+            fail(cause);
+          } finally {
+            reading = false;
+          }
         };
         this.detach.add(detach);
-        unsubscribe = this.bridge.onChanged(() => { void refresh(); });
+        unsubscribe = this.bridge.onChanged(() => {
+          void refresh();
+        });
         signal?.addEventListener('abort', abort, { once: true });
         if (signal?.aborted) abort();
         else void refresh();
       },
       // Losing a renderer/reader is not a command to stop native work.
-      cancel: () => { cancel(); },
+      cancel: () => {
+        cancel();
+      },
     });
   }
 
-  dispose(): void { this.closed = true; for (const detach of this.detach) detach(); }
+  dispose(): void {
+    this.closed = true;
+    for (const detach of this.detach) detach();
+  }
 }
 
 /** Keeps SDK presentation local to a conversation while native execution outlives its view. */
@@ -136,13 +240,23 @@ export class NativeChatSession {
   private connecting = false;
   private disposed = false;
   private viewers = 0;
-  constructor(private bridge: ChatBridge, readonly conversationId: string, snapshot: WorkspaceSnapshot) {
-    this.transport = new RandolphChatTransport(bridge, conversationId, () => { this.admission?.resolve(); this.admission = undefined; });
+  constructor(
+    private bridge: ChatBridge,
+    readonly conversationId: string,
+    snapshot: WorkspaceSnapshot,
+  ) {
+    this.transport = new RandolphChatTransport(bridge, conversationId, () => {
+      this.admission?.resolve();
+      this.admission = undefined;
+    });
     this.chat = new Chat<NativeChatMessage>({
       id: conversationId,
       messages: projectChatMessages(snapshot, conversationId),
       transport: this.transport,
-      onError: error => { this.admission?.reject(error); this.admission = undefined; },
+      onError: (error) => {
+        this.admission?.reject(error);
+        this.admission = undefined;
+      },
     });
   }
   attach(): () => void {
@@ -150,31 +264,63 @@ export class NativeChatSession {
     void this.connect();
     return () => {
       this.viewers -= 1;
-      queueMicrotask(() => { if (this.viewers === 0) this.dispose(); });
+      queueMicrotask(() => {
+        if (this.viewers === 0) this.dispose();
+      });
     };
   }
   sync(snapshot: WorkspaceSnapshot): void {
-    if (this.disposed || this.connecting || this.admission || this.chat.status === 'submitted' || this.chat.status === 'streaming') return;
+    if (
+      this.disposed ||
+      this.connecting ||
+      this.admission ||
+      this.chat.status === 'submitted' ||
+      this.chat.status === 'streaming'
+    )
+      return;
     const messages = projectChatMessages(snapshot, this.conversationId);
-    if (JSON.stringify(messages) !== JSON.stringify(this.chat.messages)) this.chat.messages = messages;
+    if (JSON.stringify(messages) !== JSON.stringify(this.chat.messages))
+      this.chat.messages = messages;
   }
   async connect(): Promise<void> {
-    if (this.connecting || this.disposed || this.admission || this.chat.status === 'submitted' || this.chat.status === 'streaming') return;
+    if (
+      this.connecting ||
+      this.disposed ||
+      this.admission ||
+      this.chat.status === 'submitted' ||
+      this.chat.status === 'streaming'
+    )
+      return;
     this.connecting = true;
-    try { await this.chat.resumeStream(); }
-    finally { this.connecting = false; await this.refresh(); }
+    try {
+      await this.chat.resumeStream();
+    } finally {
+      this.connecting = false;
+      await this.refresh();
+    }
   }
   async send(text: string): Promise<void> {
-    if (this.disposed || this.connecting || this.admission || this.chat.status === 'submitted' || this.chat.status === 'streaming') throw new Error('This conversation already has active work.');
+    if (
+      this.disposed ||
+      this.connecting ||
+      this.admission ||
+      this.chat.status === 'submitted' ||
+      this.chat.status === 'streaming'
+    )
+      throw new Error('This conversation already has active work.');
     const admission = Promise.withResolvers<void>();
     this.admission = admission;
-    this.settled = this.finishSend(this.chat.sendMessage({ text, metadata: { createdAt: new Date().toISOString() } }));
+    this.settled = this.finishSend(
+      this.chat.sendMessage({ text, metadata: { createdAt: new Date().toISOString() } }),
+    );
     await admission.promise;
   }
   private async finishSend(completed: Promise<void>): Promise<void> {
-    try { await completed; }
-    catch (cause) { this.admission?.reject(cause); }
-    finally {
+    try {
+      await completed;
+    } catch (cause) {
+      this.admission?.reject(cause);
+    } finally {
       this.admission?.reject(this.chat.error ?? new Error('Message was not admitted.'));
       this.admission = undefined;
       await this.refresh();
@@ -182,8 +328,14 @@ export class NativeChatSession {
   }
   private async refresh(): Promise<void> {
     if (this.disposed) return;
-    try { this.sync(await this.bridge.snapshot()); }
-    catch { /* Transport errors remain visible; focus/reconnect can reload the durable state. */ }
+    try {
+      this.sync(await this.bridge.snapshot());
+    } catch {
+      /* Transport errors remain visible; focus/reconnect can reload the durable state. */
+    }
   }
-  dispose(): void { this.disposed = true; this.transport.dispose(); }
+  dispose(): void {
+    this.disposed = true;
+    this.transport.dispose();
+  }
 }
