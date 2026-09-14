@@ -13,10 +13,28 @@ const emptyContext: ProjectContext = { purpose: '', instructions: '', documents:
 
 export function readProjectContext(root: string): ProjectContextSnapshot {
   const result = readYamlSettings(root, 'config.project.yaml', parseProjectContext, emptyContext);
-  return { revision: result.revision, value: result.value, ...(result.error ? { error: result.error } : {}) };
+  return {
+    revision: result.revision,
+    value: result.value,
+    ...(result.error ? { error: result.error } : {}),
+  };
 }
 
-export function writeProjectContext(root: string, value: ProjectContext, expectedRevision: string | null): ProjectContextSnapshot {
-  const result = writeYamlSettings(root, 'config.project.yaml', value, expectedRevision, parseProjectContext);
-  return { revision: result.revision, value: result.value, ...(result.error ? { error: result.error } : {}) };
+export function writeProjectContext(
+  root: string,
+  value: ProjectContext,
+  expectedRevision: string | null,
+): ProjectContextSnapshot {
+  const result = writeYamlSettings(
+    root,
+    'config.project.yaml',
+    value,
+    expectedRevision,
+    parseProjectContext,
+  );
+  return {
+    revision: result.revision,
+    value: result.value,
+    ...(result.error ? { error: result.error } : {}),
+  };
 }
