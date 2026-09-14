@@ -1,16 +1,8 @@
-import { spawn, execFileSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import {
-  accessSync,
-  constants,
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { spawn, execFileSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { parse } from 'smol-toml';
 import type {
   AdapterRun,
@@ -21,257 +13,20 @@ import type {
   HarnessModel,
 } from '@randolph/runtime/contracts';
 import { assertWorkspaceIdentity, workspaceIdentity } from '@randolph/runtime/workspace-identity';
-
 import { WorkspaceFiles } from './workspace-files.js';
-
-type Json = Record<string, unknown>;
-type Exec = (
-  file: string,
-  args: string[],
-  options: { encoding: 'utf8'; timeout: number; env: NodeJS.ProcessEnv },
-) => string;
-type Spawn = (
-  file: string,
-  args: string[],
-  options: {
-    cwd: string;
-    env: NodeJS.ProcessEnv;
-    stdio: ['pipe', 'pipe', 'pipe'];
-    detached: boolean;
-  },
-) => ChildProcessWithoutNullStreams;
-type Pending = {
-  resolve: (value: Json) => void;
-  reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-};
-const VERIFIED_VERSION = 'grok 1.0.30 (04b7ffed98c6) [stable]';
-const VERIFIED_AGENT_VERSION = '1.0.30';
-const object = (value: unknown): Json =>
-  value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : {};
-const text = (value: unknown, limit = 16_384): string =>
-  typeof value === 'string' ? value.slice(0, limit) : '';
-export type GrokAdapterOptions = {
-  executable?: string;
-  execFile?: Exec;
-  spawn?: Spawn;
-  readConfig?: (path: string) => string | undefined;
-  rpcTimeoutMs?: number;
-};
-function environment(): NodeJS.ProcessEnv {
-  const env = Object.fromEntries(
-    ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR'].flatMap((key) =>
-      process.env[key] ? [[key, process.env[key]!]] : [],
-    ),
-  );
-  return {
-    ...env,
-    GROK_DISABLE_API_KEY_AUTH: '1',
-    GROK_SUBAGENTS: '0',
-    GROK_WORKFLOWS: '0',
-    GROK_BACKEND_SEARCH: '0',
-    GROK_WEB_FETCH: '0',
-    GROK_MEMORY: '0',
-    GROK_SESSION_SEARCH: '0',
-    GROK_CAMPAIGNS: '0',
-    GROK_MANAGED_MCPS_ENABLED: '0',
-  };
-}
-function candidates(): string[] {
-  return [
-    ...new Set([
-      ...(process.env.PATH ?? '')
-        .split(delimiter)
-        .filter(Boolean)
-        .map((path) => join(path, 'grok')),
-      join(homedir(), '.local/bin/grok'),
-      join(homedir(), '.grok/bin/grok'),
-      '/opt/homebrew/bin/grok',
-    ]),
-  ].filter((path) => {
-    try {
-      accessSync(path, constants.X_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  });
-}
-function modelsFrom(value: Json): HarnessModel[] {
-  if (!Array.isArray(value.availableModels))
-    throw new Error('Grok returned no supported model catalog.');
-  return value.availableModels.flatMap((entry) => {
-    const model = object(entry);
-    const meta = object(model._meta);
-    const choices = Array.isArray(meta.reasoningEfforts) ? meta.reasoningEfforts.map(object) : [];
-    const efforts = choices.map((option) => text(option.id, 32)).filter(Boolean);
-    const id = text(model.modelId, 200);
-    return id && efforts.length
-      ? [
-          {
-            id,
-            name: text(model.name, 200) || id,
-            efforts,
-            defaultEffort:
-              text(choices.find((option) => option.default === true)?.id, 32) || efforts[0]!,
-          },
-        ]
-      : [];
-  });
-}
-class AcpClient {
-  private pending = new Map<number, Pending>();
-  private sequence = 0;
-  private buffer = '';
-  error?: Error;
-  constructor(
-    private child: ChildProcessWithoutNullStreams,
-    private timeout: number,
-    private notification: (message: Json) => void,
-    private read?: (params: Json) => Json,
-    private denied?: (method: string) => void,
-    private write?: (params: Json) => Json,
-  ) {
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      if (this.error) return;
-      this.buffer += chunk;
-      try {
-        let index: number;
-        while ((index = this.buffer.indexOf('\n')) >= 0) {
-          if (index > 1_048_576) throw new Error('Grok returned an oversized ACP record.');
-          const line = this.buffer.slice(0, index);
-          this.buffer = this.buffer.slice(index + 1);
-          if (line.trim()) this.receive(object(JSON.parse(line)));
-        }
-        if (this.buffer.length > 1_048_576)
-          throw new Error('Grok returned an oversized ACP record.');
-      } catch {
-        this.fail(new Error('Grok returned invalid ACP output.'));
-      }
-    });
-    child.stderr.on('data', () => {
-      /* Native diagnostics can include account information; do not retain them. */
-    });
-    child.once('error', () => this.fail(new Error('Grok could not start.')));
-    child.once('close', () => this.fail(new Error('Grok transport closed.')));
-  }
-  private receive(message: Json): void {
-    if (this.error) return;
-    if (typeof message.method === 'string') {
-      if (message.id !== undefined) {
-        if (message.method === 'session/request_permission')
-          this.send({ id: message.id, result: { outcome: { outcome: 'cancelled' } } });
-        else if (
-          (message.method === 'fs/read_text_file' && this.read) ||
-          (message.method === 'fs/write_text_file' && this.write)
-        ) {
-          try {
-            const handler = message.method === 'fs/read_text_file' ? this.read! : this.write!;
-            this.send({ id: message.id, result: handler(object(message.params)) });
-          } catch {
-            this.denied?.(message.method);
-            this.send({
-              id: message.id,
-              error: {
-                code: -32602,
-                message: 'Filesystem request is outside the approved scope or unsupported.',
-              },
-            });
-          }
-        } else {
-          this.denied?.(message.method);
-          this.send({
-            id: message.id,
-            error: { code: -32601, message: 'Randolph does not authorize this operation.' },
-          });
-        }
-      } else {
-        try {
-          this.notification(message);
-        } catch (cause) {
-          this.fail(cause instanceof Error ? cause : new Error('Grok session validation failed.'));
-        }
-      }
-      return;
-    }
-    const pending = this.pending.get(Number(message.id));
-    if (!pending) return;
-    this.pending.delete(Number(message.id));
-    clearTimeout(pending.timer);
-    if (message.error)
-      pending.reject(
-        new Error(
-          `Grok request failed (${text(object(message.error).message, 200) || 'native error'}).`,
-        ),
-      );
-    else pending.resolve(object(message.result));
-  }
-  send(message: Json): void {
-    if (this.error) throw this.error;
-    if (!this.child.stdin.writable) throw new Error('Grok transport closed.');
-    this.child.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
-  }
-  rpc(method: string, params: Json, timeout = this.timeout): Promise<Json> {
-    return new Promise((resolve, reject) => {
-      const id = ++this.sequence;
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(
-          new Error(
-            `Grok request timed out: ${method}. Inspect retained activity before retrying.`,
-          ),
-        );
-      }, timeout);
-      this.pending.set(id, { resolve, reject, timer });
-      try {
-        this.send({ id, method, params });
-      } catch (cause) {
-        clearTimeout(timer);
-        this.pending.delete(id);
-        reject(cause);
-      }
-    });
-  }
-  fail(error: Error): void {
-    if (this.error) return;
-    this.error = error;
-    for (const pending of this.pending.values()) {
-      clearTimeout(pending.timer);
-      pending.reject(error);
-    }
-    this.pending.clear();
-  }
-}
-async function terminate(child: ChildProcessWithoutNullStreams): Promise<boolean> {
-  const exited = () => child.exitCode !== null || child.signalCode !== null;
-  const signal = (name: NodeJS.Signals) => {
-    try {
-      if (child.pid) process.kill(-child.pid, name);
-      else child.kill(name);
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== 'ESRCH') {
-        try {
-          child.kill(name);
-        } catch {
-          /* Checked below. */
-        }
-      }
-    }
-  };
-  signal('SIGTERM');
-  for (let i = 0; i < 25 && !exited(); i++) await delay(20);
-  signal('SIGKILL');
-  for (let i = 0; i < 25 && !exited(); i++) await delay(20);
-  if (!exited()) return false;
-  try {
-    if (child.pid) process.kill(-child.pid, 0);
-    else return true;
-    return false;
-  } catch (cause) {
-    return (cause as NodeJS.ErrnoException).code === 'ESRCH';
-  }
-}
+import {
+  object,
+  text,
+  VERIFIED_AGENT_VERSION,
+  VERIFIED_VERSION,
+  type Exec,
+  type GrokAdapterOptions,
+  type Json,
+  type Spawn,
+} from './grok-shared.js';
+export type { GrokAdapterOptions } from './grok-shared.js';
+import { AcpClient } from './grok-rpc.js';
+import { candidates, environment, modelsFrom, terminate } from './grok-launch.js';
 
 export class GrokProtocol implements HarnessAdapter {
   private exec: Exec;
