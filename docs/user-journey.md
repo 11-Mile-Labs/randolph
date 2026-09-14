@@ -74,15 +74,15 @@ The user can review the historical timeline without execution. They can explicit
 
 ## Interruptions along this journey
 
-| Event | Expected experience |
-| --- | --- |
-| User selects Pause | New dispatches stop; Pausing remains visible until active operations reach a safe boundary. Resume continues paused work. |
-| User selects Stop | All app-managed delegated work is stopped; process-exit status is reported honestly. Restart is an explicit action from the last completed checkpoint. |
-| User quits or the app crashes | Unfinished execution is lost; retained history remains. Reopening never automatically restarts work. |
-| Execution budget expires | Stop new dispatches, pause at a safe boundary, and request extension even in YOLO mode. |
-| Harness has no recent events | Display last confirmed activity and age; do not imply progress solely from a spinner. |
-| Required harness becomes unavailable | Surface the interruption. Do not silently replace an approved assignment or switch to API billing. Exact user choices and recovery behavior still need design. |
-| Another conversation is writing in the shared checkout | If isolation was disabled, show the waiting writer and which conversation holds write access. Separate worktrees proceed independently. |
+| Event                                                  | Expected experience                                                                                                                                            |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User selects Pause                                     | New dispatches stop; Pausing remains visible until active operations reach a safe boundary. Resume continues paused work.                                      |
+| User selects Stop                                      | All app-managed delegated work is stopped; process-exit status is reported honestly. Restart is an explicit action from the last completed checkpoint.         |
+| User quits or the app crashes                          | Unfinished execution is lost; retained history remains. Reopening never automatically restarts work.                                                           |
+| Execution budget expires                               | Stop new dispatches, pause at a safe boundary, and request extension even in YOLO mode.                                                                        |
+| Harness has no recent events                           | Display last confirmed activity and age; do not imply progress solely from a spinner.                                                                          |
+| Required harness becomes unavailable                   | Surface the interruption. Do not silently replace an approved assignment or switch to API billing. Exact user choices and recovery behavior still need design. |
+| Another conversation is writing in the shared checkout | If isolation was disabled, show the waiting writer and which conversation holds write access. Separate worktrees proceed independently.                        |
 
 ## Recovery ownership
 

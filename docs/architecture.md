@@ -6,24 +6,24 @@ The [product specification](product-spec.md) defines approved behavior; the [use
 
 ## Decision register
 
-| ID | Decision | Status and consequence |
-| --- | --- | --- |
-| D01 | Separate desktop interaction, execution runtime, adapters, and durable storage | Accepted boundaries; implementations can change independently |
-| D02 | Selected main agent supplies task judgment; application code owns authority | Accepted; model output cannot authorize its own delivery or raise execution limits |
-| D03 | Use installed subscription-backed harnesses, with ACP or native protocols as appropriate | Accepted direction; capability verification is required per route, with no API fallback |
-| D04 | Use AI SDK UI with an application-owned transport | [Implemented over typed Electron IPC](decisions/ai-sdk-chat-transport.md); runtime records remain authoritative |
-| D05 | Electron/React/TypeScript, runtime hosted in Electron main, SQLite with derived JSONL | Implemented for the [first desktop slice](decisions/desktop-first-slice.md); independent runtime supervision remains unfinished |
-| D06 | Enforce final approval and stop on owner loss through verified native boundaries/supervision | Required behavior; mechanism unresolved and tested first |
+| ID  | Decision                                                                                     | Status and consequence                                                                                                          |
+| --- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| D01 | Separate desktop interaction, execution runtime, adapters, and durable storage               | Accepted boundaries; implementations can change independently                                                                   |
+| D02 | Selected main agent supplies task judgment; application code owns authority                  | Accepted; model output cannot authorize its own delivery or raise execution limits                                              |
+| D03 | Use installed subscription-backed harnesses, with ACP or native protocols as appropriate     | Accepted direction; capability verification is required per route, with no API fallback                                         |
+| D04 | Use AI SDK UI with an application-owned transport                                            | [Implemented over typed Electron IPC](decisions/ai-sdk-chat-transport.md); runtime records remain authoritative                 |
+| D05 | Electron/React/TypeScript, runtime hosted in Electron main, SQLite with derived JSONL        | Implemented for the [first desktop slice](decisions/desktop-first-slice.md); independent runtime supervision remains unfinished |
+| D06 | Enforce final approval and stop on owner loss through verified native boundaries/supervision | Required behavior; mechanism unresolved and tested first                                                                        |
 
 ## Recommendation and alternatives
 
 Build one macOS application with a separately testable local runtime. Keep the runtime's modules in one process initially, separate from the UI, with installed harness processes behind adapters. The selected main agent makes task judgments; deterministic application code controls execution and authorization.
 
-| Approach | Benefit | Tradeoff |
-| --- | --- | --- |
-| Packaged desktop with a local runtime — recommended | Clear lifecycle, durable execution, replaceable UI/adapters | Requires explicit process and IPC contracts |
-| UI wrapping CLIs directly | Small initial prototype | Approval, persistence, and lifecycle behavior become coupled to views |
-| Independent always-running daemon and desktop client | Can later serve multiple clients | Adds installation and lifecycle complexity; conflicts with expected stop-on-quit behavior unless carefully constrained |
+| Approach                                             | Benefit                                                     | Tradeoff                                                                                                               |
+| ---------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Packaged desktop with a local runtime — recommended  | Clear lifecycle, durable execution, replaceable UI/adapters | Requires explicit process and IPC contracts                                                                            |
+| UI wrapping CLIs directly                            | Small initial prototype                                     | Approval, persistence, and lifecycle behavior become coupled to views                                                  |
+| Independent always-running daemon and desktop client | Can later serve multiple clients                            | Adds installation and lifecycle complexity; conflicts with expected stop-on-quit behavior unless carefully constrained |
 
 Electron, React, TypeScript, and SQLite are selected for the first desktop slice. AI SDK UI uses the application-owned IPC transport. Electron supports separate renderer and utility processes; the slice uses a narrow preload bridge to the runtime in Electron main. [Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model).
 
@@ -60,20 +60,20 @@ flowchart TB
 
 `Runtime` in `packages/runtime/src/index.ts` is a thin public facade. Collaborators and bounded workflows live in named modules. Native execute/stop/close remain instance methods so tests can intercept them, with their bodies in `run-turn.ts` and `runtime-lifecycle.ts`.
 
-| Responsibility | Module | Notes |
-| --- | --- | --- |
-| Composition | `packages/runtime/src/index.ts` constructor | Wires adapters and collaborators |
-| Reopen interruption | `packages/runtime/src/runtime-reopen.ts` | Marks interrupted runs without restarting work |
-| Workspace preparation | `packages/runtime/src/run-workspace.ts` | Lease acquire, plan, transfer, release |
-| Harness inspection and selection | `packages/runtime/src/runtime-harness.ts` | Discovery, defaults, conversation overrides, execution mode |
-| Ordinary send | `packages/runtime/src/run-dispatch.ts` | Prepare, retain, then hand to execute |
-| Linked recovery | `packages/runtime/src/checkpoint-recovery.ts` | Checkpoint parse and restart/rerun dispatch |
-| Execute and event/finish | `packages/runtime/src/run-turn.ts` | Runtime keeps interceptable `execute`/`finish` wrappers |
-| Stop, stop-all, close | `packages/runtime/src/runtime-lifecycle.ts` | Shutdown and active-work queries |
-| Projects and conversations | `packages/runtime/src/runtime-catalog.ts` | Add project, create conversation, snapshot, checkpoint export |
-| Project setup | `packages/runtime/src/project-setup-runtime.ts` plus `project-setup.ts` | Inspection conversations and context approval |
-| Reviews, push, memory | `reviews.ts`, `pushes.ts`, `memory.ts` | Already extracted |
-| Store | `store.ts` | SQLite remains the state authority |
+| Responsibility                   | Module                                                                  | Notes                                                         |
+| -------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Composition                      | `packages/runtime/src/index.ts` constructor                             | Wires adapters and collaborators                              |
+| Reopen interruption              | `packages/runtime/src/runtime-reopen.ts`                                | Marks interrupted runs without restarting work                |
+| Workspace preparation            | `packages/runtime/src/run-workspace.ts`                                 | Lease acquire, plan, transfer, release                        |
+| Harness inspection and selection | `packages/runtime/src/runtime-harness.ts`                               | Discovery, defaults, conversation overrides, execution mode   |
+| Ordinary send                    | `packages/runtime/src/run-dispatch.ts`                                  | Prepare, retain, then hand to execute                         |
+| Linked recovery                  | `packages/runtime/src/checkpoint-recovery.ts`                           | Checkpoint parse and restart/rerun dispatch                   |
+| Execute and event/finish         | `packages/runtime/src/run-turn.ts`                                      | Runtime keeps interceptable `execute`/`finish` wrappers       |
+| Stop, stop-all, close            | `packages/runtime/src/runtime-lifecycle.ts`                             | Shutdown and active-work queries                              |
+| Projects and conversations       | `packages/runtime/src/runtime-catalog.ts`                               | Add project, create conversation, snapshot, checkpoint export |
+| Project setup                    | `packages/runtime/src/project-setup-runtime.ts` plus `project-setup.ts` | Inspection conversations and context approval                 |
+| Reviews, push, memory            | `reviews.ts`, `pushes.ts`, `memory.ts`                                  | Already extracted                                             |
+| Store                            | `store.ts`                                                              | SQLite remains the state authority                            |
 
 This map is navigation, not a folder reshuffle.
 
@@ -102,11 +102,11 @@ ACP supplies an app-to-agent protocol, including session setup and negotiated ca
 
 Proposed initial harness routes:
 
-| Harness | Initial route to prove | Why |
-| --- | --- | --- |
-| Codex | Installed Codex App Server over stdio | Direct native model/effort discovery, sessions, events, and approval requests |
-| Grok | Native ACP through the installed CLI | First-party support for integration through ACP |
-| Claude | Unmodified installed CLI with structured streaming and documented control surfaces | Fits the accepted investigation direction without making the SDK-backed ACP wrapper a prerequisite |
+| Harness | Initial route to prove                                                             | Why                                                                                                |
+| ------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Codex   | Installed Codex App Server over stdio                                              | Direct native model/effort discovery, sessions, events, and approval requests                      |
+| Grok    | Native ACP through the installed CLI                                               | First-party support for integration through ACP                                                    |
+| Claude  | Unmodified installed CLI with structured streaming and documented control surfaces | Fits the accepted investigation direction without making the SDK-backed ACP wrapper a prerequisite |
 
 The Codex App Server documentation describes stdio, version-specific schema generation, and model discovery. The recorded experiment used Codex CLI 0.149.0; future runs must discover and record the installed version. [Codex App Server](https://developers.openai.com/codex/app-server/). Grok documents native ACP integration. [Grok Build](https://docs.x.ai/build/overview). Claude documents newline-delimited streaming output, which establishes an output interface but does not prove our permission or lifecycle integration. [Claude programmatic use](https://code.claude.com/docs/en/headless).
 
@@ -144,11 +144,11 @@ The UI subscribes from a durable cursor and can recover missed updates. Replayin
 
 Use three explicit sources of authority:
 
-| Material | Authority | Presentation / derived forms |
-| --- | --- | --- |
-| Editable project configuration | Focused versioned YAML files | Validated UI forms and run-start snapshots |
-| Run state, approvals, ordered events, action intents | Local SQLite transactions | Activity views, inbox, JSONL logs, readable summaries |
-| Retained source snapshots, context, artifacts | Durable immutable files and manifests | Previews, search index, checkpoint views |
+| Material                                             | Authority                             | Presentation / derived forms                          |
+| ---------------------------------------------------- | ------------------------------------- | ----------------------------------------------------- |
+| Editable project configuration                       | Focused versioned YAML files          | Validated UI forms and run-start snapshots            |
+| Run state, approvals, ordered events, action intents | Local SQLite transactions             | Activity views, inbox, JSONL logs, readable summaries |
+| Retained source snapshots, context, artifacts        | Durable immutable files and manifests | Previews, search index, checkpoint views              |
 
 Propose one local SQLite database initially, with project-scoped access and queries. It provides local transactions without requiring a server. Its transaction mechanism supports atomic database commits; it does not make Git, files, or Linear part of the same transaction. [SQLite atomic commit](https://www.sqlite.org/atomiccommit.html).
 

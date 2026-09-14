@@ -4,7 +4,6 @@ Status: execution authorized by the operator. [Git enforcement](../research/scri
 
 **Approved acceptance amendment:** after the live model did not execute the requested standalone Git diagnostic, the operator approved deterministic model-response fixtures through the real installed App Server. For the standalone Git enforcement case, real tool execution, denial, unchanged refs and a permitted positive control now satisfy the criterion without live model selection. This is not a fake harness adapter: only the upstream model response is scripted. See the [passing proof](../research/scripted-git-2026-09-12.md). Prior live observations remain unchanged. Lifecycle, recovery and delivery requirements are not waived.
 
-
 **Goal:** determine whether one subscription-backed native agent can make a useful change with visible activity while Randolph enforces delivery approval, stops owned execution, and restores a durable checkpoint only on explicit request.
 
 **Architecture:** a headless controller owns one synthetic project, one conversation, one active run, and one worktree. A native Codex App Server adapter reports observed events; deterministic controller code owns approval, process lifetime, snapshots, and local Git delivery. This is a disposable experiment, not the production runtime.
@@ -39,19 +38,19 @@ Reserve turns as follows: one useful bugfix turn; two protected-operation turns 
 
 This is the approved target file map. Fixture, adapter, evidence, approval predicates, lifecycle research, checkpoint capture/restore and explicit restart now exist. The lifecycle candidate failed containment; final delivery remains deferred.
 
-| Path | Responsibility |
-| --- | --- |
-| `experiments/controlled-run/package.json`, `tsconfig.json`, `pnpm-lock.yaml` | Isolated experiment scripts, types, and reproducible dependencies |
-| `experiments/controlled-run/src/cli.ts` | Operator commands, headless readable view, explicit decisions, and attempt budget |
-| `experiments/controlled-run/src/fixture.ts` | Synthetic repo, in-repo worktree, local bare remote, content/ref observations, owned cleanup |
-| `experiments/controlled-run/src/codex.ts` | Versioned native schema, clean environment, readiness, turns, events, and permission callbacks |
-| `experiments/controlled-run/src/control.ts` | Dispatch gate, revision-bound approvals, stop/restart state, and local finalization |
-| `experiments/controlled-run/src/lifecycle.ts` | Verified ownership records and owner-loss cleanup candidate |
-| `experiments/controlled-run/src/checkpoint.ts` | Self-contained content capture, manifest verification, and restoration |
-| `experiments/controlled-run/src/evidence.ts` | Ordered event records, sanitized results, and human-readable summary |
-| `experiments/controlled-run/test/*.test.ts` | Deterministic contract, fault-injection, and fixture tests |
-| `experiments/controlled-run/test/native.test.ts` | Explicitly opted-in native compatibility cases; never part of default offline tests |
-| `experiments/controlled-run/README.md` | Actual commands, prerequisites, observed limitations, and cleanup instructions |
+| Path                                                                         | Responsibility                                                                                 |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `experiments/controlled-run/package.json`, `tsconfig.json`, `pnpm-lock.yaml` | Isolated experiment scripts, types, and reproducible dependencies                              |
+| `experiments/controlled-run/src/cli.ts`                                      | Operator commands, headless readable view, explicit decisions, and attempt budget              |
+| `experiments/controlled-run/src/fixture.ts`                                  | Synthetic repo, in-repo worktree, local bare remote, content/ref observations, owned cleanup   |
+| `experiments/controlled-run/src/codex.ts`                                    | Versioned native schema, clean environment, readiness, turns, events, and permission callbacks |
+| `experiments/controlled-run/src/control.ts`                                  | Dispatch gate, revision-bound approvals, stop/restart state, and local finalization            |
+| `experiments/controlled-run/src/lifecycle.ts`                                | Verified ownership records and owner-loss cleanup candidate                                    |
+| `experiments/controlled-run/src/checkpoint.ts`                               | Self-contained content capture, manifest verification, and restoration                         |
+| `experiments/controlled-run/src/evidence.ts`                                 | Ordered event records, sanitized results, and human-readable summary                           |
+| `experiments/controlled-run/test/*.test.ts`                                  | Deterministic contract, fault-injection, and fixture tests                                     |
+| `experiments/controlled-run/test/native.test.ts`                             | Explicitly opted-in native compatibility cases; never part of default offline tests            |
+| `experiments/controlled-run/README.md`                                       | Actual commands, prerequisites, observed limitations, and cleanup instructions                 |
 
 The package exposes `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm test`, and an explicit `pnpm test:native`. Default tests must refuse model execution. Scaffold only what each task needs; do not introduce a production monorepo or plugin framework.
 
@@ -61,7 +60,8 @@ Keep shared types with their owning module; import types rather than duplicating
 
 ```ts
 type Verdict = 'passed' | 'failed' | 'unverified';
-type RunState = 'idle' | 'running' | 'stopping' | 'stopped' | 'interrupted' | 'review' | 'delivered';
+type RunState =
+  'idle' | 'running' | 'stopping' | 'stopped' | 'interrupted' | 'review' | 'delivered';
 type ReviewBasis = {
   runId: string;
   revision: number;

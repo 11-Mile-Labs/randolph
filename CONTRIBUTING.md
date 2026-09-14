@@ -27,14 +27,14 @@ For contributions, push to your fork and open a pull request against `main`. Kee
 
 ## Find the code
 
-| Location | Responsibility |
-| --- | --- |
-| `apps/desktop` | Electron main/preload, React interface, desktop acceptance tests |
-| `packages/runtime` | State, project settings, approvals, execution, recovery, and Git delivery |
-| `packages/harness-codex` | Native Codex subscription adapter |
-| `packages/harness-grok` | Grok discovery and experimental protocol work; execution is gated |
-| `docs` | Product direction, decisions, plans, and compatibility evidence |
-| `experiments` | Isolated research; not a production capability guarantee |
+| Location                 | Responsibility                                                            |
+| ------------------------ | ------------------------------------------------------------------------- |
+| `apps/desktop`           | Electron main/preload, React interface, desktop acceptance tests          |
+| `packages/runtime`       | State, project settings, approvals, execution, recovery, and Git delivery |
+| `packages/harness-codex` | Native Codex subscription adapter                                         |
+| `packages/harness-grok`  | Grok discovery and experimental protocol work; execution is gated         |
+| `docs`                   | Product direction, decisions, plans, and compatibility evidence           |
+| `experiments`            | Isolated research; not a production capability guarantee                  |
 
 Use TypeScript/ES modules, two-space indentation, semicolons, and async/await. Prefer small changes with clear names. Keep private integrations and operator-specific settings out of the public core.
 

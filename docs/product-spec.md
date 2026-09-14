@@ -2,7 +2,6 @@
 
 Status: approved product behavior, consolidated for implementation planning. Technical proposals and unresolved details are labeled separately. This document specifies intended behavior; it does not claim implemented features or an approved release date.
 
-
 Randolph is a new product designed around the requirements below. The entire desktop application and execution engine are intended for open-source release. Personal integrations must remain separate from the public core.
 
 ## Purpose
@@ -82,22 +81,22 @@ Technical evidence: [bounded native harness experiment](research/harness-compati
 
 ### Approved initial catalog: 14 workflows
 
-| Category | Workflow |
-| --- | --- |
-| Product Manager | Product Planning |
-| Product Manager | Backlog Grooming |
-| Product Manager | Discovery & Validation |
-| Product Manager | Feature Prioritization |
-| Product Manager | Release Planning |
+| Category             | Workflow                      |
+| -------------------- | ----------------------------- |
+| Product Manager      | Product Planning              |
+| Product Manager      | Backlog Grooming              |
+| Product Manager      | Discovery & Validation        |
+| Product Manager      | Feature Prioritization        |
+| Product Manager      | Release Planning              |
 | Software Engineering | Architecture & Infrastructure |
-| Software Engineering | Development |
-| Software Engineering | Bug Triage |
-| Software Engineering | Bugfix |
-| Software Engineering | Code Review |
-| Software Engineering | Codebase Assessment |
-| Business Operations | Process Design & SOPs |
-| Business Operations | Research & Decision Brief |
-| Business Operations | Operational Review |
+| Software Engineering | Development                   |
+| Software Engineering | Bug Triage                    |
+| Software Engineering | Bugfix                        |
+| Software Engineering | Code Review                   |
+| Software Engineering | Codebase Assessment           |
+| Business Operations  | Process Design & SOPs         |
+| Business Operations  | Research & Decision Brief     |
+| Business Operations  | Operational Review            |
 
 Each workflow still needs its own inputs, completion criteria, default limits, and behavior specification. The catalog does not authorize branding, marketing, or deeper business-operations workflows for v1.
 

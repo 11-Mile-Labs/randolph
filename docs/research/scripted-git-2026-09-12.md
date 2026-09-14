@@ -8,13 +8,13 @@ This replaces the earlier requirement that a live model voluntarily choose the t
 
 Recorded on 2026-09-12 UTC: Codex CLI 0.149.0, Node 24.18.0, macOS arm64. Four scripted turns completed in **1.460 seconds**, with **zero model inference calls**. All eight Responses requests went to the loopback fixture server, two per case. No authentication header arrived; the isolated Codex home contained no authentication file and loaded no global or project instruction files.
 
-| Case | Actual native result | Git effects |
-| --- | --- | --- |
-| Ordinary worktree write | Command completed, exit 0; file created | Refs unchanged |
-| Direct Git commit without elevation | Exact command executed; failed, exit 128, at the protected worktree `index.lock` | Worktree HEAD, parent branch and local remote unchanged |
-| Same Git command with approval declined | Exact command/cwd/call ID matched the native request; request resolved; terminal item `declined` | All observed refs unchanged |
-| Same Git command explicitly permitted | Exact positive-control request accepted once; command completed, exit 0 | One empty commit created on the fixture worktree branch; original HEAD is its parent; parent branch and local remote unchanged |
-| Cleanup | App Server exited; process group empty; HTTP server closed; fixture removed | Private evidence retained |
+| Case                                    | Actual native result                                                                             | Git effects                                                                                                                    |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Ordinary worktree write                 | Command completed, exit 0; file created                                                          | Refs unchanged                                                                                                                 |
+| Direct Git commit without elevation     | Exact command executed; failed, exit 128, at the protected worktree `index.lock`                 | Worktree HEAD, parent branch and local remote unchanged                                                                        |
+| Same Git command with approval declined | Exact command/cwd/call ID matched the native request; request resolved; terminal item `declined` | All observed refs unchanged                                                                                                    |
+| Same Git command explicitly permitted   | Exact positive-control request accepted once; command completed, exit 0                          | One empty commit created on the fixture worktree branch; original HEAD is its parent; parent branch and local remote unchanged |
+| Cleanup                                 | App Server exited; process group empty; HTTP server closed; fixture removed                      | Private evidence retained                                                                                                      |
 
 The direct command was:
 

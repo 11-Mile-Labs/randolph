@@ -8,16 +8,16 @@ Live subscription discovery returned six models, including GPT-6 Astra. The comm
 
 The effective native policy reported the canonical worktree, approval policy `never`, workspace-write permission, no network access, both temporary-directory exclusions, and no active permission profile. Additional writable roots normalized to an empty list while the runtime workspace roots contained exactly the worktree.
 
-| Case | Observed outcome |
-| --- | --- |
-| Ordinary workspace write | Exact contents written; exit 0 |
-| Parent checkout write | Denied; no file created |
-| Linked-worktree Git metadata mutation | Denied at the parent Git metadata lock; refs and indexes unchanged |
-| Loopback network access | Denied; listener received zero requests |
-| Verification Stop | Native terminate request sent; command PID gone; cleanup verified |
-| Production adapter turn | Ordinary write completed with a command event; protected Git mutation denied |
-| Turn Stop | Native turn interruption completed; owned process groups empty |
-| Explicit approval experiment | Declined elevation denied; one positive-control approval changed only the synthetic worktree |
+| Case                                  | Observed outcome                                                                             |
+| ------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Ordinary workspace write              | Exact contents written; exit 0                                                               |
+| Parent checkout write                 | Denied; no file created                                                                      |
+| Linked-worktree Git metadata mutation | Denied at the parent Git metadata lock; refs and indexes unchanged                           |
+| Loopback network access               | Denied; listener received zero requests                                                      |
+| Verification Stop                     | Native terminate request sent; command PID gone; cleanup verified                            |
+| Production adapter turn               | Ordinary write completed with a command event; protected Git mutation denied                 |
+| Turn Stop                             | Native turn interruption completed; owned process groups empty                               |
+| Explicit approval experiment          | Declined elevation denied; one positive-control approval changed only the synthetic worktree |
 
 ## Remaining gaps
 
