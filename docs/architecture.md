@@ -58,20 +58,22 @@ flowchart TB
 
 ### Runtime module map (current)
 
-`Runtime` in `packages/runtime/src/index.ts` is the public facade. Collaborators already own reviews, pushes, memory, checkpoints, delegation, admission, and the store. The remaining inline work is composition, workspace preparation, send, linked recovery, execute/stop, and project setup.
+`Runtime` in `packages/runtime/src/index.ts` is the public facade. Collaborators own reviews, pushes, memory, checkpoints, delegation, admission, and the store. Bounded workflows live in named modules; execute, stop, and close stay on Runtime until descendant-cleanup supervision is designed.
 
 | Responsibility | Module | Notes |
 | --- | --- | --- |
-| Composition and reopen | `packages/runtime/src/index.ts` constructor | Wires adapters and collaborators; marks interrupted runs |
-| Workspace preparation | `packages/runtime/src/run-workspace.ts` | Lease acquire, plan, transfer, release; Runtime remains the facade |
-| Send | `packages/runtime/src/index.ts` `#send` | Stays on Runtime; uses workspace preparation helpers |
-| Linked recovery | `packages/runtime/src/checkpoint-recovery.ts` | Checkpoint parse and restart/rerun dispatch; Runtime remains the facade |
+| Composition | `packages/runtime/src/index.ts` constructor | Wires adapters and collaborators |
+| Reopen interruption | `packages/runtime/src/runtime-reopen.ts` | Marks interrupted runs without restarting work |
+| Workspace preparation | `packages/runtime/src/run-workspace.ts` | Lease acquire, plan, transfer, release |
+| Harness inspection and selection | `packages/runtime/src/runtime-harness.ts` | Discovery, defaults, conversation overrides, execution mode |
+| Ordinary send | `packages/runtime/src/run-dispatch.ts` | Prepare, retain, then hand to execute |
+| Linked recovery | `packages/runtime/src/checkpoint-recovery.ts` | Checkpoint parse and restart/rerun dispatch |
 | Execute, stop, close | `packages/runtime/src/index.ts` | Stays here until descendant-cleanup supervision is designed |
-| Project setup | `packages/runtime/src/index.ts` plus `project-setup.ts` | Inspection conversations and context approval |
+| Project setup | `packages/runtime/src/project-setup-runtime.ts` plus `project-setup.ts` | Inspection conversations and context approval |
 | Reviews, push, memory | `reviews.ts`, `pushes.ts`, `memory.ts` | Already extracted |
 | Store | `store.ts` | SQLite remains the state authority |
 
-This map is navigation, not a folder reshuffle. Workspace preparation and linked recovery are the next bounded extractions. Execute, stop, and close stay on Runtime until process-descendant cleanup has an accepted design.
+This map is navigation, not a folder reshuffle.
 
 ## 2. Execution model
 
