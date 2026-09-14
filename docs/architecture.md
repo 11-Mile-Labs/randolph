@@ -58,7 +58,7 @@ flowchart TB
 
 ### Runtime module map (current)
 
-`Runtime` in `packages/runtime/src/index.ts` is the public facade. Collaborators own reviews, pushes, memory, checkpoints, delegation, admission, and the store. Bounded workflows live in named modules; execute, stop, and close stay on Runtime until descendant-cleanup supervision is designed.
+`Runtime` in `packages/runtime/src/index.ts` is a thin public facade. Collaborators and bounded workflows live in named modules. Native execute/stop/close remain instance methods so tests can intercept them, with their bodies in `run-turn.ts` and `runtime-lifecycle.ts`.
 
 | Responsibility | Module | Notes |
 | --- | --- | --- |
@@ -68,7 +68,9 @@ flowchart TB
 | Harness inspection and selection | `packages/runtime/src/runtime-harness.ts` | Discovery, defaults, conversation overrides, execution mode |
 | Ordinary send | `packages/runtime/src/run-dispatch.ts` | Prepare, retain, then hand to execute |
 | Linked recovery | `packages/runtime/src/checkpoint-recovery.ts` | Checkpoint parse and restart/rerun dispatch |
-| Execute, stop, close | `packages/runtime/src/index.ts` | Stays here until descendant-cleanup supervision is designed |
+| Execute and event/finish | `packages/runtime/src/run-turn.ts` | Runtime keeps interceptable `execute`/`finish` wrappers |
+| Stop, stop-all, close | `packages/runtime/src/runtime-lifecycle.ts` | Shutdown and active-work queries |
+| Projects and conversations | `packages/runtime/src/runtime-catalog.ts` | Add project, create conversation, snapshot, checkpoint export |
 | Project setup | `packages/runtime/src/project-setup-runtime.ts` plus `project-setup.ts` | Inspection conversations and context approval |
 | Reviews, push, memory | `reviews.ts`, `pushes.ts`, `memory.ts` | Already extracted |
 | Store | `store.ts` | SQLite remains the state authority |
