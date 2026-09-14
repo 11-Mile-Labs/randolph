@@ -56,6 +56,23 @@ flowchart TB
 
 **Adapters:** translate between the runtime's contract and each harness or external integration. They report supported, unsupported, and unverified capabilities explicitly. The UI must not imply equal capabilities merely because all adapters implement the same interface. V1 reuses existing native profiles and logins; optional separate profiles require a post-v1 product and architecture review across harnesses. See [native harness profiles](decisions/native-harness-profiles.md).
 
+### Runtime module map (current)
+
+`Runtime` in `packages/runtime/src/index.ts` is the public facade. Collaborators already own reviews, pushes, memory, checkpoints, delegation, admission, and the store. The remaining inline work is composition, workspace preparation, send, linked recovery, execute/stop, and project setup.
+
+| Responsibility | Module | Notes |
+| --- | --- | --- |
+| Composition and reopen | `packages/runtime/src/index.ts` constructor | Wires adapters and collaborators; marks interrupted runs |
+| Workspace preparation | `packages/runtime/src/run-workspace.ts` | Lease acquire, plan, transfer, release; Runtime remains the facade |
+| Send | `packages/runtime/src/index.ts` `#send` | Stays on Runtime; uses workspace preparation helpers |
+| Linked recovery | `packages/runtime/src/checkpoint-recovery.ts` | Checkpoint parse and restart/rerun dispatch; Runtime remains the facade |
+| Execute, stop, close | `packages/runtime/src/index.ts` | Stays here until descendant-cleanup supervision is designed |
+| Project setup | `packages/runtime/src/index.ts` plus `project-setup.ts` | Inspection conversations and context approval |
+| Reviews, push, memory | `reviews.ts`, `pushes.ts`, `memory.ts` | Already extracted |
+| Store | `store.ts` | SQLite remains the state authority |
+
+This map is navigation, not a folder reshuffle. Workspace preparation and linked recovery are the next bounded extractions. Execute, stop, and close stay on Runtime until process-descendant cleanup has an accepted design.
+
 ## 2. Execution model
 
 The main objects are Project, Conversation, Run, Task, AgentSession, PlanRevision, Approval, Checkpoint, Event, Artifact, and ExternalAction. These are proposed model concepts, not an approved database schema.
