@@ -8,7 +8,7 @@ import { DelegationTasks } from './delegation-tasks.js';
 import { captureGitTree } from './git-review.js';
 import { NativeAdmission, type NativeAdmissionContext } from './native-admission.js';
 import { Store } from './store.js';
-import { detectVerificationCommands } from './verification.js';
+import { detectVerificationCommands } from './verification-command-discovery.js';
 import { assertWorkspaceIdentity } from './workspace-identity.js';
 import type { WorkspaceLeasePort } from './workspace-leases.js';
 

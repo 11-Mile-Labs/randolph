@@ -13,7 +13,8 @@ import {
   mergeGitDelivery,
   reconcileGitDelivery,
 } from './git-review.js';
-import { detectVerificationCommands, runVerification } from './verification.js';
+import { detectVerificationCommands } from './verification-command-discovery.js';
+import { runVerification } from './verification.js';
 import { WorkspaceOwnership } from './workspace-ownership.js';
 import { workspaceCleanupConfirmed } from './workspace-operation.js';
 import { assertOpen, now } from './runtime-status.js';
