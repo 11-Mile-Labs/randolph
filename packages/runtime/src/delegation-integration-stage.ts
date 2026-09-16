@@ -1,14 +1,16 @@
 import { mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { createCheckpoint, readCheckpoint } from './checkpoint-storage.js';
-import { Checkpoints } from './checkpoints.js';
 import { DelegationControls } from './delegation-control.js';
 import { DelegationIntegration, type DelegationIntegrationPlan } from './delegation-integration.js';
 import {
+  DelegationIntegrationSources,
+  same,
+  type Authority,
+} from './delegation-integration-sources.js';
+import {
   DelegationRecords,
   type DelegationAttempt,
-  type DelegationAuthorization,
-  type DelegationPlanRevision,
   type DelegationSourceSnapshot,
   type DelegationTask,
 } from './delegation-records.js';
@@ -17,7 +19,6 @@ import { Store } from './store.js';
 import { assertWorkspaceIdentity, workspaceIdentity } from './workspace-identity.js';
 import type { WorkspaceLeasePort } from './workspace-leases.js';
 import { now } from './runtime-status.js';
-import { canonicalJson } from './canonical-json.js';
 
 export type IntegrationReceipt = {
   state: 'intent' | 'prepared' | 'applied';
@@ -27,20 +28,13 @@ export type IntegrationReceipt = {
   updatedAt: string;
 };
 type Attempt = DelegationAttempt & { integration?: IntegrationReceipt };
-type Authority = {
-  task: DelegationTask;
-  authorization: DelegationAuthorization;
-  plan: DelegationPlanRevision;
-};
-const same = (left: unknown, right: unknown): boolean =>
-  JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
 
 /** Durable candidate receipt for the main-integration task. It prepares data only; native dispatch remains the runner's authority. */
 export class DelegationIntegrationStage {
   private readonly records: DelegationRecords;
   private readonly tasks: DelegationTasks;
   private readonly controls: DelegationControls;
-  private readonly checkpoints: Checkpoints;
+  private readonly sources: DelegationIntegrationSources;
   constructor(
     private readonly store: Store,
     private readonly leases: WorkspaceLeasePort,
@@ -50,7 +44,7 @@ export class DelegationIntegrationStage {
     this.records = new DelegationRecords(store);
     this.tasks = new DelegationTasks(store);
     this.controls = controls;
-    this.checkpoints = new Checkpoints(store);
+    this.sources = new DelegationIntegrationSources(store, this.tasks);
   }
 
   private authority(runId: string, taskId: string): Authority {
@@ -115,121 +109,6 @@ export class DelegationIntegrationStage {
       );
     assertWorkspaceIdentity(run.workspace, run.workspaceIdentity);
   }
-  private source(authority: Authority, assignmentId: string): DelegationSourceSnapshot {
-    const assignment = authority.plan.plan.assignments.find((item) => item.id === assignmentId);
-    if (!assignment) throw new Error('Integration source assignment is missing.');
-    if (assignment.source === 'run-basis') {
-      const digest = authority.plan.basis.checkpointDigest;
-      if (typeof digest !== 'string')
-        throw new Error('Authorized run basis is missing its checkpoint.');
-      const selected = this.checkpoints.selected(authority.task.runId, digest);
-      if (selected.checkpoint.snapshotTreeOid !== authority.plan.basis.sourceTreeOid)
-        throw new Error('Authorized run basis tree is stale.');
-      return {
-        checkpointDirectory: selected.checkpoint.directory,
-        checkpointDigest: selected.checkpoint.digest,
-        treeOid: selected.checkpoint.snapshotTreeOid,
-      };
-    }
-    const producerAssignment = assignment.source.slice('output:'.length),
-      producer = this.records
-        .tasks(authority.task.runId)
-        .find(
-          (task) =>
-            task.authorizationId === authority.authorization.id &&
-            task.assignmentId === producerAssignment,
-        );
-    if (!producer || !authority.task.dependencies.includes(producer.id))
-      throw new Error('Integration declared source is not an explicit task dependency.');
-    const output = this.tasks.completedOutput({
-      runId: authority.task.runId,
-      authorizationId: authority.authorization.id,
-      producerTaskId: producer.id,
-      consumerTaskId: authority.task.id,
-    });
-    const attempt = output && producer.attempts.find((item) => item.id === output.attemptId);
-    if (
-      !output ||
-      !attempt?.source ||
-      !attempt.result?.source ||
-      !same(attempt.result.source, output.source)
-    )
-      throw new Error(
-        'Integration declared source lacks an exact cleanup-confirmed completed output.',
-      );
-    const manifest = readCheckpoint(
-      output.source.checkpointDirectory,
-      output.source.checkpointDigest,
-    );
-    if (
-      manifest.snapshotTreeOid !== output.source.treeOid ||
-      !same(manifest.metadata, {
-        runId: authority.task.runId,
-        authorizationId: authority.authorization.id,
-        taskId: producer.id,
-        attemptId: attempt.id,
-        source: attempt.source,
-      })
-    )
-      throw new Error('Integration output checkpoint metadata does not bind its producer attempt.');
-    return structuredClone(output.source);
-  }
-  private inputs(authority: Authority): Array<{
-    assignmentId: string;
-    source: DelegationSourceSnapshot;
-    output: DelegationSourceSnapshot;
-  }> {
-    const assignment = authority.plan.plan.assignments.find(
-      (item) => item.id === authority.task.assignmentId,
-    )!;
-    return (assignment.integrationInputs ?? []).map((assignmentId) => {
-      const producer = this.records
-        .tasks(authority.task.runId)
-        .find(
-          (task) =>
-            task.authorizationId === authority.authorization.id &&
-            task.assignmentId === assignmentId,
-        );
-      if (!producer || !authority.task.dependencies.includes(producer.id))
-        throw new Error('Integration input is not an explicit same-authorization dependency.');
-      const output = this.tasks.completedOutput({
-        runId: authority.task.runId,
-        authorizationId: authority.authorization.id,
-        producerTaskId: producer.id,
-        consumerTaskId: authority.task.id,
-      });
-      const attempt = output && producer.attempts.find((item) => item.id === output.attemptId);
-      if (
-        !output ||
-        !attempt?.source ||
-        !attempt.result?.source ||
-        !same(attempt.result.source, output.source)
-      )
-        throw new Error('Integration input lacks an exact cleanup-confirmed completed output.');
-      const manifest = readCheckpoint(
-        output.source.checkpointDirectory,
-        output.source.checkpointDigest,
-      );
-      if (
-        manifest.snapshotTreeOid !== output.source.treeOid ||
-        !same(manifest.metadata, {
-          runId: authority.task.runId,
-          authorizationId: authority.authorization.id,
-          taskId: producer.id,
-          attemptId: attempt.id,
-          source: attempt.source,
-        })
-      )
-        throw new Error(
-          'Integration input checkpoint metadata does not bind its producer attempt.',
-        );
-      return {
-        assignmentId,
-        source: structuredClone(attempt.source),
-        output: structuredClone(output.source),
-      };
-    });
-  }
   private update(task: DelegationTask): void {
     this.store.db
       .prepare('UPDATE delegation_tasks SET document=? WHERE id=?')
@@ -274,8 +153,8 @@ export class DelegationIntegrationStage {
     );
     try {
       const run = this.store.runs().find((item) => item.id === input.runId)!;
-      const target = this.source(authority, authority.task.assignmentId),
-        inputs = this.inputs(authority),
+      const target = this.sources.resolveTarget(authority, authority.task.assignmentId),
+        inputs = this.sources.resolveInputs(authority),
         evidenceDirectory = this.evidence(input.runId, input.attemptId);
       const manifest = createCheckpoint(run.workspace, evidenceDirectory, {
         runId: input.runId,
