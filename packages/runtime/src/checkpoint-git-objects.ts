@@ -161,12 +161,33 @@ export function treeEntries(root: string, treeOid: string): TreeEntry[] {
     });
 }
 
-export function materializeBlob(root: string, entry: TreeEntry): void {
+/**
+ * Standalone and linked restoration materialize blobs identically except for two
+ * deliberately different policies: the redirected-parent message and the
+ * post-write inspection. Linked restore's inspection is NOT the same check as
+ * `inspectRegularFile` - it omits the post-read mtime equality check - so the
+ * policy is passed explicitly rather than unified. Tightening or loosening
+ * either side is a rejection-behavior change, not a refactor.
+ */
+export type BlobRestorePolicy = {
+  redirectedParentMessage: string;
+  inspectRestoredFile: (path: string, limit: number, label: string) => { bytes: number };
+};
+
+export const STANDALONE_RESTORE_POLICY: BlobRestorePolicy = {
+  redirectedParentMessage: 'Checkpoint path parent was redirected during restore.',
+  inspectRestoredFile: inspectRegularFile,
+};
+
+export function materializeBlob(
+  root: string,
+  entry: TreeEntry,
+  policy: BlobRestorePolicy = STANDALONE_RESTORE_POLICY,
+): void {
   const path = join(root, entry.path);
   const parent = dirname(path);
   mkdirSync(parent, { recursive: true, mode: 0o700 });
-  if (realpathSync(parent) !== parent)
-    throw new Error('Checkpoint path parent was redirected during restore.');
+  if (realpathSync(parent) !== parent) throw new Error(policy.redirectedParentMessage);
   if (entry.mode === '120000') {
     const target = runSafeGit(root, ['cat-file', 'blob', entry.oid]);
     if (target.length !== entry.size || target.includes(0))
@@ -204,6 +225,8 @@ export function materializeBlob(root: string, entry: TreeEntry): void {
   } finally {
     closeSync(fd);
   }
-  if (inspectRegularFile(path, FILE_LIMIT, `Restored file ${entry.path}`).bytes !== entry.size)
+  if (
+    policy.inspectRestoredFile(path, FILE_LIMIT, `Restored file ${entry.path}`).bytes !== entry.size
+  )
     throw new Error('Restored Git blob has an unexpected size.');
 }
