@@ -1,5 +1,4 @@
 import { workspaceCleanupConfirmed } from './workspace-operation.js';
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   closeSync,
@@ -13,34 +12,19 @@ import {
   readSync,
   realpathSync,
   rmSync,
-  symlinkSync,
 } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { readCheckpoint, type CheckpointManifest } from './checkpoint-storage.js';
+import { materializeBlob, treeEntries, type BlobRestorePolicy } from './checkpoint-git-objects.js';
 import { runSafeGit } from './git-execution.js';
 import { captureGitTree } from './git-workspace-snapshot.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const FILE_LIMIT = 64 * 1024 * 1024;
 const INDEX_LIMIT = 32 * 1024 * 1024;
-type TreeEntry = { mode: '100644' | '100755' | '120000'; oid: string; path: string; size: number };
 
 function gitText(root: string, args: string[], input?: string | Buffer, index?: string): string {
   return runSafeGit(root, args, input, index).toString('utf8').trim();
-}
-
-function safeGitEnvironment(): NodeJS.ProcessEnv {
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')),
-  );
-  Object.assign(env, {
-    GIT_CONFIG_GLOBAL: '/dev/null',
-    GIT_CONFIG_NOSYSTEM: '1',
-    GIT_TERMINAL_PROMPT: '0',
-    GIT_OPTIONAL_LOCKS: '0',
-    GIT_NO_REPLACE_OBJECTS: '1',
-  });
-  return env;
 }
 
 function missing(error: unknown): boolean {
@@ -190,84 +174,17 @@ export function importCheckpointObjects(
   }
 }
 
-function treeEntries(root: string, treeOid: string): TreeEntry[] {
-  const raw = new TextDecoder('utf-8', { fatal: true }).decode(
-    runSafeGit(root, ['ls-tree', '-r', '-l', '-z', treeOid]),
-  );
-  return raw
-    .split('\0')
-    .filter(Boolean)
-    .map((row) => {
-      const match = /^(100644|100755|120000) blob ([0-9a-f]{40,64})\s+([0-9]+)\t([^\0]+)$/.exec(
-        row,
-      );
-      if (!match) throw new Error('Checkpoint contains a submodule or unsupported Git entry.');
-      const path = match[4];
-      if (
-        path.startsWith('/') ||
-        path
-          .split('/')
-          .some((part) => !part || part === '.' || part === '..' || part.toLowerCase() === '.git')
-      )
-        throw new Error('Checkpoint contains an unsafe Git path.');
-      const size = Number(match[3]);
-      if (
-        !Number.isSafeInteger(size) ||
-        size < 0 ||
-        size > FILE_LIMIT ||
-        (match[1] === '120000' && size > 4096)
-      )
-        throw new Error('Checkpoint contains an oversized Git object.');
-      return { mode: match[1] as TreeEntry['mode'], oid: match[2], path, size };
-    });
-}
-
-function materializeBlob(root: string, entry: TreeEntry): void {
-  const path = join(root, entry.path);
-  const parent = dirname(path);
-  mkdirSync(parent, { recursive: true, mode: 0o700 });
-  if (realpathSync(parent) !== parent)
-    throw new Error('Checkpoint path parent was redirected during linked restore.');
-  if (entry.mode === '120000') {
-    const target = runSafeGit(root, ['cat-file', 'blob', entry.oid]);
-    if (target.length !== entry.size || target.includes(0))
-      throw new Error('Checkpoint symlink target is invalid.');
-    symlinkSync(target, path);
-    return;
-  }
-  const fd = openSync(
-    path,
-    constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
-    entry.mode === '100755' ? 0o755 : 0o644,
-  );
-  try {
-    execFileSync(
-      '/usr/bin/git',
-      [
-        '-c',
-        'core.hooksPath=/dev/null',
-        '-c',
-        'core.attributesFile=/dev/null',
-        '-C',
-        root,
-        'cat-file',
-        'blob',
-        entry.oid,
-      ],
-      {
-        env: safeGitEnvironment(),
-        maxBuffer: 1024 * 1024,
-        stdio: ['ignore', fd, 'pipe'],
-        timeout: 30_000,
-      },
-    );
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  if (inspectFile(path, FILE_LIMIT, `Restored file ${entry.path}`).bytes !== entry.size)
-    throw new Error('Restored Git blob has an unexpected size.');
-}
+/**
+ * Linked restore deliberately keeps its own post-write inspection: `inspectFile`
+ * above omits the post-read mtime equality check that `inspectRegularFile`
+ * performs for standalone restore. Adopting the stricter helper would be a new
+ * rejection, so the difference is carried as an explicit policy rather than
+ * unified away. The redirected-parent message is likewise linked-restore's own.
+ */
+const LINKED_RESTORE_POLICY: BlobRestorePolicy = {
+  redirectedParentMessage: 'Checkpoint path parent was redirected during linked restore.',
+  inspectRestoredFile: inspectFile,
+};
 
 function restoreLimitation(message: string): Error {
   return new Error(
@@ -354,7 +271,7 @@ export function restoreCheckpointWorktree(
     for (const entry of treeEntries(workspace, manifest.snapshotTreeOid).sort(
       (left, right) => Number(left.mode === '120000') - Number(right.mode === '120000'),
     ))
-      materializeBlob(workspace, entry);
+      materializeBlob(workspace, entry, LINKED_RESTORE_POLICY);
     if (
       directoryIdentity(workspace) !== workspaceIdentity ||
       directoryIdentity(root) !== rootIdentity ||
