@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Store } from './store.js';
 import type { Conversation, Run } from './contracts.js';
-import type { DelegationTask } from './delegation-records.js';
+import type { DelegationTask } from './delegation-records-types.js';
 import { cleanupReconciliationReason } from './execution-origin.js';
 import { now } from './runtime-status.js';
 import { canonicalJson } from './canonical-json.js';
