@@ -2,7 +2,8 @@ import { mkdirSync, realpathSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { Run } from './contracts.js';
-import { inspectGitWorkspace, runSafeGit } from './git-review.js';
+import { runSafeGit } from './git-execution.js';
+import { inspectGitWorkspace } from './git-workspace-snapshot.js';
 import {
   prepareIntegration,
   applyIntegration,

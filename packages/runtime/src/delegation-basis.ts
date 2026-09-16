@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Run } from './contracts.js';
 import type { DelegationPlanRevision } from './delegation-records.js';
 import { Checkpoints } from './checkpoints.js';
-import { captureGitTree } from './git-review.js';
+import { captureGitTree } from './git-workspace-snapshot.js';
 import { assertWorkspaceIdentity } from './workspace-identity.js';
 import { Store } from './store.js';
 

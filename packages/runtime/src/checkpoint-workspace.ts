@@ -17,7 +17,8 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { readCheckpoint, type CheckpointManifest } from './checkpoint-storage.js';
-import { captureGitTree, runSafeGit } from './git-review.js';
+import { runSafeGit } from './git-execution.js';
+import { captureGitTree } from './git-workspace-snapshot.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const FILE_LIMIT = 64 * 1024 * 1024;

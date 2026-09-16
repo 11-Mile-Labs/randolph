@@ -5,7 +5,7 @@ import { DelegationChecks } from './delegation-checks.js';
 import { DelegationControls, type ExecutionActivity } from './delegation-control.js';
 import { DelegationRecords } from './delegation-records.js';
 import { DelegationTasks } from './delegation-tasks.js';
-import { captureGitTree } from './git-review.js';
+import { captureGitTree } from './git-workspace-snapshot.js';
 import { NativeAdmission, type NativeAdmissionContext } from './native-admission.js';
 import { Store } from './store.js';
 import { detectVerificationCommands } from './verification.js';

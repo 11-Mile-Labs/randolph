@@ -18,14 +18,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
+import type { GitDeliveryPlan } from './git-delivery.js';
+import { runSafeGit } from './git-execution.js';
 import {
   assertCleanGitParent,
   captureGitTree,
   inspectGitWorkspace,
-  runSafeGit,
-  type GitDeliveryPlan,
   type GitWorkspace,
-} from './git-review.js';
+} from './git-workspace-snapshot.js';
 
 type Entry = { mode: '100644' | '100755' | '120000'; oid: string };
 type RetainedEntry = Entry & { blobPath: string };

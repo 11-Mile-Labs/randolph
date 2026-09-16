@@ -11,7 +11,8 @@ import {
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { captureGitTree, runSafeGit } from './git-review.js';
+import { runSafeGit } from './git-execution.js';
+import { captureGitTree } from './git-workspace-snapshot.js';
 import {
   GIT_OID,
   MANIFEST_LIMIT,

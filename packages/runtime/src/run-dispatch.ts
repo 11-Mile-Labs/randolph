@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { assertWorkspaceIdentity, workspaceIdentity } from './workspace-identity.js';
 import { readProjectContext } from './project-context.js';
 import { assertHarnessRoute, readHarnessSettings } from './harness-settings.js';
-import { inspectGitWorkspace } from './git-review.js';
+import { inspectGitWorkspace } from './git-workspace-snapshot.js';
 import { prepareWorkspace, plannedConversationWorkspace } from './workspace.js';
 import { workspaceCleanupConfirmed } from './workspace-operation.js';
 import type { WorkspaceLease } from './workspace-leases.js';
