@@ -15,6 +15,8 @@ import {
   validateDelegationPlan,
   writeDelegationSettings,
 } from '../dist/delegation-plan.js';
+import { delegationPlanDigest as digestFromModule } from '../dist/delegation-plan-digest.js';
+import { validateDelegationPlan as validateFromModule } from '../dist/delegation-plan-validation.js';
 
 const route = {
   harness: 'grok',
@@ -320,4 +322,9 @@ test('missing delegation settings use the balanced, no-preset default', async (t
     defaultPresetId: null,
     presets: [],
   });
+});
+
+test('the package export and the direct module import resolve one validator and one digest', () => {
+  assert.equal(validateFromModule, validateDelegationPlan);
+  assert.equal(digestFromModule, delegationPlanDigest);
 });
