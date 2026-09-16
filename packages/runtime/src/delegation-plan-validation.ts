@@ -5,7 +5,7 @@ import type {
   DelegationPlan,
   DelegationRole,
   DelegationValidation,
-} from './delegation-plan.js';
+} from './delegation-plan-types.js';
 
 function graphErrors(plan: DelegationPlan): string[] {
   const errors: string[] = [],

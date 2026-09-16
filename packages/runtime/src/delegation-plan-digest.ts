@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { DelegationPlan } from './delegation-plan.js';
+import type { DelegationPlan } from './delegation-plan-types.js';
 
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
