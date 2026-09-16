@@ -29,6 +29,7 @@ Status: active implementation toward the complete [approved v1 scope](../product
 - [x] Record delivery intent before mutation, then reconcile commit, merge, and cleanup outcomes independently after interruption.
 - [x] Support parent integration/conflicts and fresh verification/approval; push remains a separate explicit action.
 - [x] Verify with real synthetic repositories, fake native protocol tests, actual Electron UI, and bounded native compatibility evidence where needed.
+- [ ] Prepare conversation worktree dependencies before Code dispatch and checks: runtime-detected pnpm install with an offline preference, outside the native sandbox, sanitized environment, time limit, bounded output, and a durable receipt; failure blocks dispatch and checks visibly. Approved for v1 on 2026-09-15.
 
 **Files:** extend `packages/harness-codex/src/index.ts`, runtime contracts/store/orchestration, Electron bridge/validation and renderer. Add focused Git review/delivery and verification modules with behavioral tests. Keep native fault fixtures outside real projects.
 

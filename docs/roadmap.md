@@ -55,6 +55,7 @@ Permission and lifecycle experiments have produced bounded passes and an explici
 | Obvious activity, unread indicators, project/shared inbox, notifications                                             | M2, M4            |
 | Stop/Pause/Resume; background setting; menu-bar controls; explicit restart only                                      | M1, M2, M3        |
 | Worktree defaults, parent selection, dirty-change copy choice, shared-checkout writer coordination                   | M1, M2, M3        |
+| Runtime-owned worktree dependency preparation before Code runs and checks (approved 2026-09-15)                      | M2, M3            |
 | Final reviewed commit/merge, separate push, stale-parent invalidation, cleanup/reconciliation                        | M1, M2, M5        |
 | Context references with @, skills with / and +; previews/external editor; pinning and budget indicators              | M2, M3, M4        |
 | Concise context preparation, provenance, relevant retrieval, no silent loss of pinned requirements                   | M3, M4            |
