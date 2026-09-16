@@ -17,28 +17,32 @@ import {
   GIT_OID,
   MANIFEST_LIMIT,
   PACK_LIMIT,
+  type StoredCheckpointManifest,
+  checkpointBody,
+  normalizeMetadata,
+  type CheckpointManifest,
+} from './checkpoint-manifest.js';
+import {
   assertOwnedDirectory,
   syncPath,
-  type StoredCheckpointManifest,
   canonicalDirectory,
-  checkpointBody,
   exists,
-  gitText,
   hashBytes,
   inspectRegularFile,
-  loadCheckpoint,
-  materializeBlob,
-  normalizeMetadata,
   overlaps,
+  writeDurable,
+} from './checkpoint-file-io.js';
+import {
+  gitText,
+  materializeBlob,
   safeGitInit,
   treeEntries,
   validateSnapshot,
   verifyStandalonePack,
-  writeDurable,
-  type CheckpointManifest,
-} from './checkpoint-storage-io.js';
+} from './checkpoint-git-objects.js';
+import { loadCheckpoint } from './checkpoint-storage-io.js';
 
-export type { CheckpointManifest } from './checkpoint-storage-io.js';
+export type { CheckpointManifest } from './checkpoint-manifest.js';
 
 export function createCheckpoint(
   workspace: string,
