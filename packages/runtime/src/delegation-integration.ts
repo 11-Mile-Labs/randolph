@@ -16,7 +16,8 @@ import { createCheckpoint, readCheckpoint, restoreCheckpoint } from './checkpoin
 import { importCheckpointObjects } from './checkpoint-workspace.js';
 import type { WorkspaceIdentity } from './contracts.js';
 import type { DelegationSourceSnapshot } from './delegation-records.js';
-import { captureGitTree, runSafeGit } from './git-review.js';
+import { runSafeGit } from './git-execution.js';
+import { captureGitTree } from './git-workspace-snapshot.js';
 import { assertWorkspaceIdentity } from './workspace-identity.js';
 
 type Entry = { mode: '100644' | '100755' | '120000'; oid: string };

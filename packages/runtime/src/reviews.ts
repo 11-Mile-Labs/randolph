@@ -9,10 +9,10 @@ import {
   cleanupGitDelivery,
   commitGitDelivery,
   createGitDeliveryPlan,
-  createGitReview,
   mergeGitDelivery,
   reconcileGitDelivery,
-} from './git-review.js';
+} from './git-delivery.js';
+import { createGitReview } from './git-review.js';
 import { detectVerificationCommands, runVerification } from './verification.js';
 import { WorkspaceOwnership } from './workspace-ownership.js';
 import { workspaceCleanupConfirmed } from './workspace-operation.js';

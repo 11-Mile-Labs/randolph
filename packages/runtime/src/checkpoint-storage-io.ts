@@ -17,7 +17,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
-import { runSafeGit } from './git-review.js';
+import { runSafeGit } from './git-execution.js';
 
 export type JsonValue =
   | null

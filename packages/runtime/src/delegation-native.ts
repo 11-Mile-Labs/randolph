@@ -11,7 +11,7 @@ import type { CapacityQueueReason } from './session-capacity.js';
 import { Store } from './store.js';
 import { assertWorkspaceIdentity } from './workspace-identity.js';
 import type { WorkspaceLeasePort } from './workspace-leases.js';
-import { captureGitTree } from './git-review.js';
+import { captureGitTree } from './git-workspace-snapshot.js';
 
 export type DelegationNativeInput = {
   runId: string;
