@@ -277,7 +277,13 @@ test('an unresponsive executor returns cancellation with unconfirmed cleanup aft
   assert.equal(result.status, 'cancelled');
   assert.equal(result.checks[0].cleanupVerified, false);
   assert.match(result.checks[0].error, /did not confirm cleanup/);
-  assert.ok(result.elapsedMs >= 5000);
+  // CLEANUP_TIMEOUT_MS is 5000 in src/verification.ts (not exported). Node
+  // timers keep libuv time in whole milliseconds at both registration and
+  // the expiry check, while elapsedMs uses sub-ms performance.now();
+  // truncation can therefore let the timer fire under 1ms before the exact
+  // boundary. Allow a small tolerance rather than asserting >= 5000 with
+  // zero slack.
+  assert.ok(result.elapsedMs >= 4_990, `bounded wait elapsed only ${result.elapsedMs} ms`);
   assert.ok(result.elapsedMs < 10_000);
 });
 
