@@ -1,52 +1,25 @@
 import { realpathSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import {
-  parseInspectProject,
-  parseSetupApproval,
-  parseHarnessRequest,
-  parseLinkedCheckpoint,
-  parseAppSettings,
-  parseGlobalMemory,
-  parseCheckpoint,
-  parsePushApproval,
-} from './validation.js';
-import { parseMemoryCommand, parseLessonRef } from './memory-validation.js';
-import {
-  parseApproveDelegation,
-  parseRejectDelegation,
-  parseReviseDelegation,
-  parseSaveDelegationPreset,
-} from './delegation-validation.js';
+import { parseAppSettings } from './validation.js';
 import {
   app,
   BrowserWindow,
   dialog,
   ipcMain,
   Menu,
-  nativeImage,
-  nativeTheme,
-  Notification,
   net,
   protocol,
   session,
-  Tray,
   type IpcMainInvokeEvent,
 } from 'electron';
 import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { Runtime, type AppPreferences, type AppSettingsSnapshot } from '@randolph/runtime';
+import { Runtime } from '@randolph/runtime';
 import { CodexAdapter } from '@randolph/harness-codex';
 import { GrokAdapter } from '@randolph/harness-grok';
-import {
-  parseChatEvents,
-  parseSend,
-  parseId,
-  parseProjectDefaults,
-  parseConversationSelection,
-  parseMode,
-  parseReviewApproval,
-} from './validation.js';
+import { registerDomainCommands } from './main-ipc.js';
+import { createTrayPolicy, type TrayPolicy } from './main-tray.js';
 
 const dataRoot = process.env.RANDOLPH_DATA_DIR
   ? resolve(process.env.RANDOLPH_DATA_DIR)
@@ -62,12 +35,9 @@ let window: BrowserWindow | undefined;
 let runtime: Runtime | undefined;
 let quitting = false;
 let confirming = false;
-let preferences: AppPreferences | undefined;
-let tray: Tray | undefined;
-let trayActive: boolean | undefined;
+let trayPolicy: TrayPolicy | undefined;
 let pendingNavigation: { sequence: number; destination: 'workspace' | 'settings' } | undefined;
 let navigationSequence = 0;
-let notificationCursor = 0;
 
 function assertSender(event: IpcMainInvokeEvent): void {
   if (
@@ -110,7 +80,7 @@ async function openWindow(): Promise<void> {
   window.on('close', (event) => {
     if (quitting) return;
     event.preventDefault();
-    if (preferences?.background) window?.hide();
+    if (trayPolicy?.backgroundEnabled()) window?.hide();
     else void shutdown('close');
   });
   window.on('closed', () => {
@@ -144,8 +114,7 @@ async function shutdown(reason: 'close' | 'quit' = 'quit'): Promise<void> {
       if (answer.response !== 1) return;
     }
     await runtime?.close();
-    tray?.destroy();
-    tray = undefined;
+    trayPolicy?.destroyTray();
     quitting = true;
     app.quit();
   } catch {
@@ -166,92 +135,26 @@ async function showPage(destination: 'workspace' | 'settings'): Promise<void> {
   if (window && !window.webContents.isLoadingMainFrame() && pendingNavigation)
     window.webContents.send('randolph:navigate', pendingNavigation);
 }
-function updateTray(): void {
-  if (!preferences?.background) {
-    tray?.destroy();
-    tray = undefined;
-    trayActive = undefined;
-    return;
-  }
-  if (!tray) {
-    tray = new Tray(
-      nativeImage
-        .createFromPath(join(rendererRoot, 'randolph.png'))
-        .resize({ width: 18, height: 18 }),
-    );
-    tray.on('click', () => {
-      void showPage('workspace');
-    });
-  }
-  const active = runtime?.hasActiveWork() ?? false;
-  if (trayActive === active) return;
-  trayActive = active;
-  tray.setToolTip(active ? 'Randolph — work running' : 'Randolph');
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      {
-        label: 'Open Randolph',
-        click: () => {
-          void showPage('workspace');
-        },
-      },
-      {
-        label: 'Settings…',
-        click: () => {
-          void showPage('settings');
-        },
-      },
-      { type: 'separator' },
-      {
-        label: 'Stop all work',
-        enabled: active,
-        click: () => {
-          void runtime?.stopAll();
-        },
-      },
-      { type: 'separator' },
-      { label: 'Quit Randolph', click: () => app.quit() },
-    ]),
-  );
+async function chooseRestoreDirectory(): Promise<string | null> {
+  const choice = await dialog.showOpenDialog(window!, {
+    title: 'Choose a folder for the restored checkpoint',
+    message:
+      'Creates a new folder with retained files and Git history. No agent or delivery action starts.',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (choice.canceled || !choice.filePaths[0]) return null;
+  return join(realpathSync(choice.filePaths[0]), `randolph-recovery-${randomUUID()}`);
 }
-function applySettings(settings: AppSettingsSnapshot): void {
-  if (settings.error) return;
-  preferences = settings.value;
-  nativeTheme.themeSource = preferences.theme;
-  updateTray();
-}
-function notifyChanges(): void {
-  for (const event of runtime?.store.events() ?? []) {
-    if (event.sequence <= notificationCursor) continue;
-    notificationCursor = event.sequence;
-    if (window?.isFocused() || !Notification.isSupported() || !preferences) continue;
-    const enabled =
-      event.type === 'run.completed'
-        ? preferences.notifications.completed
-        : [
-              'run.failed',
-              'run.stop-unconfirmed',
-              'verification.failed',
-              'verification.stop-unconfirmed',
-              'delivery.failed',
-            ].includes(event.type)
-          ? preferences.notifications.failures
-          : event.type === 'verification.completed' && event.data.status === 'passed'
-            ? preferences.notifications.approvals
-            : false;
-    if (!enabled) continue;
-    const notification = new Notification({
-      title: event.type === 'verification.completed' ? 'Randolph: review ready' : 'Randolph',
-      body: event.summary.slice(0, 240),
-    });
-    notification.on('click', () => {
-      void showPage('workspace');
-    });
-    notification.show();
-  }
+async function chooseProjectDirectory(): Promise<string | null> {
+  const choice = await dialog.showOpenDialog(window!, {
+    title: 'Choose a project folder',
+    properties: ['openDirectory'],
+  });
+  if (choice.canceled || !choice.filePaths[0]) return null;
+  return choice.filePaths[0];
 }
 app.on('window-all-closed', () => {
-  if (!quitting && !preferences?.background) app.quit();
+  if (!quitting && !trayPolicy?.backgroundEnabled()) app.quit();
 });
 app.on('before-quit', (event) => {
   if (!quitting) {
@@ -290,8 +193,18 @@ if (!app.requestSingleInstanceLock()) {
       });
       session.defaultSession.setPermissionCheckHandler(() => false);
       runtime = new Runtime({ codex: new CodexAdapter(), grok: new GrokAdapter() }, dataRoot);
-      notificationCursor = runtime.store.events().at(-1)?.sequence ?? 0;
-      applySettings(runtime.appSettings());
+      const policy = createTrayPolicy({
+        runtime,
+        iconPath: join(rendererRoot, 'randolph.png'),
+        showPage: (destination) => {
+          void showPage(destination);
+        },
+        isWindowFocused: () => window?.isFocused() ?? false,
+        // The before-quit hook routes this back through shutdown's cleanup confirmation.
+        requestQuit: () => app.quit(),
+      });
+      trayPolicy = policy;
+      policy.applySettings(runtime.appSettings());
       app.dock?.setIcon(join(rendererRoot, 'randolph.png'));
       app.setAboutPanelOptions({
         applicationName: 'Randolph',
@@ -301,29 +214,13 @@ if (!app.requestSingleInstanceLock()) {
       });
       runtime.subscribe(() => {
         if (window && !window.isDestroyed()) window.webContents.send('randolph:changed');
-        updateTray();
-        notifyChanges();
+        policy.update();
+        policy.notifyChanges();
       });
+      // Handlers register only after the runtime exists. The bootstrap keeps the channels that
+      // read or write its own navigation and tray state; every other domain goes through the
+      // same guarded registrar in main-ipc.ts.
       command('randolph:snapshot', () => runtime!.snapshot());
-      command('randolph:run-execution-snapshot', (input) =>
-        runtime!.runExecutionSnapshot(parseId(input)),
-      );
-      command('randolph:delegation-snapshot', (input) =>
-        runtime!.delegationSnapshot(parseId(input)),
-      );
-      command('randolph:revise-delegation', (input) =>
-        runtime!.reviseDelegation(parseReviseDelegation(input)),
-      );
-      command('randolph:reject-delegation', (input) =>
-        runtime!.rejectDelegation(parseRejectDelegation(input)),
-      );
-      command('randolph:approve-delegation', (input) =>
-        runtime!.approveDelegation(parseApproveDelegation(input)),
-      );
-      command('randolph:save-delegation-preset', (input) =>
-        runtime!.saveDelegationPreset(parseSaveDelegationPreset(input)),
-      );
-      command('randolph:chat-events', (input) => runtime!.chatEvents(parseChatEvents(input)));
       command('randolph:initial-navigation', () => pendingNavigation ?? null);
       command('randolph:ack-navigation', (sequence) => {
         if (typeof sequence === 'number' && pendingNavigation?.sequence === sequence)
@@ -331,97 +228,19 @@ if (!app.requestSingleInstanceLock()) {
       });
       command('randolph:app-settings', () => {
         const settings = runtime!.appSettings();
-        applySettings(settings);
+        policy.applySettings(settings);
         return settings;
       });
       command('randolph:save-app-settings', (input) => {
         const settings = runtime!.saveAppSettings(parseAppSettings(input));
-        applySettings(settings);
+        policy.applySettings(settings);
         return settings;
       });
-      command('randolph:save-global-memory', (input) =>
-        runtime!.saveGlobalMemory(parseGlobalMemory(input)),
-      );
-      command('randolph:restart-run', (input) => runtime!.restartRun(parseLinkedCheckpoint(input)));
-      command('randolph:rerun-checkpoint', (input) =>
-        runtime!.rerunFromCheckpoint(parseLinkedCheckpoint(input)),
-      );
-      command('randolph:restore-checkpoint', async (input) => {
-        const checkpoint = parseCheckpoint(input);
-        const choice = await dialog.showOpenDialog(window!, {
-          title: 'Choose a folder for the restored checkpoint',
-          message:
-            'Creates a new folder with retained files and Git history. No agent or delivery action starts.',
-          properties: ['openDirectory', 'createDirectory'],
-        });
-        if (choice.canceled || !choice.filePaths[0]) return null;
-        return runtime!.restoreCheckpoint(
-          checkpoint,
-          join(realpathSync(choice.filePaths[0]), `randolph-recovery-${randomUUID()}`),
-        );
+      registerDomainCommands(runtime, {
+        command,
+        chooseRestoreDirectory,
+        chooseProjectDirectory,
       });
-      command('randolph:memory', (id) => runtime!.memorySnapshot(parseId(id)));
-      command('randolph:memory-command', (input) =>
-        runtime!.memoryCommand(parseMemoryCommand(input)),
-      );
-      command('randolph:memory-history', (input) => {
-        if (
-          !input ||
-          typeof input !== 'object' ||
-          !('projectId' in input) ||
-          !('reference' in input)
-        )
-          throw new Error('Invalid memory history request.');
-        return runtime!.memoryHistory(parseId(input.projectId), parseLessonRef(input.reference));
-      });
-      command('randolph:project-setup', (id) => runtime!.projectSetup(parseId(id)));
-      command('randolph:reconcile-setup-cleanup', (id) =>
-        runtime!.reconcileProjectSetupCleanup(parseId(id)),
-      );
-      command('randolph:inspect-project', (input) =>
-        runtime!.inspectProject(parseInspectProject(input)),
-      );
-      command('randolph:approve-project-setup', (input) =>
-        runtime!.approveProjectSetup(parseSetupApproval(input)),
-      );
-      command('randolph:harness-installations', (input) =>
-        runtime!.harnessInstallations(parseHarnessRequest(input).harness),
-      );
-      command('randolph:harness', (input) => {
-        const request = parseHarnessRequest(input);
-        return runtime!.harness(request.projectId, request.executable, request.harness);
-      });
-      command('randolph:add-project', async () => {
-        const choice = await dialog.showOpenDialog(window!, {
-          title: 'Choose a project folder',
-          properties: ['openDirectory'],
-        });
-        if (choice.canceled || !choice.filePaths[0]) return null;
-        return runtime!.addProject(choice.filePaths[0]);
-      });
-      command('randolph:create-conversation', (id) => runtime!.createConversation(parseId(id)));
-      command('randolph:save-project-defaults', (input) =>
-        runtime!.saveProjectDefaults(parseProjectDefaults(input)),
-      );
-      command('randolph:conversation-selection', (input) =>
-        runtime!.setConversationSelection(parseConversationSelection(input)),
-      );
-      command('randolph:execution-mode', (input) => runtime!.setExecutionMode(parseMode(input)));
-      command('randolph:integrate', (id) => runtime!.integrateConversation(parseId(id)));
-      command('randolph:confirm-integration', (id) => runtime!.confirmIntegration(parseId(id)));
-      command('randolph:prepare-review', (id) => runtime!.prepareReview(parseId(id)));
-      command('randolph:verify-review', (id) => runtime!.verifyReview(parseId(id)));
-      command('randolph:approve-review', (input) =>
-        runtime!.approveReview(parseReviewApproval(input)),
-      );
-      command('randolph:preview-push', (id) => runtime!.previewPush(parseId(id)));
-      command('randolph:approve-push', (input) => runtime!.approvePush(parsePushApproval(input)));
-      command('randolph:check-push', (id) => runtime!.checkPush(parseId(id)));
-      command('randolph:stop-push', (id) => runtime!.stopPush(parseId(id)));
-      command('randolph:stop-review', (id) => runtime!.stopReview(parseId(id)));
-      command('randolph:send', (input) => runtime!.send(parseSend(input)));
-      command('randolph:stop', (id) => runtime!.stop(parseId(id)));
-      command('randolph:mark-read', (id) => runtime!.markRead(parseId(id)));
       Menu.setApplicationMenu(
         Menu.buildFromTemplate([
           {
