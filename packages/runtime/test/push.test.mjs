@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { previewOriginPush, executeOriginPush, reconcileOriginPush } from '../src/push.ts';
+import { previewOriginPush, executeOriginPush, reconcileOriginPush } from '../dist/push.js';
 
 const options = { allowLocalTransport: true };
 function git(root, args) {
