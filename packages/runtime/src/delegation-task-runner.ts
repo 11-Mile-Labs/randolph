@@ -144,7 +144,10 @@ export class DelegationTaskRunner {
     runId: string,
     assignment: DelegationAssignment,
   ): Array<{ role: 'user' | 'assistant'; text: string }> {
-    const context = this.controls.read(runId)!.coordinator!.context;
+    const coordinator = this.controls.read(runId)?.coordinator;
+    if (!coordinator)
+      throw new ExecutionAdmissionClosed('Task execution lost its coordinator claim.');
+    const context = coordinator.context;
     const dependencies = this.records
       .tasks(runId)
       .filter(
