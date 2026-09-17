@@ -27,6 +27,7 @@ export type Pending = {
   timer: ReturnType<typeof setTimeout>;
 };
 export const MAX_LINE = 1_048_576;
+export const VERIFIED_CODE_VERSION = /^codex-cli 0\.(149|154)\.0$/;
 export const bounded = (value: unknown, limit = 16_384): string =>
   typeof value === 'string' ? value.slice(0, limit) : '';
 export const identity = (value: unknown): string | undefined =>
