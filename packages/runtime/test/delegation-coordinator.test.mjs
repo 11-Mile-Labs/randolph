@@ -483,3 +483,99 @@ test('budget expiry inside begin stays paused instead of failing an unlaunched t
   assert.ok(paused.find((task) => task.assignmentId === 'writer-a').attempts[0]);
   f.controls.finish('run', active.token, { confirmed: true, evidence: { fixture: 'settled' } });
 });
+
+function breakDelegationTaskWrites(store, active, oneShot = false) {
+  const database = store.db,
+    original = database.prepare;
+  let thrown = 0;
+  database.prepare = (sql) => {
+    const statement = original.call(database, sql);
+    if (!active() || !sql.includes('UPDATE delegation_tasks')) return statement;
+    return new Proxy(statement, {
+      get(target, property) {
+        if (property !== 'run') {
+          const value = Reflect.get(target, property);
+          return typeof value === 'function' ? value.bind(target) : value;
+        }
+        return (...args) => {
+          if (oneShot && thrown) return target.run(...args);
+          thrown += 1;
+          throw new Error('Injected delegation task write failure');
+        };
+      },
+    });
+  };
+  return () => {
+    database.prepare = original;
+  };
+}
+
+test('a failed task attempt settles its session, attempt and failure evidence atomically', async (t) => {
+  const f = fixture(t),
+    events = [],
+    originalApply = DelegationIntegration.prototype.apply;
+  let breakTasks = false;
+  DelegationIntegration.prototype.apply = () => {
+    breakTasks = true;
+    throw new Error('Injected partial raw apply failure');
+  };
+  const restorePrepare = breakDelegationTaskWrites(f.store, () => breakTasks);
+  try {
+    await coordinator(f, adapter(events)).drive({
+      runId: 'run',
+      expectedGeneration: 1,
+      signal: new AbortController().signal,
+    });
+  } finally {
+    restorePrepare();
+    DelegationIntegration.prototype.apply = originalApply;
+  }
+  const task = f.records.tasks('run').find((value) => value.assignmentId === 'integrate'),
+    attempt = task.attempts.at(-1),
+    session = f.records.sessions('run').find((value) => value.id === attempt.sessionId),
+    failures = f.store
+      .events('run')
+      .filter((value) => value.type === 'delegation.coordinator-task-failed');
+  assert.equal(task.state, 'running');
+  assert.equal(attempt.status, 'dispatching');
+  assert.equal(attempt.runtimeRecoveryRequired, undefined);
+  assert.equal(attempt.error, undefined);
+  assert.equal(session.state, 'prepared');
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].data.taskId, task.id);
+  assert.match(failures[0].data.error, /Injected partial raw apply failure/);
+  assert.match(failures[0].data.settlementError, /Injected delegation task write failure/);
+});
+
+test('a failed attempt whose fallback succeeds still records session, attempt and evidence together', async (t) => {
+  const f = fixture(t),
+    events = [],
+    originalApply = DelegationIntegration.prototype.apply;
+  let breakTasks = false;
+  DelegationIntegration.prototype.apply = () => {
+    breakTasks = true;
+    throw new Error('Injected partial raw apply failure');
+  };
+  const restorePrepare = breakDelegationTaskWrites(f.store, () => breakTasks, true);
+  try {
+    await coordinator(f, adapter(events)).drive({
+      runId: 'run',
+      expectedGeneration: 1,
+      signal: new AbortController().signal,
+    });
+  } finally {
+    restorePrepare();
+    DelegationIntegration.prototype.apply = originalApply;
+  }
+  const task = f.records.tasks('run').find((value) => value.assignmentId === 'integrate'),
+    attempt = task.attempts.at(-1),
+    session = f.records.sessions('run').find((value) => value.id === attempt.sessionId),
+    failures = f.store
+      .events('run')
+      .filter((value) => value.type === 'delegation.coordinator-task-failed');
+  assert.equal(session.state, 'failed');
+  assert.equal(attempt.runtimeRecoveryRequired, true);
+  assert.match(attempt.error, /Injected partial raw apply failure/);
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].data.settlementError, undefined);
+});

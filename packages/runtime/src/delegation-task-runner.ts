@@ -85,6 +85,61 @@ export class DelegationTaskRunner {
         .run(JSON.stringify(task), task.id);
     });
   }
+  /**
+   * Settles a failed attempt's session record, attempt record and failure evidence in one
+   * transaction. Returns `undefined` when the settlement committed, or the bounded settlement
+   * error when it rolled back, so the caller can still retain standalone failure evidence.
+   */
+  private settleFailure(input: {
+    run: Parameters<Store['append']>[0];
+    runId: string;
+    taskId: string;
+    attempt: Attempt;
+    error: string;
+  }): string | undefined {
+    const { run, runId, taskId, attempt, error } = input;
+    try {
+      this.store.transaction(() => {
+        const session = this.records
+          .sessions(runId)
+          .find((value) => value.id === attempt.sessionId);
+        if (session?.state === 'prepared' && !session.admissionClaim)
+          this.records.finishSession({
+            runId,
+            sessionId: session.id,
+            status: 'failed',
+            cleanupConfirmed: true,
+            cleanupEvidence: { dispatch: 'not-invoked' },
+            error,
+          });
+        try {
+          this.tasks.finishAttempt({
+            runId,
+            taskId,
+            attemptId: attempt.id,
+            sessionId: attempt.sessionId!,
+            status: 'failed',
+            error,
+            result: { success: false, summary: error, artifacts: [] },
+          });
+        } catch {
+          this.updateAttempt(runId, taskId, attempt.id, (value) => {
+            value.runtimeRecoveryRequired = true;
+            value.error = error;
+          });
+        }
+        this.store.append(
+          run,
+          'delegation.coordinator-task-failed',
+          'Task execution could not advance; retained evidence was preserved.',
+          { taskId, error },
+        );
+      });
+      return undefined;
+    } catch (settlementCause) {
+      return boundedError(settlementCause);
+    }
+  }
   private messages(
     runId: string,
     assignment: DelegationAssignment,
@@ -333,42 +388,23 @@ export class DelegationTaskRunner {
         !control.recoveryRequired
       )
         return;
+      const error = boundedError(cause);
       if (attempt) {
-        const session = this.records
-          .sessions(runId)
-          .find((value) => value.id === attempt!.sessionId);
-        if (session?.state === 'prepared' && !session.admissionClaim)
-          this.records.finishSession({
-            runId,
-            sessionId: session.id,
-            status: 'failed',
-            cleanupConfirmed: true,
-            cleanupEvidence: { dispatch: 'not-invoked' },
-            error: boundedError(cause),
-          });
-        try {
-          this.tasks.finishAttempt({
-            runId,
-            taskId,
-            attemptId: attempt.id,
-            sessionId: attempt.sessionId!,
-            status: 'failed',
-            error: boundedError(cause),
-            result: { success: false, summary: boundedError(cause), artifacts: [] },
-          });
-        } catch {
-          this.updateAttempt(runId, taskId, attempt.id, (value) => {
-            value.runtimeRecoveryRequired = true;
-            value.error = boundedError(cause);
-          });
-        }
-      }
-      this.store.append(
-        run,
-        'delegation.coordinator-task-failed',
-        'Task execution could not advance; retained evidence was preserved.',
-        { taskId, error: boundedError(cause) },
-      );
+        const settlementError = this.settleFailure({ run, runId, taskId, attempt, error });
+        if (settlementError)
+          this.store.append(
+            run,
+            'delegation.coordinator-task-failed',
+            'Task execution could not advance; retained evidence was preserved.',
+            { taskId, error, settlementError },
+          );
+      } else
+        this.store.append(
+          run,
+          'delegation.coordinator-task-failed',
+          'Task execution could not advance; retained evidence was preserved.',
+          { taskId, error },
+        );
     } finally {
       if (ownership && attempt) {
         const retained = this.records.tasks(runId).find((value) => value.id === taskId)!;
