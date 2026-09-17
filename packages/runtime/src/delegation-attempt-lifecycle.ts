@@ -11,6 +11,7 @@ import {
   type DelegationSourceSnapshot,
   type DelegationTask,
 } from './delegation-records.js';
+import { terminal } from './delegation-task-state.js';
 import { Store } from './store.js';
 import { now } from './runtime-status.js';
 
@@ -27,9 +28,6 @@ type SessionIntent = Omit<
   | 'error'
 >;
 type FinishStatus = 'completed' | 'failed' | 'interrupted';
-const terminal = (task: DelegationTask): boolean =>
-  ['completed', 'failed', 'cancelled', 'cleanup-unconfirmed'].includes(task.state) ||
-  (task.state === 'blocked' && task.blockedReason !== undefined);
 const text = (value: unknown, label: string, maximum = 500): string => {
   if (
     typeof value !== 'string' ||

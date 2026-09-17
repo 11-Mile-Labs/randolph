@@ -12,6 +12,10 @@ import { DelegationRecords } from '../dist/delegation-records.js';
 import { DelegationControls } from '../dist/delegation-control.js';
 import { DelegationIntegration } from '../dist/delegation-integration.js';
 import { DelegationCoordinator } from '../dist/delegation-coordinator.js';
+import { DelegationTaskRunner } from '../dist/delegation-task-runner.js';
+import { DelegationTasks } from '../dist/delegation-tasks.js';
+import { DelegationSources } from '../dist/delegation-sources.js';
+import { DelegationIntegrationStage } from '../dist/delegation-integration-stage.js';
 import { WorkspaceOwnership } from '../dist/workspace-ownership.js';
 import { NativeAdmission } from '../dist/native-admission.js';
 import { prepareWorkspace } from '../dist/workspace.js';
@@ -482,4 +486,205 @@ test('budget expiry inside begin stays paused instead of failing an unlaunched t
   assert.equal(events.length, 0);
   assert.ok(paused.find((task) => task.assignmentId === 'writer-a').attempts[0]);
   f.controls.finish('run', active.token, { confirmed: true, evidence: { fixture: 'settled' } });
+});
+
+function breakDelegationTaskWrites(store, active, oneShot = false) {
+  const database = store.db,
+    original = database.prepare;
+  let thrown = 0;
+  database.prepare = (sql) => {
+    const statement = original.call(database, sql);
+    if (!active() || !sql.includes('UPDATE delegation_tasks')) return statement;
+    return new Proxy(statement, {
+      get(target, property) {
+        if (property !== 'run') {
+          const value = Reflect.get(target, property);
+          return typeof value === 'function' ? value.bind(target) : value;
+        }
+        return (...args) => {
+          if (oneShot && thrown) return target.run(...args);
+          thrown += 1;
+          throw new Error('Injected delegation task write failure');
+        };
+      },
+    });
+  };
+  return () => {
+    database.prepare = original;
+  };
+}
+
+test('a failed task attempt settles its session, attempt and failure evidence atomically', async (t) => {
+  const f = fixture(t),
+    events = [],
+    originalApply = DelegationIntegration.prototype.apply;
+  let breakTasks = false;
+  DelegationIntegration.prototype.apply = () => {
+    breakTasks = true;
+    throw new Error('Injected partial raw apply failure');
+  };
+  const restorePrepare = breakDelegationTaskWrites(f.store, () => breakTasks);
+  try {
+    await coordinator(f, adapter(events)).drive({
+      runId: 'run',
+      expectedGeneration: 1,
+      signal: new AbortController().signal,
+    });
+  } finally {
+    restorePrepare();
+    DelegationIntegration.prototype.apply = originalApply;
+  }
+  const task = f.records.tasks('run').find((value) => value.assignmentId === 'integrate'),
+    attempt = task.attempts.at(-1),
+    session = f.records.sessions('run').find((value) => value.id === attempt.sessionId),
+    failures = f.store
+      .events('run')
+      .filter((value) => value.type === 'delegation.coordinator-task-failed');
+  assert.equal(task.state, 'running');
+  assert.equal(attempt.status, 'dispatching');
+  assert.equal(attempt.runtimeRecoveryRequired, undefined);
+  assert.equal(attempt.error, undefined);
+  assert.equal(session.state, 'prepared');
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].data.taskId, task.id);
+  assert.match(failures[0].data.error, /Injected partial raw apply failure/);
+  assert.match(failures[0].data.settlementError, /Injected delegation task write failure/);
+});
+
+test('a failed attempt whose fallback succeeds still records session, attempt and evidence together', async (t) => {
+  const f = fixture(t),
+    events = [],
+    originalApply = DelegationIntegration.prototype.apply;
+  let breakTasks = false;
+  DelegationIntegration.prototype.apply = () => {
+    breakTasks = true;
+    throw new Error('Injected partial raw apply failure');
+  };
+  const restorePrepare = breakDelegationTaskWrites(f.store, () => breakTasks, true);
+  try {
+    await coordinator(f, adapter(events)).drive({
+      runId: 'run',
+      expectedGeneration: 1,
+      signal: new AbortController().signal,
+    });
+  } finally {
+    restorePrepare();
+    DelegationIntegration.prototype.apply = originalApply;
+  }
+  const task = f.records.tasks('run').find((value) => value.assignmentId === 'integrate'),
+    attempt = task.attempts.at(-1),
+    session = f.records.sessions('run').find((value) => value.id === attempt.sessionId),
+    failures = f.store
+      .events('run')
+      .filter((value) => value.type === 'delegation.coordinator-task-failed');
+  assert.equal(session.state, 'failed');
+  assert.equal(attempt.runtimeRecoveryRequired, true);
+  assert.match(attempt.error, /Injected partial raw apply failure/);
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].data.settlementError, undefined);
+});
+
+// Builds the runner directly with the same collaborators DelegationCoordinator constructs
+// (delegation-coordinator.ts:35-49). Direct construction is required: driving through the
+// coordinator supplies `current` as its claim guard, whose own() check throws
+// 'Coordinator ownership is stale.' before the runner can read the claim itself.
+function directRunner(f, native) {
+  const tasks = new DelegationTasks(f.store);
+  const sources = new DelegationSources(f.store, (input) => {
+    const output = tasks.completedOutput(input);
+    if (!output) throw new Error('Task source output is unavailable.');
+    return output;
+  });
+  return new DelegationTaskRunner({
+    store: f.store,
+    controls: f.controls,
+    leases: f.leases,
+    records: f.records,
+    tasks,
+    sources,
+    integration: new DelegationIntegrationStage(f.store, f.leases, undefined, f.controls),
+    native,
+    verification: {
+      async runNext() {
+        throw new Error('Verification is unreachable for a worker assignment.');
+      },
+    },
+  });
+}
+function rewriteControl(f, mutate) {
+  const control = f.controls.read('run');
+  mutate(control);
+  f.store.db
+    .prepare('UPDATE delegation_controls SET document=? WHERE run_id=?')
+    .run(JSON.stringify(control), 'run');
+}
+// Runs 'writer-a' once against a native stub that leaves the attempt dispatching, so the second
+// run re-enters with an existing attempt and a bound workspace and reaches the claim read.
+async function dispatchedWriter(t) {
+  const f = fixture(t),
+    assignment = f.records
+      .plans('run')
+      .at(-1)
+      .plan.assignments.find((value) => value.id === 'writer-a'),
+    task = f.records.tasks('run').find((value) => value.assignmentId === 'writer-a');
+  // Only DelegationCoordinator.claim seeds `coordinator`; the shared fixture's controls.create
+  // does not. messages() is the argument expression at delegation-task-runner.ts:279 and so runs
+  // on the first run too, which would otherwise throw at the very line under test.
+  rewriteControl(f, (control) => {
+    control.coordinator = { id: randomUUID(), active: true, context: {} };
+  });
+  const generation = f.controls.read('run').generation,
+    runner = directRunner(f, {
+      async run() {
+        return { status: 'pending' };
+      },
+    });
+  const invoke = () =>
+    runner.run({
+      runId: 'run',
+      taskId: task.id,
+      assignment,
+      signal: new AbortController().signal,
+      current: () => generation,
+    });
+  await invoke();
+  const dispatched = f.records.tasks('run').find((value) => value.id === task.id),
+    attempt = dispatched.attempts.at(-1),
+    session = f.records.sessions('run').find((value) => value.id === attempt.sessionId);
+  assert.equal(dispatched.state, 'running');
+  assert.equal(attempt.status, 'dispatching');
+  assert.equal(session.state, 'prepared');
+  assert.equal(session.admissionClaim, undefined);
+  return { f, task, invoke };
+}
+
+test('a task that loses its coordinator claim while paused returns without failing the attempt', async (t) => {
+  const { f, task, invoke } = await dispatchedWriter(t);
+  rewriteControl(f, (control) => {
+    delete control.coordinator;
+  });
+  f.controls.command('run', f.controls.read('run').revision, 'pause');
+  await invoke();
+  const attempt = f.records
+    .tasks('run')
+    .find((value) => value.id === task.id)
+    .attempts.at(-1);
+  assert.notEqual(attempt.status, 'failed');
+  assert.equal(attempt.status, 'dispatching');
+  assert.equal(attempt.error, undefined);
+});
+
+test('a task that loses its coordinator claim while running settles as a bounded admission failure', async (t) => {
+  const { f, task, invoke } = await dispatchedWriter(t);
+  rewriteControl(f, (control) => {
+    delete control.coordinator;
+  });
+  await invoke();
+  const attempt = f.records
+    .tasks('run')
+    .find((value) => value.id === task.id)
+    .attempts.at(-1);
+  assert.equal(attempt.status, 'failed');
+  assert.equal(attempt.error, 'Task execution lost its coordinator claim.');
+  assert.doesNotMatch(attempt.error ?? '', /Cannot read propert/);
 });

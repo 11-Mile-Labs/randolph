@@ -606,3 +606,23 @@ test('reader identity aliases are compatible only with readers and retained read
     'blocked',
   );
 });
+
+test('a blocked acquire leaves no workspace ownership row and no replayed acquire behind', (t) => {
+  const { store, ownership, request } = fixture(t);
+  assert.equal(ownership.acquire(request).status, 'acquired');
+  const contender = { ...request, reservationId: 'two', ownerId: 'other' };
+  assert.equal(ownership.acquire(contender).status, 'blocked');
+  assert.equal(
+    store.db.prepare('SELECT COUNT(*) AS total FROM workspace_ownership WHERE id=?').get('two')
+      .total,
+    0,
+  );
+  assert.deepEqual(
+    ownership.snapshot().map((value) => value.reservationId),
+    ['one'],
+  );
+  ownership.release(release);
+  const later = ownership.acquire(contender);
+  assert.equal(later.status, 'acquired');
+  assert.equal(later.replayed, false);
+});

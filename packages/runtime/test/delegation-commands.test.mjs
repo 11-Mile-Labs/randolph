@@ -367,10 +367,50 @@ test('tampered settings keep a pending preset receipt visible without overwritin
   await writeFile(path, tampered);
   const snapshot = await commands.snapshot('run-one');
   assert.ok(snapshot.presetSaveWarnings.length);
+  assert.equal(snapshot.settings.error, undefined);
+  assert.match(snapshot.presetSaveWarnings.join(' '), /no longer match/i);
   assert.equal(commands.records.presetSaves('run-one').length, 0);
   assert.equal(await readFile(path, 'utf8'), tampered);
   assert.equal(commands.records.authorizations('run-one').length, 0);
   assert.deepEqual(queued, []);
+});
+
+test('an unreadable settings file reports the read failure rather than a false digest mismatch', async (t) => {
+  const { root, commands, ready, queued } = await fixture(t);
+  const value = ready();
+  const input = {
+    ...exact(value),
+    presetId: 'daily-code',
+    name: 'Daily code',
+    expectedSettingsRevision: null,
+  };
+  const original = commands.records.recordPresetSave;
+  commands.records.recordPresetSave = () => {
+    throw new Error('receipt database failed');
+  };
+  await assert.rejects(commands.savePreset(input), /receipt.*unconfirmed/i);
+  commands.records.recordPresetSave = original;
+  const path = join(root, 'config.delegation.yaml'),
+    malformed = 'schemaVersion: 1\nrouting: balanced\npresets: [unclosed\n';
+  await writeFile(path, malformed);
+  const snapshot = await commands.snapshot('run-one');
+  assert.ok(snapshot.settings.error);
+  assert.ok(Array.isArray(snapshot.presetSaveWarnings));
+  assert.equal(snapshot.presetSaveWarnings.length, 1);
+  assert.match(snapshot.presetSaveWarnings[0], /could not be read/i);
+  assert.doesNotMatch(snapshot.presetSaveWarnings[0], /no longer match/i);
+  assert.equal(commands.records.presetSaves('run-one').length, 0);
+  assert.equal(await readFile(path, 'utf8'), malformed);
+  assert.equal(commands.records.authorizations('run-one').length, 0);
+  assert.deepEqual(queued, []);
+});
+
+test('a delegation snapshot always carries a preset save warnings array', async (t) => {
+  const { commands } = await fixture(t);
+  const snapshot = await commands.snapshot('run-one');
+  assert.ok(Array.isArray(snapshot.presetSaveWarnings));
+  assert.equal(snapshot.presetSaveWarnings.length, 0);
+  assert.equal(snapshot.plan, undefined);
 });
 
 test('an explicit newer preset save supersedes an older unconfirmed intent', async (t) => {

@@ -22,6 +22,6 @@ export type DelegationSnapshot = {
   blockedReasons: string[];
   canEdit: boolean;
   canApprove: boolean;
-  presetSaveWarnings?: string[];
+  presetSaveWarnings: string[];
   settings: { revision: string | null; value: DelegationSettings; error?: string };
 };
