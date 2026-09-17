@@ -25,8 +25,7 @@ import { runExecutionSnapshot } from './run-execution.js';
 import { DelegationControls } from './delegation-control.js';
 import { DelegationTasks } from './delegation-tasks.js';
 import { DelegationChecks } from './delegation-checks.js';
-import { assertDelegationBasis } from './delegation-basis.js';
-import type { DelegationAvailability } from './delegation-plan.js';
+import { delegationCommandPolicy } from './delegation-command-policy.js';
 import type {
   DelegationSnapshot,
   DelegationRevisionInput,
@@ -152,100 +151,17 @@ export class Runtime {
     );
     this.delegation = new DelegationCommands(
       this.store,
-      {
-        assertMutable: (run) => {
-          if (
-            !this.accepting ||
-            this.admission.has(run.conversationId) ||
-            this.active.has(run.id) ||
-            this.reviews?.hasActiveWork(run.conversationId) ||
-            this.pushes?.hasActiveWork(run.conversationId)
-          )
-            throw new Error('Wait for current work to settle before changing this proposal.');
-          const runs = this.store
-            .runs()
-            .filter((candidate) => candidate.conversationId === run.conversationId);
-          if (runs.at(-1)?.id !== run.id)
-            throw new Error('A newer conversation request superseded this proposal.');
-          if (
-            conversationHasBlockingRun(runs, run.conversationId) ||
-            this.delegation.records
-              .sessions(run.id)
-              .some((session) =>
-                ['prepared', 'dispatch-intent', 'running', 'cleanup-unconfirmed'].includes(
-                  session.state,
-                ),
-              )
-          )
-            throw new Error('Native work and cleanup must settle before a proposal decision.');
-        },
-        assertBasis: (run, plan) => assertDelegationBasis(this.store, run, plan),
-        availability: async (run, plan) => {
-          const available: DelegationAvailability['routes'] = [];
-          const unique = [
-            ...new Map(
-              plan.plan.assignments.map((assignment) => [
-                `${assignment.harness}:${assignment.executable}`,
-                assignment,
-              ]),
-            ).values(),
-          ];
-          const results = await Promise.allSettled(
-            unique.map(async (assignment) => {
-              if (
-                !run.enabledHarnessRoutes?.some(
-                  (route) =>
-                    route.harness === assignment.harness &&
-                    route.executable === assignment.executable,
-                )
-              )
-                return;
-              const found = this.adapters[assignment.harness];
-              if (!found) return;
-              const info = await this.nativeAdmission
-                .adapter(assignment.harness, found, {
-                  owner: { kind: 'delegation', id: run.id },
-                  runId: run.id,
-                })
-                .discover(assignment.executable);
-              if (
-                !info.available ||
-                !info.authenticated ||
-                info.executable !== assignment.executable ||
-                !info.version
-              )
-                return;
-              available.push({
-                harness: assignment.harness,
-                executable: info.executable,
-                version: info.version,
-                models: info.models.map((model) => ({ id: model.id, efforts: model.efforts })),
-                modes: info.executionModes ?? ['read-only'],
-                enabled: true,
-                commandCapability: Boolean(
-                  found.runCommand &&
-                  info.commandLifecycle === true &&
-                  info.executionModes?.includes('code'),
-                ),
-              });
-            }),
-          );
-          if (results.some((result) => result.status === 'rejected'))
-            throw new Error('A proposed CLI could not be inspected. Refresh before approval.');
-          if (!run.executable || !run.executableVersion)
-            throw new Error('The retained main-agent CLI identity is incomplete.');
-          return {
-            routes: available,
-            mainSelection: {
-              harness: run.harness ?? 'codex',
-              executable: run.executable,
-              executableVersion: run.executableVersion,
-              model: run.model,
-              effort: run.effort,
-            },
-          };
-        },
-      },
+      delegationCommandPolicy({
+        store: this.store,
+        nativeAdmission: this.nativeAdmission,
+        adapters: this.adapters,
+        isAccepting: () => this.accepting,
+        isAdmitting: (conversationId) => this.admission.has(conversationId),
+        isRunActive: (runId) => this.active.has(runId),
+        reviewsBusy: (conversationId) => this.reviews?.hasActiveWork(conversationId) ?? false,
+        pushesBusy: (conversationId) => this.pushes?.hasActiveWork(conversationId) ?? false,
+        sessions: (runId) => this.delegation.records.sessions(runId),
+      }),
       () => this.changed(),
     );
     this.delegation.records.reconcileUnfinishedSessions();
