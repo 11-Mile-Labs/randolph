@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { admittedHarnessAdapter } from './admitted-harness-adapter.js';
 import { AdapterRunFailure, type HarnessAdapter, type HarnessId } from './contracts.js';
+import { legacyNativeCleanupConfirmed } from './native-legacy-ownership.js';
 import {
-  legacyNativeCleanupConfirmed,
-  reconstructLegacyNativeOwnership,
-} from './native-legacy-ownership.js';
-import { DelegationRecords } from './delegation-records.js';
+  reconcileNativeAdmissionOnReopen,
+  retainedLegacyNativeLeases,
+} from './native-admission-recovery.js';
 import type { NativeAdmissionCleanup, NativeAdmissionContext } from './native-admission-types.js';
 import { NativeAdmissionQueue } from './native-admission-queue.js';
 import { NativeOperationRecords, type NativeOperation } from './native-operation-records.js';
@@ -46,90 +46,8 @@ export class NativeAdmission {
     this.origin = structuredClone(origin);
     this.records = new NativeOperationRecords(store);
     this.queue = new NativeAdmissionQueue(new SessionCapacity(limits));
-    this.records.reconcileOnReopen();
-    const sessions = new DelegationRecords(store);
-    for (const run of store.runs())
-      if (
-        run.status === 'interrupted' &&
-        run.cleanupUnconfirmed === false &&
-        sessions
-          .sessions(run.id)
-          .some((session) => session.cleanupEvidence?.reconciliation === 'later-boot')
-      )
-        this.records.reconcileSetupCleanup(run.id);
-    const operations = this.records.list();
-    for (const operation of operations) {
-      if (
-        !operation.runId ||
-        !operation.sessionId ||
-        !['model-turn', 'command'].includes(operation.purpose) ||
-        !operation.cleanupConfirmed ||
-        !operation.cleanupEvidence
-      )
-        continue;
-      const linked = operations.filter((item) => item.sessionId === operation.sessionId);
-      if (
-        linked.some(
-          (item) =>
-            !item.cleanupConfirmed ||
-            item.runId !== operation.runId ||
-            item.harness !== operation.harness,
-        )
-      )
-        continue;
-      const session = sessions
-        .sessions(operation.runId)
-        .find((item) => item.id === operation.sessionId);
-      if (!session || session.harness !== operation.harness) continue;
-      if (
-        operation.state === 'interrupted' &&
-        operation.cleanupEvidence.reason === 'not-admitted-on-reopen' &&
-        session.native
-      )
-        throw new Error('Queued native operation contradicts a retained native session identity.');
-      if (['prepared', 'dispatch-intent', 'running'].includes(session.state))
-        sessions.finishSession({
-          runId: operation.runId,
-          sessionId: session.id,
-          status: 'interrupted',
-          cleanupConfirmed: true,
-          cleanupEvidence: { operationId: operation.id, ...operation.cleanupEvidence },
-          error: 'Native operation cleanup is retained. No session was resumed.',
-        });
-    }
-    this.queue.capacity.restore(
-      this.records
-        .list()
-        .filter((item) => item.state === 'quarantined')
-        .map((item) => ({
-          reservationId: item.id,
-          ownerId: item.owner.id,
-          runId: item.runId,
-          harness: item.harness,
-          ...item.capacity,
-          generation: 1,
-          state: 'cleanup-unconfirmed' as const,
-        })),
-    );
-    const retained = (
-      store.db.prepare('SELECT document FROM native_legacy_ownership').all() as Array<{
-        document: string;
-      }>
-    ).map((row) => JSON.parse(row.document) as CapacityLease);
-    const legacy = [
-      ...new Map(
-        [...reconstructLegacyNativeOwnership(store), ...retained].map((lease) => [
-          lease.reservationId,
-          lease,
-        ]),
-      ).values(),
-    ];
-    store.transaction(() => {
-      for (const lease of legacy)
-        store.db
-          .prepare('INSERT OR IGNORE INTO native_legacy_ownership(id, document) VALUES (?, ?)')
-          .run(lease.reservationId, JSON.stringify(lease));
-    });
+    this.queue.capacity.restore(reconcileNativeAdmissionOnReopen(store, this.records));
+    const legacy = retainedLegacyNativeLeases(store);
     this.queue.capacity.restore(legacy);
     for (const lease of legacy) this.legacy.set(lease.reservationId, lease);
   }
