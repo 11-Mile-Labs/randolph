@@ -1,10 +1,21 @@
-import { accessSync, constants, statSync } from 'node:fs';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { parse } from 'smol-toml';
 import type { HarnessModel } from '@randolph/runtime/contracts';
-import { hasOwn, identity, identitiesAgree, object, type Json } from './codex-shared.js';
+import {
+  hasOwn,
+  identity,
+  identitiesAgree,
+  object,
+  type CodexAdapterOptions,
+  type Exec,
+  type Json,
+  type Spawn,
+} from './codex-shared.js';
+import type { RpcClient } from './codex-rpc.js';
 
 const THREAD_NOTIFICATIONS_WITH_TURN_ID = new Set(['thread/tokenUsage/updated']);
 
@@ -210,4 +221,79 @@ export async function terminate(child: ChildProcessWithoutNullStreams): Promise<
     }
   }
   return true;
+}
+export class CodexProcessHost {
+  readonly exec: Exec;
+  readonly spawn: Spawn;
+  readonly timeout: number;
+  constructor(readonly options: CodexAdapterOptions = {}) {
+    this.exec = options.execFile ?? ((file, args, settings) => execFileSync(file, args, settings));
+    this.spawn = options.spawn ?? ((file, args, settings) => spawn(file, args, settings));
+    this.timeout = options.rpcTimeoutMs ?? 20_000;
+  }
+  // Discovery re-enters with a substituted executable instead of reconstructing the public adapter.
+  withExecutable(executable: string): CodexProcessHost {
+    return new CodexProcessHost({ ...this.options, executable });
+  }
+  executablePath(): string {
+    const path = this.options.executable ?? executableCandidates()[0];
+    if (!path) throw new Error('Codex CLI was not found. Install it and sign in with ChatGPT.');
+    return path;
+  }
+  launch(cwd: string, code = false): ChildProcessWithoutNullStreams {
+    const configPath = join(homedir(), '.codex', 'config.toml');
+    let config: Json = {};
+    if (existsSync(configPath)) {
+      try {
+        config = parse(readFileSync(configPath, 'utf8')) as Json;
+      } catch {
+        throw new Error('Codex configuration could not be parsed. Check it in the CLI first.');
+      }
+    }
+    const settings = [
+      'model_provider="openai"',
+      'forced_login_method="chatgpt"',
+      `sandbox_mode="${code ? 'workspace-write' : 'read-only'}"`,
+      'approval_policy="never"',
+      'web_search="disabled"',
+      'project_doc_max_bytes=0',
+      'shell_environment_policy.inherit="none"',
+      `shell_environment_policy.set.HOME=${JSON.stringify(cwd)}`,
+      `shell_environment_policy.set.ZDOTDIR=${JSON.stringify(cwd)}`,
+      `shell_environment_policy.set.PATH=${JSON.stringify(toolchainPath())}`,
+      `shell_environment_policy.set.VOLTA_HOME=${JSON.stringify(join(homedir(), '.volta'))}`,
+      `shell_environment_policy.set.PYENV_ROOT=${JSON.stringify(join(homedir(), '.pyenv'))}`,
+      'shell_environment_policy.set.GIT_CONFIG_GLOBAL="/dev/null"',
+      'shell_environment_policy.set.GIT_CONFIG_NOSYSTEM="1"',
+    ];
+    if (code)
+      settings.push(
+        'sandbox_workspace_write.network_access=false',
+        'sandbox_workspace_write.exclude_tmpdir_env_var=true',
+        'sandbox_workspace_write.exclude_slash_tmp=true',
+        `sandbox_workspace_write.writable_roots=${JSON.stringify([cwd])}`,
+      );
+    for (const name of Object.keys(object(config.mcp_servers))) {
+      if (!/^[A-Za-z0-9_-]+$/.test(name))
+        throw new Error('This Codex configuration contains an unsupported MCP server name.');
+      settings.push(`mcp_servers.${name}.enabled=false`);
+    }
+    return this.spawn(
+      this.executablePath(),
+      [
+        'app-server',
+        '--stdio',
+        ...FEATURES.flatMap((feature) => ['--disable', feature]),
+        ...settings.flatMap((setting) => ['-c', setting]),
+      ],
+      { cwd, env: environment(), stdio: ['pipe', 'pipe', 'pipe'], detached: true },
+    );
+  }
+  async initialize(client: RpcClient): Promise<void> {
+    await client.rpc('initialize', {
+      clientInfo: { name: 'randolph', version: '0.1.0' },
+      capabilities: { experimentalApi: true },
+    });
+    client.send({ method: 'initialized', params: {} });
+  }
 }

@@ -6,12 +6,8 @@ import {
 } from './application-tools.js';
 import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { parse } from 'smol-toml';
 import { AdapterRunFailure } from '@randolph/runtime/contracts';
 import type {
   AdapterCommand,
@@ -19,259 +15,44 @@ import type {
   HarnessAdapter,
   HarnessInfo,
   HarnessInstallation,
-  HarnessModel,
 } from '@randolph/runtime/contracts';
 import {
   bounded,
   object,
+  VERIFIED_CODE_VERSION,
   type CodexAdapterOptions,
-  type Exec,
   type Json,
-  type Spawn,
 } from './codex-shared.js';
 import { RpcClient } from './codex-rpc.js';
 import {
-  FEATURES,
+  CodexProcessHost,
   environment,
-  executableCandidates,
   isRunScopedNotification,
   modelsFrom,
   runNotificationIdentity,
   terminate,
-  toolchainPath,
   verifyCodePolicy,
   workspacePolicy,
 } from './codex-launch.js';
+import {
+  discover as discoverCodex,
+  installations as codexInstallations,
+} from './codex-discovery.js';
 
 export type { CodexAdapterOptions } from './codex-shared.js';
 
-const VERIFIED_CODE_VERSION = /^codex-cli 0\.(149|154)\.0$/;
 const MAX_BUFFERED_RUN_NOTIFICATIONS = 64;
 
 export class CodexAdapter implements HarnessAdapter {
-  private readonly exec: Exec;
-  private readonly spawn: Spawn;
-  private readonly timeout: number;
+  private readonly host: CodexProcessHost;
   constructor(private readonly options: CodexAdapterOptions = {}) {
-    this.exec = options.execFile ?? ((file, args, settings) => execFileSync(file, args, settings));
-    this.spawn = options.spawn ?? ((file, args, settings) => spawn(file, args, settings));
-    this.timeout = options.rpcTimeoutMs ?? 20_000;
-  }
-  private executablePath(): string {
-    const path = this.options.executable ?? executableCandidates()[0];
-    if (!path) throw new Error('Codex CLI was not found. Install it and sign in with ChatGPT.');
-    return path;
-  }
-  private launch(cwd: string, code = false): ChildProcessWithoutNullStreams {
-    const configPath = join(homedir(), '.codex', 'config.toml');
-    let config: Json = {};
-    if (existsSync(configPath)) {
-      try {
-        config = parse(readFileSync(configPath, 'utf8')) as Json;
-      } catch {
-        throw new Error('Codex configuration could not be parsed. Check it in the CLI first.');
-      }
-    }
-    const settings = [
-      'model_provider="openai"',
-      'forced_login_method="chatgpt"',
-      `sandbox_mode="${code ? 'workspace-write' : 'read-only'}"`,
-      'approval_policy="never"',
-      'web_search="disabled"',
-      'project_doc_max_bytes=0',
-      'shell_environment_policy.inherit="none"',
-      `shell_environment_policy.set.HOME=${JSON.stringify(cwd)}`,
-      `shell_environment_policy.set.ZDOTDIR=${JSON.stringify(cwd)}`,
-      `shell_environment_policy.set.PATH=${JSON.stringify(toolchainPath())}`,
-      `shell_environment_policy.set.VOLTA_HOME=${JSON.stringify(join(homedir(), '.volta'))}`,
-      `shell_environment_policy.set.PYENV_ROOT=${JSON.stringify(join(homedir(), '.pyenv'))}`,
-      'shell_environment_policy.set.GIT_CONFIG_GLOBAL="/dev/null"',
-      'shell_environment_policy.set.GIT_CONFIG_NOSYSTEM="1"',
-    ];
-    if (code)
-      settings.push(
-        'sandbox_workspace_write.network_access=false',
-        'sandbox_workspace_write.exclude_tmpdir_env_var=true',
-        'sandbox_workspace_write.exclude_slash_tmp=true',
-        `sandbox_workspace_write.writable_roots=${JSON.stringify([cwd])}`,
-      );
-    for (const name of Object.keys(object(config.mcp_servers))) {
-      if (!/^[A-Za-z0-9_-]+$/.test(name))
-        throw new Error('This Codex configuration contains an unsupported MCP server name.');
-      settings.push(`mcp_servers.${name}.enabled=false`);
-    }
-    return this.spawn(
-      this.executablePath(),
-      [
-        'app-server',
-        '--stdio',
-        ...FEATURES.flatMap((feature) => ['--disable', feature]),
-        ...settings.flatMap((setting) => ['-c', setting]),
-      ],
-      { cwd, env: environment(), stdio: ['pipe', 'pipe', 'pipe'], detached: true },
-    );
-  }
-  private async initialize(client: RpcClient): Promise<void> {
-    await client.rpc('initialize', {
-      clientInfo: { name: 'randolph', version: '0.1.0' },
-      capabilities: { experimentalApi: true },
-    });
-    client.send({ method: 'initialized', params: {} });
+    this.host = new CodexProcessHost(options);
   }
   async installations(): Promise<HarnessInstallation[]> {
-    const paths = [
-      ...new Set(
-        [
-          ...(this.options.executable ? [this.options.executable] : []),
-          ...executableCandidates(),
-        ].map((path) => {
-          try {
-            return realpathSync(path);
-          } catch {
-            return path;
-          }
-        }),
-      ),
-    ];
-    // Candidate enumeration must not create a CLI process outside discovery's lifecycle.
-    return paths.map((executable) => ({ executable }));
+    return codexInstallations(this.host);
   }
   async discover(executable?: string, signal?: AbortSignal): Promise<HarnessInfo> {
-    if (signal?.aborted)
-      return {
-        available: false,
-        authenticated: false,
-        models: [],
-        cleanupVerified: true,
-        reason: 'Discovery was cancelled before dispatch.',
-      };
-    if (executable)
-      return new CodexAdapter({ ...this.options, executable }).discover(undefined, signal);
-    let selected: string;
-    try {
-      selected = this.executablePath();
-    } catch {
-      return {
-        available: false,
-        authenticated: false,
-        models: [],
-        cleanupVerified: true,
-        reason: 'Codex CLI was not found. Install it and sign in with ChatGPT.',
-      };
-    }
-    const resolved = existsSync(selected) ? realpathSync(selected) : selected;
-    if (resolved !== selected)
-      return new CodexAdapter({ ...this.options, executable: resolved }).discover(
-        undefined,
-        signal,
-      );
-    let version: string;
-    try {
-      version = this.exec(this.executablePath(), ['--version'], {
-        encoding: 'utf8',
-        timeout: 5_000,
-        env: environment(),
-      }).trim();
-    } catch {
-      return {
-        available: false,
-        authenticated: false,
-        models: [],
-        cleanupVerified: false,
-        reason: 'Codex CLI could not be started. Install it and sign in with ChatGPT.',
-      };
-    }
-    let child: ChildProcessWithoutNullStreams | undefined;
-    let client: RpcClient | undefined;
-    let stop: Promise<boolean> | undefined;
-    let info: HarnessInfo = {
-      executable: selected,
-      available: true,
-      authenticated: false,
-      commandLifecycle: false,
-      version,
-      models: [],
-      cleanupVerified: false,
-    };
-    const onAbort = (): void => {
-      client?.fail(new Error('Discovery was cancelled.'));
-      if (child) stop ??= terminate(child);
-    };
-    try {
-      if (signal?.aborted)
-        return {
-          ...info,
-          cleanupVerified: true,
-          reason: 'Discovery was cancelled before dispatch.',
-        };
-      child = this.launch(homedir());
-      client = new RpcClient(child, this.timeout, () => {});
-      signal?.addEventListener('abort', onAbort, { once: true });
-      if (signal?.aborted) onAbort();
-      await this.initialize(client);
-      const account = object((await client.rpc('account/read', { refreshToken: false })).account);
-      if (account.type !== 'chatgpt')
-        info.reason =
-          'Sign into the Codex CLI with ChatGPT. API-key authentication is not supported.';
-      else {
-        const models: HarnessModel[] = [];
-        let cursor: string | undefined;
-        const seen = new Set<string>();
-        do {
-          const page = await client.rpc('model/list', {
-            limit: 100,
-            includeHidden: false,
-            ...(cursor ? { cursor } : {}),
-          });
-          models.push(...modelsFrom(page));
-          cursor =
-            typeof page.nextCursor === 'string' && page.nextCursor ? page.nextCursor : undefined;
-          if (cursor && seen.has(cursor))
-            throw new Error('Codex model pagination repeated a cursor.');
-          if (cursor) seen.add(cursor);
-        } while (cursor);
-        info = {
-          ...info,
-          applicationTools: version === 'codex-cli 0.154.0',
-          commandLifecycle: VERIFIED_CODE_VERSION.test(version),
-          authenticated: true,
-          models,
-          executionModes: VERIFIED_CODE_VERSION.test(version)
-            ? ['read-only', 'code']
-            : ['read-only'],
-        };
-      }
-    } catch (error) {
-      info = {
-        ...info,
-        authenticated: false,
-        models: [],
-        reason: error instanceof Error ? error.message : 'Codex discovery failed.',
-      };
-    } finally {
-      signal?.removeEventListener('abort', onAbort);
-      client?.fail(new Error('Discovery ended.'));
-      if (child) info.cleanupVerified = await (stop ?? terminate(child));
-    }
-    if (!info.cleanupVerified)
-      info = {
-        ...info,
-        authenticated: false,
-        commandLifecycle: false,
-        models: [],
-        executionModes: [],
-        reason: 'Native discovery cleanup could not be confirmed.',
-      };
-    if (signal?.aborted)
-      info = {
-        ...info,
-        authenticated: false,
-        commandLifecycle: false,
-        models: [],
-        executionModes: [],
-        reason: 'Discovery was cancelled.',
-      };
-    return info;
+    return discoverCodex(this.host, executable, signal);
   }
   async runCommand(input: AdapterCommand): Promise<{
     exitCode: number | null;
@@ -343,11 +124,13 @@ export class CodexAdapter implements HarnessAdapter {
       )
         throw new Error('Verification requires a bounded command argument vector.');
       command = [...input.command];
-      const version = this.exec(this.executablePath(), ['--version'], {
-        encoding: 'utf8',
-        timeout: 5_000,
-        env: environment(),
-      }).trim();
+      const version = this.host
+        .exec(this.host.executablePath(), ['--version'], {
+          encoding: 'utf8',
+          timeout: 5_000,
+          env: environment(),
+        })
+        .trim();
       if (input.executableVersion && version !== input.executableVersion)
         throw new Error(
           'The selected CLI version changed after this run. Start fresh work before verification.',
@@ -357,8 +140,8 @@ export class CodexAdapter implements HarnessAdapter {
           'Native verification requires the verified Codex CLI 0.149.0 or 0.154.0 version.',
         );
       assertIdentity();
-      child = this.launch(input.workspace, true);
-      client = new RpcClient(child, this.timeout, (message) => {
+      child = this.host.launch(input.workspace, true);
+      client = new RpcClient(child, this.host.timeout, (message) => {
         if (message.method !== 'command/exec/outputDelta') return;
         const params = object(message.params);
         if (params.processId !== processId) return;
@@ -373,7 +156,7 @@ export class CodexAdapter implements HarnessAdapter {
       });
       input.signal.addEventListener('abort', onAbort, { once: true });
       if (input.signal.aborted) onAbort();
-      await this.initialize(client);
+      await this.host.initialize(client);
       assertIdentity();
       check();
       const account = object((await client.rpc('account/read', { refreshToken: false })).account);
@@ -463,11 +246,13 @@ export class CodexAdapter implements HarnessAdapter {
         executable: undefined,
       });
     if (input.executableVersion) {
-      const version = this.exec(this.executablePath(), ['--version'], {
-        encoding: 'utf8',
-        timeout: 5_000,
-        env: environment(),
-      }).trim();
+      const version = this.host
+        .exec(this.host.executablePath(), ['--version'], {
+          encoding: 'utf8',
+          timeout: 5_000,
+          env: environment(),
+        })
+        .trim();
       if (version !== input.executableVersion)
         throw new AdapterRunFailure(
           'The selected CLI version changed before dispatch. Refresh harness discovery and try again.',
@@ -478,11 +263,13 @@ export class CodexAdapter implements HarnessAdapter {
     if (input.executionMode !== undefined && input.executionMode !== 'read-only' && !code)
       throw new AdapterRunFailure('Unsupported execution mode.', { dispatch: 'not-invoked' });
     if (code) {
-      const version = this.exec(this.executablePath(), ['--version'], {
-        encoding: 'utf8',
-        timeout: 5_000,
-        env: environment(),
-      }).trim();
+      const version = this.host
+        .exec(this.host.executablePath(), ['--version'], {
+          encoding: 'utf8',
+          timeout: 5_000,
+          env: environment(),
+        })
+        .trim();
       if (!VERIFIED_CODE_VERSION.test(version))
         throw new AdapterRunFailure(
           'Code execution requires the verified Codex CLI 0.149.0 or 0.154.0 version.',
@@ -494,11 +281,13 @@ export class CodexAdapter implements HarnessAdapter {
       : undefined;
     const onApplicationRequest = input.applicationTools?.onRequest;
     if (dynamicTools) {
-      const version = this.exec(this.executablePath(), ['--version'], {
-        encoding: 'utf8',
-        timeout: 5_000,
-        env: environment(),
-      }).trim();
+      const version = this.host
+        .exec(this.host.executablePath(), ['--version'], {
+          encoding: 'utf8',
+          timeout: 5_000,
+          env: environment(),
+        })
+        .trim();
       if (version !== 'codex-cli 0.154.0')
         throw new AdapterRunFailure(
           'Application tools require the verified Codex CLI 0.154.0 interface.',
@@ -514,7 +303,7 @@ export class CodexAdapter implements HarnessAdapter {
         { dispatch: 'not-invoked' },
       );
     }
-    const child = this.launch(input.workspace, code);
+    const child = this.host.launch(input.workspace, code);
     let threadId = '';
     let turnId = '';
     let outcome: string | undefined;
@@ -652,7 +441,9 @@ export class CodexAdapter implements HarnessAdapter {
       const notifications = bufferedNotifications.splice(0);
       for (const notification of notifications) recordNotification(notification, true);
     };
-    const client = new RpcClient(child, this.timeout, (message) => recordNotification(message));
+    const client = new RpcClient(child, this.host.timeout, (message) =>
+      recordNotification(message),
+    );
     const onAbort = (): void => {
       if (stop) return;
       acceptingNotifications = false;
@@ -680,7 +471,7 @@ export class CodexAdapter implements HarnessAdapter {
     let status: 'completed' | 'interrupted' | 'stop-unconfirmed' = 'completed';
     let failure: unknown;
     try {
-      await this.initialize(client);
+      await this.host.initialize(client);
       checkDispatch();
       const account = object((await client.rpc('account/read', { refreshToken: false })).account);
       if (account.type !== 'chatgpt')
