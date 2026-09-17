@@ -7,6 +7,7 @@ import { Store } from '../dist/store.js';
 import { DelegationControls } from '../dist/delegation-control.js';
 import { DelegationRecords } from '../dist/delegation-records.js';
 import { DelegationTasks } from '../dist/delegation-tasks.js';
+import { terminal } from '../dist/delegation-task-state.js';
 
 const origin = {
   version: 1,
@@ -594,6 +595,30 @@ test('a successful source-producing task cannot finish without its completed exa
   );
 });
 
+test('the shared terminal predicate settles a blocked reason only in the blocked state', () => {
+  assert.equal(
+    terminal({
+      state: 'queued',
+      blockedReason: 'terminal-predecessor',
+      attempts: [],
+    }),
+    false,
+  );
+  assert.equal(
+    terminal({
+      state: 'running',
+      blockedReason: 'synthesis-failed-graph',
+      attempts: [],
+    }),
+    false,
+  );
+  assert.equal(terminal({ state: 'blocked', blockedReason: 'terminal-predecessor' }), true);
+  assert.equal(terminal({ state: 'blocked' }), false);
+  assert.equal(terminal({ state: 'queued' }), false);
+  assert.equal(terminal({ state: 'cancelled', blockedReason: 'terminal-predecessor' }), true);
+  assert.equal(terminal({ state: 'completed' }), true);
+});
+
 test('failed predecessors block a synthesis with an absent declared source and reopening quarantines unfinished task attempts', async (t) => {
   const f = await fixture(t, [
     assignment('worker', 'worker', [], 'run-basis', true),
@@ -624,10 +649,19 @@ test('failed predecessors block a synthesis with an absent declared source and r
     status: 'failed',
     result: { summary: 'failed', artifacts: [], success: false },
   });
+  const blocked = f.tasks.blockUnreachable({ runId: 'run' });
   assert.deepEqual(
-    f.tasks.blockUnreachable({ runId: 'run' }).map((task) => task.id),
+    blocked.map((task) => task.id),
     [synthesis.id],
   );
+  assert.equal(blocked[0].state, 'blocked');
+  assert.equal(blocked[0].blockedReason, 'synthesis-failed-graph');
+  assert.equal(blocked[0].attempts.length, 0);
+  assert.equal(terminal(blocked[0]), true);
+  const born = await fixture(t);
+  assert.equal(born.taskRecords[1].state, 'blocked');
+  assert.equal(born.taskRecords[1].blockedReason, undefined);
+  assert.equal(terminal(born.taskRecords[1]), false);
   assert.throws(
     () =>
       f.tasks.beginAttempt({
