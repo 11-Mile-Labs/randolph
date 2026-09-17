@@ -85,7 +85,13 @@ export class DelegationPresetSaves {
   reconcile(run: Run, settings: DelegationSnapshot['settings']): string[] {
     const warnings: string[] = [];
     for (const intent of this.pendingPresetSaves(run.id)) {
-      if (!settings.error && intent.data.targetSettingsDigest === settingsDigest(settings.value)) {
+      if (settings.error) {
+        warnings.push(
+          'A prior preset save is unconfirmed because the delegation settings could not be read. Correct the settings file and reload before choosing whether to save again.',
+        );
+        continue;
+      }
+      if (intent.data.targetSettingsDigest === settingsDigest(settings.value)) {
         try {
           this.completePresetSave(run, intent, settings.revision, true);
         } catch {
@@ -93,10 +99,11 @@ export class DelegationPresetSaves {
             'A preset exists on disk, but its save receipt remains unconfirmed. Reload to retry reconciliation.',
           );
         }
-      } else
-        warnings.push(
-          'A prior preset save is unconfirmed because the settings no longer match its intended result. Inspect the current preset before choosing whether to save again.',
-        );
+        continue;
+      }
+      warnings.push(
+        'A prior preset save is unconfirmed because the settings no longer match its intended result. Inspect the current preset before choosing whether to save again.',
+      );
     }
     return [...new Set(warnings)];
   }
