@@ -200,6 +200,16 @@
   justify-content: flex-end;
   gap: 10px;
 }
+/* Colocated with the .header-actions base rule above: this control's dark/system
+   overrides live in styles-theme.css, which must stay imported after this sheet. */
+.header-actions select {
+  border: 1px solid #cdc7bc;
+  border-radius: 7px;
+  padding: 6px;
+  background: #fffdf8;
+  color: #555e60;
+  font-size: 11px;
+}
 .secondary-button {
   padding: 7px 11px;
   border: 1px solid #cdc7bc;

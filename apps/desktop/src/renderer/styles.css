@@ -5,5 +5,10 @@
 @import './styles-status.css';
 @import './styles-events.css';
 @import './styles-settings.css';
-@import './styles-setup.css';
+@import './styles-project-setup.css';
+@import './styles-review.css';
+@import './styles-memory.css';
+@import './styles-run-notices.css';
+@import './styles-push.css';
+@import './styles-history.css';
 @import './styles-theme.css';

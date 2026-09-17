@@ -7,6 +7,8 @@ import type {
   Project,
   ProjectHarnessSettings,
 } from '@randolph/runtime/contracts';
+import HarnessSelectionFields from './HarnessSelectionFields';
+import RoutePermissions from './RoutePermissions';
 
 type Props = { project: Project; onClose: () => void; onChanged: () => Promise<void> };
 
@@ -164,6 +166,25 @@ export default function ProjectSettings({ project, onClose, onChanged }: Props) 
     }
   };
 
+  const chooseModel = (modelId: string) => {
+    const next = harness?.models.find((item) => item.id === modelId);
+    if (next) {
+      setModel(next.id);
+      setEffort(next.defaultEffort);
+      setSaved(false);
+    }
+  };
+
+  const chooseEffort = (nextEffort: string) => {
+    setEffort(nextEffort);
+    setSaved(false);
+  };
+
+  const changeEnabledRoutes = (routes: HarnessRoute[]) => {
+    setEnabledRoutes(routes);
+    setSaved(false);
+  };
+
   return (
     <dialog
       className="project-settings"
@@ -193,177 +214,28 @@ export default function ProjectSettings({ project, onClose, onChanged }: Props) 
         Choose the defaults for conversations in this project. Conversation overrides take
         precedence. Changes apply to new runs; active runs keep their starting settings.
       </p>
-      <div className="settings-fields">
-        <label>
-          Harness
-          <select
-            value={harnessId}
-            disabled={busy}
-            onChange={(event) => void chooseHarness(event.target.value as HarnessId)}
-          >
-            <option value="codex">Codex · ChatGPT subscription</option>
-            <option value="grok">Grok · compatibility pending</option>
-          </select>
-        </label>
-        <label>
-          {harnessId === 'grok' ? 'Grok CLI' : 'Codex CLI'}
-          <select
-            value={executable}
-            disabled={busy}
-            onChange={(event) => void chooseExecutable(event.target.value)}
-          >
-            <option value="">Automatic discovery</option>
-            {executable && !installations.some((item) => item.executable === executable) ? (
-              <option value={executable}>{executable} (unavailable)</option>
-            ) : null}
-            {installations.map((item) => (
-              <option key={item.executable} value={item.executable}>
-                {item.version ?? 'Unavailable'} · {item.executable}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p>
-          {harness?.executable ? (
-            <>
-              <code>{harness.executable}</code>
-              <br />
-              {harness.version} ·{' '}
-              {harness.executionModes?.includes('code')
-                ? 'Read-only and Code'
-                : harness.executionModes?.includes('read-only')
-                  ? 'Read-only; Code compatibility unverified'
-                  : 'Execution compatibility pending'}
-            </>
-          ) : (
-            (harness?.reason ?? 'Checking the selected CLI…')
-          )}
-        </p>
-        {harness?.executionModes?.length === 0 && harness.reason ? <p>{harness.reason}</p> : null}
-        <label>
-          Default model
-          <select
-            value={model}
-            disabled={busy || !harness?.available}
-            onChange={(event) => {
-              const next = harness?.models.find((item) => item.id === event.target.value);
-              if (next) {
-                setModel(next.id);
-                setEffort(next.defaultEffort);
-                setSaved(false);
-              }
-            }}
-          >
-            {!selectedModel ? (
-              <option value={model}>
-                {model ? `${model} (unavailable)` : 'No models available'}
-              </option>
-            ) : null}
-            {harness?.models.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Default reasoning effort
-          <select
-            value={effort}
-            disabled={busy || !selectedModel}
-            onChange={(event) => {
-              setEffort(event.target.value);
-              setSaved(false);
-            }}
-          >
-            {!selectedModel?.efforts.includes(effort) ? (
-              <option value={effort}>
-                {effort ? `${effort} (unavailable)` : 'No effort available'}
-              </option>
-            ) : null}
-            {selectedModel?.efforts.map((item) => (
-              <option key={item} value={item}>
-                {item} effort
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <fieldset className="route-permissions" disabled={busy}>
-        <legend>Project CLI permissions</legend>
-        {enabledRoutes === undefined ? (
-          <>
-            <p>
-              This project uses its selected main agent. Enabling additional worker CLIs requires
-              explicit project permissions.
-            </p>
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={!harness?.executable}
-              onClick={() => {
-                setEnabledRoutes(
-                  harness?.executable
-                    ? [{ harness: harnessId, executable: harness.executable }]
-                    : [],
-                );
-                setSaved(false);
-              }}
-            >
-              Set project CLI permissions
-            </button>
-          </>
-        ) : (
-          <>
-            <p>
-              Only enabled CLIs can start new runs. Saved changes leave active runs on their
-              original permissions.
-            </p>
-            {[
-              ...installations.map((item) => ({ harness: harnessId, executable: item.executable })),
-              ...enabledRoutes.filter(
-                (route) =>
-                  route.harness !== harnessId ||
-                  !installations.some((item) => item.executable === route.executable),
-              ),
-            ].map((route) => (
-              <label key={`${route.harness}:${route.executable}`}>
-                <input
-                  type="checkbox"
-                  checked={enabledRoutes.some(
-                    (item) =>
-                      item.harness === route.harness && item.executable === route.executable,
-                  )}
-                  onChange={(event) => {
-                    setEnabledRoutes(
-                      event.target.checked
-                        ? [...enabledRoutes, route]
-                        : enabledRoutes.filter(
-                            (item) =>
-                              item.harness !== route.harness ||
-                              item.executable !== route.executable,
-                          ),
-                    );
-                    setSaved(false);
-                  }}
-                />
-                <span>
-                  Allow {route.harness} · {route.executable}
-                </span>
-              </label>
-            ))}
-            {!enabledRoutes.length ? (
-              <p>No CLI is enabled. New execution will be blocked until you enable one.</p>
-            ) : null}
-            {harness?.executable &&
-            !enabledRoutes.some(
-              (route) => route.harness === harnessId && route.executable === harness.executable,
-            ) ? (
-              <p>The selected default CLI is disabled for new runs.</p>
-            ) : null}
-          </>
-        )}
-      </fieldset>
+      <HarnessSelectionFields
+        harnessId={harnessId}
+        executable={executable}
+        installations={installations}
+        harness={harness}
+        model={model}
+        effort={effort}
+        selectedModel={selectedModel}
+        busy={busy}
+        onHarnessChange={(next) => void chooseHarness(next)}
+        onExecutableChange={(next) => void chooseExecutable(next)}
+        onModelChange={chooseModel}
+        onEffortChange={chooseEffort}
+      />
+      <RoutePermissions
+        enabledRoutes={enabledRoutes}
+        harnessId={harnessId}
+        harness={harness}
+        installations={installations}
+        busy={busy}
+        onEnabledRoutesChange={changeEnabledRoutes}
+      />
       <p className="settings-location">
         Saving creates or updates <code>config.harness.yaml</code> in the project folder. You can
         version and edit this file yourself.

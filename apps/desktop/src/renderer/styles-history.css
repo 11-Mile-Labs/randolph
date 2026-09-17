@@ -1,0 +1,18 @@
+.history-dialog {
+  padding: 0;
+  color: var(--ink);
+  width: min(1000px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 24px 100px #0003;
+  flex-direction: column;
+}
+.history-dialog[open] {
+  display: flex;
+}
+.history-dialog::backdrop {
+  background: #18271d66;
+}

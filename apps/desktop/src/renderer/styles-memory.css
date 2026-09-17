@@ -1,0 +1,118 @@
+.memory-panel {
+  width: min(1040px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  overflow-y: auto;
+}
+.memory-panel::backdrop {
+  background: #161c2055;
+}
+.memory-panel header,
+.memory-panel footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.memory-panel h2 {
+  margin: 4px 0;
+  font-family: Georgia, serif;
+  font-size: 28px;
+}
+.memory-layout {
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr);
+  gap: 24px;
+  margin: 24px 0;
+}
+.memory-layout aside {
+  border-right: 1px solid var(--line);
+  padding-right: 18px;
+}
+.memory-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.memory-row.selected {
+  background: var(--surface-muted);
+}
+.memory-row button {
+  display: grid;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.memory-row small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.memory-editor {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+.memory-editor label {
+  display: grid;
+  gap: 6px;
+}
+.memory-editor input,
+.memory-editor textarea,
+.memory-editor select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 9px;
+  color: inherit;
+  font: inherit;
+}
+.memory-actions,
+.memory-group-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.memory-group-actions {
+  margin: 12px 0;
+}
+.memory-preferences {
+  border-top: 1px solid var(--line);
+  padding: 16px 0;
+}
+.memory-preferences label {
+  display: block;
+  margin: 12px 0;
+}
+.memory-editor details p {
+  white-space: pre-wrap;
+}
+
+.memory-project-preferences textarea {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+/* These button rules sat after the run-notice rules in the old omnibus sheet; they
+   belong to the memory panel, and no run-notice selector shares their subjects. */
+.memory-panel .primary-button,
+.memory-group-actions button {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
