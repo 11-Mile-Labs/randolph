@@ -177,6 +177,97 @@ test('settles only a durably later-boot reconciled project-setup model turn', ()
   rmSync(root, { recursive: true, force: true });
 });
 
+test('setup reconciliation refuses an otherwise eligible run that carries delegated task authority', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'randolph-native-setup-delegated-')),
+    store = new Store(root),
+    at = '2026-01-01T00:00:00.000Z',
+    project = { id: 'project', root: '/fixture', name: 'fixture', createdAt: at },
+    conversation = {
+      id: 'conversation',
+      projectId: project.id,
+      kind: 'project-setup',
+      title: 'setup',
+      model: 'm',
+      effort: 'low',
+      createdAt: at,
+      updatedAt: at,
+      lastReadSequence: 0,
+    },
+    origin = { boot: 'old' },
+    run = {
+      id: 'run',
+      projectId: project.id,
+      conversationId: conversation.id,
+      status: 'interrupted',
+      cleanupUnconfirmed: false,
+      executionMode: 'read-only',
+      executionOrigin: origin,
+      model: 'm',
+      effort: 'low',
+      workspace: '/fixture/workspace',
+      createdAt: at,
+      updatedAt: at,
+      lastActivityAt: at,
+    };
+  t.after(() => {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  store.putProject(project);
+  store.putConversation(conversation);
+  store.putRun(run);
+  store.db
+    .prepare(
+      'INSERT INTO delegation_sessions(id, run_id, task_id, document) VALUES (?, ?, NULL, ?)',
+    )
+    .run(
+      'session',
+      run.id,
+      JSON.stringify({
+        id: 'session',
+        runId: run.id,
+        role: 'main',
+        state: 'interrupted',
+        cleanupConfirmed: true,
+        cleanupEvidence: { reconciliation: 'later-boot' },
+        origin,
+      }),
+    );
+  const records = new NativeOperationRecords(store),
+    intent = {
+      id: 'setup-op',
+      owner: { kind: 'run', id: run.id },
+      runId: run.id,
+      sessionId: 'session',
+      harness: 'codex',
+      purpose: 'model-turn',
+      capacity: { role: 'main' },
+      generation: 1,
+      origin,
+    };
+  records.create(intent);
+  records.admit({ id: intent.id, expectedGeneration: 1 });
+  records.settle({
+    id: intent.id,
+    expectedGeneration: 1,
+    status: 'interrupted',
+    cleanupConfirmed: false,
+  });
+  /* The delegation_tasks authorization_id foreign key has no fixture row; the probe is the subject. */
+  store.db.exec('PRAGMA foreign_keys=OFF');
+  try {
+    store.db
+      .prepare(
+        'INSERT INTO delegation_tasks(id, run_id, authorization_id, document) VALUES (?, ?, ?, ?)',
+      )
+      .run('task', run.id, 'fixture-authorization', JSON.stringify({ id: 'task', runId: run.id }));
+  } finally {
+    store.db.exec('PRAGMA foreign_keys=ON');
+  }
+  assert.throws(() => records.reconcileSetupCleanup(run.id), /delegated native operations/);
+  assert.equal(records.list()[0].state, 'quarantined');
+});
+
 test('canonical replay and failed event persistence preserve exact prior operation state', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'randolph-native-atomic-')),
     store = new Store(root),

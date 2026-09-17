@@ -1,6 +1,7 @@
 import { Store } from './store.js';
 import { now } from './runtime-status.js';
 import { canonicalJson } from './canonical-json.js';
+import { setupReconciliationProof } from './native-setup-reconciliation.js';
 
 export type NativeOperationOwner = {
   kind: 'app-discovery' | 'run' | 'review' | 'delegation';
@@ -351,73 +352,21 @@ export class NativeOperationRecords {
   }
   reconcileSetupCleanup(runId: string): NativeOperation[] {
     return this.store.transaction(() => {
-      const run = this.store.runs().find((item) => item.id === runId),
-        conversation =
-          run && this.store.conversations().find((item) => item.id === run.conversationId);
-      if (
-        !run ||
-        !conversation ||
-        conversation.kind !== 'project-setup' ||
-        run.executionMode !== 'read-only' ||
-        run.cleanupUnconfirmed ||
-        run.status !== 'interrupted'
-      )
-        throw new Error(
-          'Only durably reconciled read-only project setup runs may settle native operations.',
-        );
-      if (
-        this.store.db.prepare('SELECT 1 FROM delegation_tasks WHERE run_id=? LIMIT 1').get(runId) ||
-        this.store.db
-          .prepare('SELECT 1 FROM delegation_controls WHERE run_id=? LIMIT 1')
-          .get(runId) ||
-        this.store.db
-          .prepare('SELECT 1 FROM delegation_tool_receipts WHERE run_id=? LIMIT 1')
-          .get(runId)
-      )
-        throw new Error('Project setup reconciliation cannot settle delegated native operations.');
-      const sessions = (
-        this.store.db
-          .prepare('SELECT document FROM delegation_sessions WHERE run_id=?')
-          .all(runId) as Array<{ document: string }>
-      ).map(
-        (row) =>
-          JSON.parse(row.document) as {
-            id: string;
-            role: string;
-            state: string;
-            cleanupConfirmed?: boolean;
-            cleanupEvidence?: Record<string, unknown>;
-            origin?: Record<string, unknown>;
-          },
-      );
+      /* The eligibility policy reads current rows, so it is built here, inside this transaction, before any write. */
+      const proof = setupReconciliationProof(this.store, runId);
       const updated: NativeOperation[] = [];
       for (const item of this.list({ runId })) {
         if (item.purpose !== 'model-turn' || item.state !== 'quarantined' || !item.sessionId)
           continue;
-        const session = sessions.find((value) => value.id === item.sessionId);
-        if (
-          !session ||
-          session.role !== 'main' ||
-          session.state !== 'interrupted' ||
-          session.cleanupConfirmed !== true ||
-          session.cleanupEvidence?.reconciliation !== 'later-boot' ||
-          !same(item.origin, session.origin) ||
-          !same(item.origin, run.executionOrigin)
-        )
-          throw new Error(
-            'Setup native operation lacks the durable later-boot session reconciliation proof.',
-          );
+        /* Proved per item inside the loop: a late throw must still roll back the items written before it. */
+        const evidence = proof.settlement(item);
         item.state = 'settled';
         item.terminalStatus = 'interrupted';
         item.cleanupConfirmed = true;
-        item.cleanupEvidence = { reconciliation: 'later-boot', sessionId: session.id };
+        item.cleanupEvidence = evidence;
         item.updatedAt = now();
         this.write(item);
-        this.event(item, 'settled', {
-          generation: item.generation,
-          reconciliation: 'later-boot',
-          sessionId: session.id,
-        });
+        this.event(item, 'settled', { generation: item.generation, ...evidence });
         updated.push(item);
       }
       return updated;

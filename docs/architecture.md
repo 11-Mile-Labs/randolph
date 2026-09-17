@@ -60,20 +60,21 @@ flowchart TB
 
 `Runtime` in `packages/runtime/src/index.ts` is a thin public facade. Collaborators and bounded workflows live in named modules. Native execute/stop/close remain instance methods so tests can intercept them, with their bodies in `run-turn.ts` and `runtime-lifecycle.ts`.
 
-| Responsibility                   | Module                                                                  | Notes                                                         |
-| -------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Composition                      | `packages/runtime/src/index.ts` constructor                             | Wires adapters and collaborators                              |
-| Reopen interruption              | `packages/runtime/src/runtime-reopen.ts`                                | Marks interrupted runs without restarting work                |
-| Workspace preparation            | `packages/runtime/src/run-workspace.ts`                                 | Lease acquire, plan, transfer, release                        |
-| Harness inspection and selection | `packages/runtime/src/runtime-harness.ts`                               | Discovery, defaults, conversation overrides, execution mode   |
-| Ordinary send                    | `packages/runtime/src/run-dispatch.ts`                                  | Prepare, retain, then hand to execute                         |
-| Linked recovery                  | `packages/runtime/src/checkpoint-recovery.ts`                           | Checkpoint parse and restart/rerun dispatch                   |
-| Execute and event/finish         | `packages/runtime/src/run-turn.ts`                                      | Runtime keeps interceptable `execute`/`finish` wrappers       |
-| Stop, stop-all, close            | `packages/runtime/src/runtime-lifecycle.ts`                             | Shutdown and active-work queries                              |
-| Projects and conversations       | `packages/runtime/src/runtime-catalog.ts`                               | Add project, create conversation, snapshot, checkpoint export |
-| Project setup                    | `packages/runtime/src/project-setup-runtime.ts` plus `project-setup.ts` | Inspection conversations and context approval                 |
-| Reviews, push, memory            | `reviews.ts`, `pushes.ts`, `memory.ts`                                  | Already extracted                                             |
-| Store                            | `store.ts`                                                              | SQLite remains the state authority                            |
+| Responsibility                   | Module                                                                                                                                              | Notes                                                                                               |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Composition                      | `packages/runtime/src/index.ts` constructor                                                                                                         | Wires adapters and collaborators                                                                    |
+| Reopen interruption              | `packages/runtime/src/runtime-reopen.ts`                                                                                                            | Marks interrupted runs without restarting work                                                      |
+| Workspace preparation            | `packages/runtime/src/run-workspace.ts`                                                                                                             | Lease acquire, plan, transfer, release                                                              |
+| Harness inspection and selection | `packages/runtime/src/runtime-harness.ts`                                                                                                           | Discovery, defaults, conversation overrides, execution mode                                         |
+| Ordinary send                    | `packages/runtime/src/run-dispatch.ts`                                                                                                              | Prepare, retain, then hand to execute                                                               |
+| Linked recovery                  | `packages/runtime/src/checkpoint-recovery.ts`                                                                                                       | Checkpoint parse and restart/rerun dispatch                                                         |
+| Execute and event/finish         | `packages/runtime/src/run-turn.ts`                                                                                                                  | Runtime keeps interceptable `execute`/`finish` wrappers                                             |
+| Stop, stop-all, close            | `packages/runtime/src/runtime-lifecycle.ts`                                                                                                         | Shutdown and active-work queries                                                                    |
+| Projects and conversations       | `packages/runtime/src/runtime-catalog.ts`                                                                                                           | Add project, create conversation, snapshot, checkpoint export                                       |
+| Project setup                    | `packages/runtime/src/project-setup-runtime.ts` plus `project-setup.ts`                                                                             | Inspection conversations and context approval                                                       |
+| Native admission                 | `native-admission.ts`, `native-admission-queue.ts`, `native-admission-recovery.ts`, `native-operation-records.ts`, `native-setup-reconciliation.ts` | Capacity, startup reconstruction, the SQLite operation ledger, and setup reconciliation eligibility |
+| Reviews, push, memory            | `reviews.ts`, `pushes.ts`, `memory.ts`                                                                                                              | Already extracted                                                                                   |
+| Store                            | `store.ts`                                                                                                                                          | SQLite remains the state authority                                                                  |
 
 This map is navigation, not a folder reshuffle.
 
