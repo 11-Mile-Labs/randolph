@@ -5,13 +5,17 @@ import type {
   MemoryCommand,
   MemorySnapshot,
 } from '@randolph/runtime/contracts';
+import MemoryLessonEditor from './MemoryLessonEditor';
+import MemoryLessonList from './MemoryLessonList';
+import MemoryPreferencesSection from './MemoryPreferencesSection';
+import { failure } from './memory-panel-types';
+
+export { failure } from './memory-panel-types';
 
 const reference = (lesson: LessonVersion): LessonRef => ({
   lessonId: lesson.lessonId,
   version: lesson.version,
 });
-const failure = (error: unknown): string =>
-  error instanceof Error ? error.message : 'Memory operation failed.';
 export default function MemoryPanel({
   projectId,
   onClose,
@@ -100,6 +104,51 @@ export default function MemoryPanel({
       snapshot?.lessons.filter((lesson) => chosen.includes(lesson.lessonId)).map(reference) ?? [];
     await command({ projectId, action, references });
   };
+  const toggleChosen = (lessonId: string, checked: boolean) => {
+    setChosen((values) =>
+      checked ? [...values, lessonId] : values.filter((id) => id !== lessonId),
+    );
+  };
+  const approveSelected = () => {
+    if (!selected) return;
+    void command({ projectId, action: 'approve', references: [reference(selected)] });
+  };
+  const rejectSelected = () => {
+    if (!selected) return;
+    void command({ projectId, action: 'reject', references: [reference(selected)] });
+  };
+  const togglePin = () => {
+    if (!selected) return;
+    void command({
+      projectId,
+      action: 'pin',
+      reference: selectedPin ?? reference(selected),
+      pinned: !selectedPin,
+    });
+  };
+  const updatePin = () => {
+    if (!selected) return;
+    void command({ projectId, action: 'pin', reference: reference(selected), pinned: true });
+  };
+  const restoreVersion = (sourceVersion: number) => {
+    if (!selected) return;
+    void command({
+      projectId,
+      action: 'restore',
+      reference: reference(selected),
+      sourceVersion,
+    });
+  };
+  const loadHistory = () => {
+    if (!selected) return;
+    void (async () => {
+      try {
+        setHistory(await window.randolph.memoryHistory(projectId, reference(selected)));
+      } catch (error) {
+        setError(failure(error));
+      }
+    })();
+  };
   return (
     <dialog
       className="memory-panel"
@@ -129,257 +178,63 @@ export default function MemoryPanel({
         </p>
       ) : null}
       <div className="memory-layout">
-        <aside aria-label="Lessons">
-          <button className="primary-button" type="button" onClick={() => choose()}>
-            New lesson
-          </button>
-          <div className="memory-group-actions">
-            <button disabled={busy || !chosen.length} onClick={() => void reviewGroup('approve')}>
-              Approve selected
-            </button>
-            <button disabled={busy || !chosen.length} onClick={() => void reviewGroup('reject')}>
-              Reject selected
-            </button>
-          </div>
-          {snapshot?.lessons.map((lesson) => (
-            <div
-              className={`memory-row ${selectedId === lesson.lessonId ? 'selected' : ''}`}
-              key={lesson.lessonId}
-            >
-              <input
-                aria-label={`Select ${lesson.title}`}
-                type="checkbox"
-                checked={chosen.includes(lesson.lessonId)}
-                onChange={(event) =>
-                  setChosen((values) =>
-                    event.target.checked
-                      ? [...values, lesson.lessonId]
-                      : values.filter((id) => id !== lesson.lessonId),
-                  )
-                }
-              />
-              <button type="button" onClick={() => choose(lesson)}>
-                <strong>{lesson.title}</strong>
-                <small>
-                  {lesson.scope.kind} · v{lesson.version} · {lesson.status}
-                  {snapshot.pins.some((pin) => pin.lessonId === lesson.lessonId) ? ' · pinned' : ''}
-                </small>
-              </button>
-            </div>
-          ))}
-          {!snapshot?.lessons.length ? <p className="muted">No lessons yet.</p> : null}
-        </aside>
-        <section className="memory-editor" aria-label="Lesson editor">
-          <label>
-            Scope
-            <select
-              aria-label="Lesson scope"
-              value={scope}
-              disabled={Boolean(selected) || busy}
-              onChange={(event) => setScope(event.target.value as 'project' | 'global')}
-            >
-              <option value="project">This project</option>
-              <option value="global">Global, when relevant</option>
-            </select>
-          </label>
-          <label>
-            Title
-            <input
-              aria-label="Lesson title"
-              maxLength={200}
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-            />
-          </label>
-          <label>
-            Lesson
-            <textarea
-              aria-label="Lesson text"
-              rows={7}
-              maxLength={16000}
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-            />
-          </label>
-          <label>
-            Tags
-            <input
-              aria-label="Lesson tags"
-              value={tags}
-              onChange={(event) => setTags(event.target.value)}
-              placeholder="testing, migrations"
-            />
-          </label>
-          <div className="memory-actions">
-            <button
-              className="primary-button"
-              disabled={busy || !title.trim() || !text.trim()}
-              onClick={() => void save()}
-            >
-              {selected ? 'Save new version' : 'Create lesson'}
-            </button>
-            {dirty ? <p>Save edits as a new version before approving them.</p> : null}
-            {selected ? (
-              <>
-                <button
-                  className="secondary-button"
-                  disabled={busy || dirty || selected.status === 'superseded'}
-                  onClick={() =>
-                    void command({
-                      projectId,
-                      action: 'approve',
-                      references: [reference(selected)],
-                    })
-                  }
-                >
-                  Approve lesson
-                </button>
-                <button
-                  className="secondary-button"
-                  disabled={busy}
-                  onClick={() =>
-                    void command({ projectId, action: 'reject', references: [reference(selected)] })
-                  }
-                >
-                  Reject lesson
-                </button>
-              </>
-            ) : null}
-          </div>
-          {dirty ? <p>Save edits as a new version before approving them.</p> : null}
-          {selected ? (
-            <>
-              <div className="memory-actions">
-                <button
-                  className="secondary-button"
-                  disabled={busy || (!selectedPin && selected.status !== 'approved')}
-                  onClick={() =>
-                    void command({
-                      projectId,
-                      action: 'pin',
-                      reference: selectedPin ?? reference(selected),
-                      pinned: !selectedPin,
-                    })
-                  }
-                >
-                  {selectedPin ? `Remove pin v${selectedPin.version}` : 'Pin this version'}
-                </button>
-                {selectedPin &&
-                selectedPin.version !== selected.version &&
-                selected.status === 'approved' ? (
-                  <button
-                    className="secondary-button"
-                    disabled={busy}
-                    onClick={() =>
-                      void command({
-                        projectId,
-                        action: 'pin',
-                        reference: reference(selected),
-                        pinned: true,
-                      })
-                    }
-                  >
-                    Update pin to v{selected.version}
-                  </button>
-                ) : null}
-                <button
-                  className="secondary-button"
-                  onClick={() => {
-                    void (async () => {
-                      try {
-                        setHistory(
-                          await window.randolph.memoryHistory(projectId, reference(selected)),
-                        );
-                      } catch (error) {
-                        setError(failure(error));
-                      }
-                    })();
-                  }}
-                >
-                  Version history
-                </button>
-              </div>
-              {selectedPin && selectedPin.version !== selected.version ? (
-                <p className="inline-error">
-                  The pin still refers to v{selectedPin.version}. New messages are blocked until
-                  that pin is resolved.
-                </p>
-              ) : null}
-              {selected.evidence.length ? (
-                <details>
-                  <summary>Supporting evidence</summary>
-                  {selected.evidence.map((item, i) => (
-                    <p key={i}>
-                      {item.label}: <code>{item.uri}</code>
-                    </p>
-                  ))}
-                </details>
-              ) : null}
-              {history.map((version) => (
-                <details key={version.version}>
-                  <summary>
-                    Version {version.version} · {version.status}
-                  </summary>
-                  <p>{version.text}</p>
-                  <button
-                    className="secondary-button"
-                    disabled={busy}
-                    onClick={() =>
-                      void command({
-                        projectId,
-                        action: 'restore',
-                        reference: reference(selected),
-                        sourceVersion: version.version,
-                      })
-                    }
-                  >
-                    Restore version {version.version}
-                  </button>
-                </details>
-              ))}
-            </>
-          ) : null}
-        </section>
+        <MemoryLessonList
+          lessons={snapshot?.lessons ?? []}
+          pins={snapshot?.pins ?? []}
+          selectedId={selectedId}
+          chosen={chosen}
+          busy={busy}
+          onChoose={choose}
+          onReviewGroup={reviewGroup}
+          onToggleChosen={toggleChosen}
+        />
+        <MemoryLessonEditor
+          scope={scope}
+          title={title}
+          text={text}
+          tags={tags}
+          selected={selected}
+          selectedPin={selectedPin}
+          history={history}
+          dirty={dirty}
+          busy={busy}
+          onScopeChange={setScope}
+          onTitleChange={setTitle}
+          onTextChange={setText}
+          onTagsChange={setTags}
+          onSave={save}
+          onApprove={approveSelected}
+          onReject={rejectSelected}
+          onTogglePin={togglePin}
+          onUpdatePin={updatePin}
+          onHistory={loadHistory}
+          onRestore={restoreVersion}
+        />
       </div>
       {snapshot ? (
-        <details className="memory-preferences">
-          <summary>Approval preferences and framework versions</summary>
-          <p>
-            Project and global auto-approval are separate. Changes apply to newly created or edited
-            lessons.
-          </p>
-          <ProjectPreferences
-            key={snapshot.projectSettings.revision ?? 'default'}
-            settings={snapshot.projectSettings}
-            busy={busy}
-            save={(value) =>
-              command({
-                projectId,
-                action: 'settings',
-                scope: 'project',
-                value,
-                expectedRevision: snapshot.projectSettings.revision,
-              })
-            }
-          />
-          <label>
-            <input
-              type="checkbox"
-              checked={snapshot.globalSettings.value.autoApprove}
-              disabled={busy}
-              onChange={(event) =>
-                void command({
-                  projectId,
-                  action: 'settings',
-                  scope: 'global',
-                  value: { ...snapshot.globalSettings.value, autoApprove: event.target.checked },
-                  expectedRevision: snapshot.globalSettings.revision,
-                })
-              }
-            />
-            Automatically approve new global lessons
-          </label>
-        </details>
+        <MemoryPreferencesSection
+          projectSettings={snapshot.projectSettings}
+          globalAutoApprove={snapshot.globalSettings.value.autoApprove}
+          busy={busy}
+          onSaveProject={(value) =>
+            command({
+              projectId,
+              action: 'settings',
+              scope: 'project',
+              value,
+              expectedRevision: snapshot.projectSettings.revision,
+            })
+          }
+          onSaveGlobal={(autoApprove) =>
+            void command({
+              projectId,
+              action: 'settings',
+              scope: 'global',
+              value: { ...snapshot.globalSettings.value, autoApprove },
+              expectedRevision: snapshot.globalSettings.revision,
+            })
+          }
+        />
       ) : null}
       <footer>
         <button
@@ -393,74 +248,5 @@ export default function MemoryPanel({
         </button>
       </footer>
     </dialog>
-  );
-}
-
-function ProjectPreferences({
-  settings,
-  busy,
-  save,
-}: {
-  settings: MemorySnapshot['projectSettings'];
-  busy: boolean;
-  save: (value: MemorySnapshot['projectSettings']['value']) => Promise<unknown>;
-}) {
-  const [autoApprove, setAutoApprove] = useState(settings.value.autoApprove);
-  const [frameworks, setFrameworks] = useState(
-    Object.entries(settings.value.frameworks)
-      .map(([name, version]) => `${name}=${version}`)
-      .join('\n'),
-  );
-  const [error, setError] = useState<string>();
-  const submit = async () => {
-    try {
-      const entries = frameworks
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((line) => {
-          const separator = line.indexOf('=');
-          if (separator < 1 || !line.slice(separator + 1).trim())
-            throw new Error('Use one Framework=Version pair per line.');
-          return [line.slice(0, separator).trim(), line.slice(separator + 1).trim()] as const;
-        });
-      if (new Set(entries.map(([name]) => name)).size !== entries.length)
-        throw new Error('Framework names must be unique.');
-      setError(undefined);
-      await save({ autoApprove, frameworks: Object.fromEntries(entries) });
-    } catch (error) {
-      setError(failure(error));
-    }
-  };
-  return (
-    <div className="memory-project-preferences">
-      <label>
-        <input
-          type="checkbox"
-          checked={autoApprove}
-          disabled={busy}
-          onChange={(event) => setAutoApprove(event.target.checked)}
-        />
-        Automatically approve new project lessons
-      </label>
-      <label>
-        Project framework versions
-        <textarea
-          aria-label="Project framework versions"
-          rows={3}
-          value={frameworks}
-          onChange={(event) => setFrameworks(event.target.value)}
-          placeholder="React=19"
-        />
-      </label>
-      {error ? (
-        <p className="inline-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-      <button className="secondary-button" disabled={busy} onClick={() => void submit()}>
-        Save project memory preferences
-      </button>
-    </div>
   );
 }
