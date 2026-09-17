@@ -6,6 +6,12 @@ import type {
   Run,
   RunEvent,
 } from '@randolph/runtime/contracts';
+import CheckpointRecoverySection from './CheckpointRecoverySection';
+import HistoryRunList from './HistoryRunList';
+import RecordedOutcomeSections from './RecordedOutcomeSections';
+import type { PendingRecovery } from './history-panel-types';
+
+export type { PendingRecovery } from './history-panel-types';
 
 type Props = {
   runs: Run[];
@@ -31,10 +37,7 @@ export default function HistoryPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [restored, setRestored] = useState<string>();
-  const [pending, setPending] = useState<{
-    checkpoint: CheckpointRecord;
-    kind: 'restart' | 'rerun';
-  }>();
+  const [pending, setPending] = useState<PendingRecovery>();
   const run = runs.find((candidate) => candidate.id === selected);
   const latest = runs.find((candidate) => candidate.conversationId === run?.conversationId);
   const canRestartSource =
@@ -105,26 +108,17 @@ export default function HistoryPanel({
         </button>
       </header>
       <div className="history-body">
-        <nav aria-label="Historical runs">
-          {runs.map((item) => (
-            <button
-              key={item.id}
-              disabled={busy}
-              className={item.id === selected ? 'selected' : ''}
-              onClick={() => {
-                setSelected(item.id);
-                setError(undefined);
-                setRestored(undefined);
-                setPending(undefined);
-              }}
-            >
-              <strong>{new Date(item.createdAt).toLocaleString()}</strong>
-              <span>
-                {item.status} · {item.checkpoints?.length ?? 0} checkpoints
-              </span>
-            </button>
-          ))}
-        </nav>
+        <HistoryRunList
+          runs={runs}
+          selected={selected}
+          busy={busy}
+          onSelect={(runId) => {
+            setSelected(runId);
+            setError(undefined);
+            setRestored(undefined);
+            setPending(undefined);
+          }}
+        />
         <div className="history-detail">
           {!run ? (
             <p>No runs retained yet.</p>
@@ -157,107 +151,20 @@ export default function HistoryPanel({
                 </p>
               ) : null}
               {run.error ? <p role="status">{run.error}</p> : null}
-              <h3>Recoverable checkpoints</h3>
-              <p>
-                Restore files and Git history into a new folder. This does not start an agent or
-                repeat a delivery action.
-              </p>
-              {recoveryBlocked ? (
-                <p>
-                  Execution recovery is unavailable while this conversation has active work or
-                  unconfirmed process cleanup.
-                </p>
-              ) : null}
-              {run.checkpointError ? (
-                <p role="alert">The latest checkpoint could not be saved: {run.checkpointError}</p>
-              ) : null}
-              {!run.checkpoints?.length ? (
-                <p>No recoverable checkpoint was retained for this run.</p>
-              ) : (
-                run.checkpoints.map((checkpoint) => (
-                  <article className="checkpoint-card" key={checkpoint.id}>
-                    <strong>
-                      {checkpoint.boundary === 'before-turn' ? 'Before turn' : 'Completed turn'}
-                    </strong>
-                    <span>{new Date(checkpoint.createdAt).toLocaleString()}</span>
-                    <code title={checkpoint.digest}>{checkpoint.digest.slice(0, 16)}</code>
-                    <button
-                      className="secondary-button"
-                      disabled={busy}
-                      onClick={() => void restore(checkpoint)}
-                    >
-                      Restore files to folder
-                    </button>
-                    <div className="checkpoint-actions">
-                      {run.status === 'interrupted' &&
-                      canRestartSource &&
-                      checkpoint.id === run.checkpoints?.at(-1)?.id ? (
-                        <button
-                          className="secondary-button"
-                          disabled={busy || recoveryBlocked}
-                          onClick={() => {
-                            setPending({ checkpoint, kind: 'restart' });
-                            setError(undefined);
-                          }}
-                        >
-                          Restart from checkpoint
-                        </button>
-                      ) : null}
-                      <button
-                        className="secondary-button"
-                        disabled={busy || recoveryBlocked}
-                        onClick={() => {
-                          setPending({ checkpoint, kind: 'rerun' });
-                          setError(undefined);
-                        }}
-                      >
-                        Rerun in new conversation
-                      </button>
-                    </div>
-                  </article>
-                ))
-              )}
-              {pending ? (
-                <section
-                  className="recovery-confirmation"
-                  aria-label="Confirm checkpoint execution"
-                >
-                  <h3>
-                    {pending.kind === 'restart' ? 'Restart this work?' : 'Rerun this checkpoint?'}
-                  </h3>
-                  <p>
-                    This starts the installed harness in a fresh project worktree using the saved{' '}
-                    {run.model} / {run.effort} configuration and context.{' '}
-                    {pending.kind === 'restart'
-                      ? 'The new run stays in the same conversation.'
-                      : 'The new run opens in a new linked conversation.'}
-                  </p>
-                  <p>
-                    Original history and files are preserved. Saved delivery actions are not
-                    repeated; new results require fresh checks and approval. AI output may differ.
-                  </p>
-                  <code>
-                    {run.harness === 'grok' ? 'Grok' : 'Codex'} · Checkpoint{' '}
-                    {pending.checkpoint.digest.slice(0, 16)} · {run.executionMode ?? 'read-only'}
-                  </code>
-                  <div className="checkpoint-actions">
-                    <button
-                      className="secondary-button"
-                      disabled={busy}
-                      onClick={() => setPending(undefined)}
-                    >
-                      Cancel recovery
-                    </button>
-                    <button
-                      className="primary-button"
-                      disabled={busy || recoveryBlocked}
-                      onClick={() => void executeCheckpoint()}
-                    >
-                      {busy ? 'Starting…' : 'Start linked run'}
-                    </button>
-                  </div>
-                </section>
-              ) : null}
+              <CheckpointRecoverySection
+                run={run}
+                busy={busy}
+                canRestartSource={canRestartSource}
+                recoveryBlocked={recoveryBlocked}
+                pending={pending}
+                onRestore={(checkpoint) => void restore(checkpoint)}
+                onPrepare={(checkpoint, kind) => {
+                  setPending({ checkpoint, kind });
+                  setError(undefined);
+                }}
+                onCancelPending={() => setPending(undefined)}
+                onExecute={() => void executeCheckpoint()}
+              />
               {error ? <p role="alert">{error}</p> : null}
               {restored ? (
                 <p role="status">
@@ -283,69 +190,12 @@ export default function HistoryPanel({
                   )}
                 </pre>
               </details>
-              <section aria-label="Recorded delivery" className="history-delivery">
-                <h3>Recorded delivery</h3>
-                <p>
-                  These are saved outcomes from the original run. Opening history does not repeat
-                  them.
-                </p>
-                {!reviews.some((review) => review.runId === run.id) ? (
-                  <p>No delivery review recorded.</p>
-                ) : (
-                  reviews
-                    .filter((review) => review.runId === run.id)
-                    .map((review) => (
-                      <article key={review.id}>
-                        <strong>{review.status}</strong>
-                        <p>
-                          {review.verification
-                            ? `Checks ${review.verification.status}`
-                            : 'Checks not recorded'}
-                        </p>
-                        {review.commitOid ? (
-                          <p>
-                            Retained commit <code>{review.commitOid}</code>
-                          </p>
-                        ) : (
-                          <p>No confirmed commit recorded.</p>
-                        )}
-                        <p>
-                          {review.merged
-                            ? `Merged to ${review.basis.parentBranch}`
-                            : 'Merge not confirmed'}{' '}
-                          · {review.cleaned ? 'Worktree removed' : 'Cleanup not confirmed'}
-                        </p>
-                        {review.error ? <p>{review.error}</p> : null}
-                      </article>
-                    ))
-                )}
-              </section>
-              <section aria-label="Recorded activity">
-                <h3>Recorded activity</h3>
-                <ol className="history-timeline">
-                  {events
-                    .filter((event) => event.runId === run.id)
-                    .map((event) => (
-                      <li key={event.sequence}>
-                        <time dateTime={event.at}>{new Date(event.at).toLocaleString()}</time>
-                        <p>{event.summary}</p>
-                        <details>
-                          <summary>{event.type}</summary>
-                          <pre>{JSON.stringify(event.data, null, 2)}</pre>
-                        </details>
-                      </li>
-                    ))}
-                </ol>
-              </section>
-              <h3>Messages from this run</h3>
-              {messages
-                .filter((message) => message.runId === run.id)
-                .map((message) => (
-                  <article className="history-message" key={message.id}>
-                    <strong>{message.role}</strong>
-                    <p>{message.text}</p>
-                  </article>
-                ))}
+              <RecordedOutcomeSections
+                runId={run.id}
+                reviews={reviews}
+                events={events}
+                messages={messages}
+              />
             </>
           )}
         </div>
