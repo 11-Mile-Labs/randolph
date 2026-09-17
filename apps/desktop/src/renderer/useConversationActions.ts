@@ -1,6 +1,6 @@
 import type { FormEvent, MutableRefObject } from 'react';
 import type { ExecutionMode, HarnessId, HarnessSelection } from '@randolph/runtime/contracts';
-import type { NativeChatSession } from './chat-transport';
+import type { NativeChatSession } from './native-chat-session';
 import { displayError } from './workspace-helpers';
 import type { useWorkspaceSession } from './useWorkspaceSession';
 

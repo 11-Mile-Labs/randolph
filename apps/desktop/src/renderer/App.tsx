@@ -1,5 +1,5 @@
 import { useChat } from '@ai-sdk/react';
-import { NativeChatSession } from './chat-transport';
+import { NativeChatSession } from './native-chat-session';
 import HistoryPanel from './HistoryPanel';
 import MemoryPanel from './MemoryPanel';
 import WorkspaceHome from './WorkspaceHome';
