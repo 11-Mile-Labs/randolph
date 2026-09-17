@@ -1,0 +1,113 @@
+.review-panel {
+  width: min(1060px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 24px;
+  border: 1px solid #d6d1c8;
+  border-radius: 14px;
+  color: #303a3f;
+  background: #fbfaf7;
+  box-shadow: 0 22px 80px rgb(35 30 24 / 25%);
+}
+.review-panel::backdrop {
+  background: rgb(30 34 32 / 35%);
+}
+.review-panel header,
+.review-panel footer,
+.review-checks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.review-panel h2 {
+  margin: 6px 0;
+  font:
+    500 24px Georgia,
+    serif;
+}
+.review-target,
+.review-approval-copy {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #6c7473;
+}
+.review-content {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  height: 300px;
+  border: 1px solid #d6d1c8;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.review-content aside {
+  overflow: auto;
+  border-right: 1px solid #d6d1c8;
+  background: #f1eee7;
+}
+.review-file {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.review-file span {
+  color: #69766b;
+}
+.review-diff {
+  margin: 0;
+  overflow: auto;
+  padding: 15px;
+  background: #fffdf8;
+  font-size: 11px;
+  line-height: 1.6;
+  tab-size: 2;
+}
+.review-checks {
+  margin: 18px 0;
+  padding: 14px;
+  border: 1px solid #d6d1c8;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.review-checks details {
+  margin-top: 12px;
+}
+.review-checks pre {
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 11px;
+}
+.commit-message-label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+.commit-message-label textarea {
+  padding: 9px;
+  border: 1px solid #d6d1c8;
+  border-radius: 7px;
+  color: #303a3f;
+  background: #fffefa;
+  resize: vertical;
+}
+.review-consent {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 14px;
+  font-size: 12px;
+}
+.review-panel .primary-button {
+  padding: 10px 14px;
+}
+.delivery-success {
+  margin: 16px 0;
+  padding: 14px;
+  border-radius: 8px;
+  color: #41674c;
+  background: #edf3eb;
+  font-size: 12px;
+}
