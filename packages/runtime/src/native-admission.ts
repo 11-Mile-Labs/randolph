@@ -1,48 +1,26 @@
 import { randomUUID } from 'node:crypto';
+import { admittedHarnessAdapter } from './admitted-harness-adapter.js';
 import { AdapterRunFailure, type HarnessAdapter, type HarnessId } from './contracts.js';
+import { legacyNativeCleanupConfirmed } from './native-legacy-ownership.js';
 import {
-  legacyNativeCleanupConfirmed,
-  reconstructLegacyNativeOwnership,
-} from './native-legacy-ownership.js';
-import { DelegationRecords } from './delegation-records.js';
+  reconcileNativeAdmissionOnReopen,
+  retainedLegacyNativeLeases,
+} from './native-admission-recovery.js';
+import type { NativeAdmissionCleanup, NativeAdmissionContext } from './native-admission-types.js';
 import { NativeAdmissionQueue } from './native-admission-queue.js';
-import {
-  NativeOperationRecords,
-  type NativeOperation,
-  type NativeOperationOwner,
-} from './native-operation-records.js';
+import { NativeOperationRecords, type NativeOperation } from './native-operation-records.js';
 import {
   SessionCapacity,
   type CapacityLease,
   type CapacityLimits,
   type CapacityQueueReason,
-  type NativeSessionRole,
 } from './session-capacity.js';
 import { Store } from './store.js';
 
-export type NativeAdmissionContext = {
-  owner: NativeOperationOwner;
-  runId?: string;
-  sessionId?: string;
-  reviewId?: string;
-  checkId?: string;
-  generation?: number;
-  role?: NativeSessionRole;
-  authorizationId?: string;
-  workerParallelLimit?: number;
-  priority?: () => number;
-  assertCurrent?: () => void;
-  onAdmitted?: () => void;
-  queued?: (reason: CapacityQueueReason) => void;
-  timeoutMs?: number;
-  cleanupTimeoutMs?: number;
-};
-export type NativeAdmissionCleanup = {
-  status: 'completed' | 'failed' | 'interrupted';
-  confirmed: boolean;
-  evidence: Record<string, unknown>;
-  identity?: { executable: string; version: string };
-};
+// The admission context and cleanup shapes live in native-admission-types.ts so the wrapper
+// factory can import them without referring back to this module. These re-exports keep every
+// established native-admission import intact.
+export type { NativeAdmissionCleanup, NativeAdmissionContext } from './native-admission-types.js';
 type Active = {
   purpose: NativeOperation['purpose'];
   runId?: string;
@@ -68,90 +46,8 @@ export class NativeAdmission {
     this.origin = structuredClone(origin);
     this.records = new NativeOperationRecords(store);
     this.queue = new NativeAdmissionQueue(new SessionCapacity(limits));
-    this.records.reconcileOnReopen();
-    const sessions = new DelegationRecords(store);
-    for (const run of store.runs())
-      if (
-        run.status === 'interrupted' &&
-        run.cleanupUnconfirmed === false &&
-        sessions
-          .sessions(run.id)
-          .some((session) => session.cleanupEvidence?.reconciliation === 'later-boot')
-      )
-        this.records.reconcileSetupCleanup(run.id);
-    const operations = this.records.list();
-    for (const operation of operations) {
-      if (
-        !operation.runId ||
-        !operation.sessionId ||
-        !['model-turn', 'command'].includes(operation.purpose) ||
-        !operation.cleanupConfirmed ||
-        !operation.cleanupEvidence
-      )
-        continue;
-      const linked = operations.filter((item) => item.sessionId === operation.sessionId);
-      if (
-        linked.some(
-          (item) =>
-            !item.cleanupConfirmed ||
-            item.runId !== operation.runId ||
-            item.harness !== operation.harness,
-        )
-      )
-        continue;
-      const session = sessions
-        .sessions(operation.runId)
-        .find((item) => item.id === operation.sessionId);
-      if (!session || session.harness !== operation.harness) continue;
-      if (
-        operation.state === 'interrupted' &&
-        operation.cleanupEvidence.reason === 'not-admitted-on-reopen' &&
-        session.native
-      )
-        throw new Error('Queued native operation contradicts a retained native session identity.');
-      if (['prepared', 'dispatch-intent', 'running'].includes(session.state))
-        sessions.finishSession({
-          runId: operation.runId,
-          sessionId: session.id,
-          status: 'interrupted',
-          cleanupConfirmed: true,
-          cleanupEvidence: { operationId: operation.id, ...operation.cleanupEvidence },
-          error: 'Native operation cleanup is retained. No session was resumed.',
-        });
-    }
-    this.queue.capacity.restore(
-      this.records
-        .list()
-        .filter((item) => item.state === 'quarantined')
-        .map((item) => ({
-          reservationId: item.id,
-          ownerId: item.owner.id,
-          runId: item.runId,
-          harness: item.harness,
-          ...item.capacity,
-          generation: 1,
-          state: 'cleanup-unconfirmed' as const,
-        })),
-    );
-    const retained = (
-      store.db.prepare('SELECT document FROM native_legacy_ownership').all() as Array<{
-        document: string;
-      }>
-    ).map((row) => JSON.parse(row.document) as CapacityLease);
-    const legacy = [
-      ...new Map(
-        [...reconstructLegacyNativeOwnership(store), ...retained].map((lease) => [
-          lease.reservationId,
-          lease,
-        ]),
-      ).values(),
-    ];
-    store.transaction(() => {
-      for (const lease of legacy)
-        store.db
-          .prepare('INSERT OR IGNORE INTO native_legacy_ownership(id, document) VALUES (?, ?)')
-          .run(lease.reservationId, JSON.stringify(lease));
-    });
+    this.queue.capacity.restore(reconcileNativeAdmissionOnReopen(store, this.records));
+    const legacy = retainedLegacyNativeLeases(store);
     this.queue.capacity.restore(legacy);
     for (const lease of legacy) this.legacy.set(lease.reservationId, lease);
   }
@@ -199,154 +95,21 @@ export class NativeAdmission {
     adapter: HarnessAdapter,
     context: NativeAdmissionContext,
   ): HarnessAdapter {
-    context = { ...context, owner: structuredClone(context.owner) };
-    return {
-      // Inventory is filesystem-only. Every native probe must use discover.
-      ...(adapter.installations ? { installations: () => adapter.installations!() } : {}),
-      discover: (executable, signal) =>
-        this.perform(
-          harness,
-          context,
-          'discovery',
-          executable,
-          signal,
-          async (ownedSignal) => {
-            const info = await adapter.discover(executable, ownedSignal);
-            return info.cleanupVerified === true
-              ? info
-              : {
-                  ...info,
-                  available: false,
-                  authenticated: false,
-                  models: [],
-                  executionModes: [],
-                  reason: 'Native discovery cleanup could not be confirmed.',
-                };
-          },
-          (info) => ({
-            status: info.available ? 'completed' : 'failed',
-            confirmed: info.cleanupVerified === true,
-            evidence: { adapterCleanupVerified: info.cleanupVerified === true },
-            ...(info.executable && info.version
-              ? { identity: { executable: info.executable, version: info.version } }
-              : {}),
-          }),
-        ),
-      run: async (value) => {
-        const input = {
-          ...value,
-          messages: structuredClone(value.messages),
-          workspaceIdentity: value.workspaceIdentity
-            ? structuredClone(value.workspaceIdentity)
-            : undefined,
-          ...(value.applicationTools
-            ? {
-                applicationTools: {
-                  definitions: structuredClone(value.applicationTools.definitions),
-                  onRequest: value.applicationTools.onRequest,
-                },
-              }
-            : {}),
-        };
-        let accepting = true;
-        try {
-          return await this.perform(
-            harness,
-            context,
-            'model-turn',
-            input.executable,
-            input.signal,
-            (signal) =>
-              adapter.run({
-                ...input,
-                signal,
-                onEvent: (event) => {
-                  if (accepting) input.onEvent(event);
-                },
-                ...(input.applicationTools
-                  ? {
-                      applicationTools: {
-                        ...input.applicationTools,
-                        onRequest: (request) => {
-                          if (!accepting || signal.aborted)
-                            throw new Error(
-                              'Native application tool request arrived after cancellation or settlement.',
-                            );
-                          return input.applicationTools!.onRequest(request);
-                        },
-                      },
-                    }
-                  : {}),
-              }),
-            (result) => ({
-              status: result.status === 'stop-unconfirmed' ? 'failed' : result.status,
-              confirmed: result.status !== 'stop-unconfirmed',
-              evidence: { adapterStatus: result.status },
-            }),
-          );
-        } finally {
-          accepting = false;
-        }
-      },
-      ...(adapter.runCommand
-        ? {
-            runCommand: async (value: Parameters<NonNullable<HarnessAdapter['runCommand']>>[0]) => {
-              const input = {
-                ...value,
-                command: [...value.command],
-                workspaceIdentity: value.workspaceIdentity
-                  ? structuredClone(value.workspaceIdentity)
-                  : undefined,
-              };
-              let accepting = true;
-              try {
-                return await this.perform(
-                  harness,
-                  context,
-                  'command',
-                  input.executable,
-                  input.signal,
-                  (signal) =>
-                    adapter.runCommand!({
-                      ...input,
-                      signal,
-                      onDispatch: (value) => {
-                        if (!accepting || signal.aborted)
-                          throw new Error(
-                            'Native command dispatch arrived after cancellation or settlement.',
-                          );
-                        const checked: unknown = input.onDispatch?.(value);
-                        if (checked && typeof (checked as { then?: unknown }).then === 'function') {
-                          void (async () => {
-                            try {
-                              await checked;
-                            } catch {
-                              /* Rejected asynchronous dispatch callbacks remain unauthorized. */
-                            }
-                          })();
-                          throw new Error('Native command dispatch callbacks must be synchronous.');
-                        }
-                      },
-                      onOutput: (value) => {
-                        if (accepting) input.onOutput(value);
-                      },
-                    }),
-                  (result) => ({
-                    status: result.exitCode === 0 ? 'completed' : 'failed',
-                    confirmed: result.cleanupVerified === true,
-                    evidence: {
-                      adapterCleanupVerified: result.cleanupVerified === true,
-                      exitCode: result.exitCode,
-                    },
-                  }),
-                );
-              } finally {
-                accepting = false;
-              }
-            },
-          }
-        : {}),
-    };
+    return admittedHarnessAdapter(
+      harness,
+      { ...context, owner: structuredClone(context.owner) },
+      adapter,
+      <T>(
+        performHarness: HarnessId,
+        performContext: NativeAdmissionContext,
+        purpose: NativeOperation['purpose'],
+        executable: string | undefined,
+        signal: AbortSignal | undefined,
+        invoke: (signal: AbortSignal) => Promise<T>,
+        cleanup: (result: T) => NativeAdmissionCleanup,
+      ) =>
+        this.perform(performHarness, performContext, purpose, executable, signal, invoke, cleanup),
+    );
   }
 
   perform<T>(
