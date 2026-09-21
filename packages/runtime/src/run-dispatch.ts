@@ -97,12 +97,14 @@ export async function dispatchOrdinaryRun(
           effort: input.effort ?? sameHarnessSelection?.effort ?? '',
         }
       : (savedSelection ?? settings.defaults ?? { harness: defaultHarness, model: '', effort: '' });
-    const info = await host.harness.inspectExecutable(
+    const info = await host.harness.discoverForDispatch(
+      conversation,
       selection.harness,
       setup?.executable ??
         (settings.defaults?.harness === selection.harness
           ? settings.defaults.executable
           : undefined),
+      settings.revision,
     );
     assertOpen(host.isAccepting());
     conversation = host.conversation(input.conversationId);

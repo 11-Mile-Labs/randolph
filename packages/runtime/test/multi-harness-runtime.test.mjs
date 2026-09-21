@@ -48,16 +48,23 @@ async function settle(runtime) {
   assert.equal(runtime.hasActiveWork(), false);
 }
 
-function adapter(harness, { code = false, write = false, status = 'completed' } = {}) {
+function adapter(
+  harness,
+  { code = false, write = false, status = 'completed', launchVerifiesAuthentication = false } = {},
+) {
   const calls = [];
   const commands = [];
+  const discoveries = [];
   return {
     calls,
     commands,
+    discoveries,
+    launchVerifiesAuthentication,
     async installations() {
       return [{ executable: `/${harness}` }];
     },
     async discover(executable) {
+      discoveries.push(executable);
       return {
         executable: executable ?? `/${harness}`,
         version: `${harness}-1.0.25`,
@@ -416,4 +423,26 @@ test('an unreadable config created during discovery cannot preserve implicit aut
   );
   assert.equal(codex.calls.length, 0);
   assert.equal(runtime.snapshot().runs.length, 0);
+});
+
+test('a CLI that is no longer discovered after switching to code mode is rejected at dispatch', async (t) => {
+  const paths = await fixture(t);
+  const codex = adapter('codex', { code: true, launchVerifiesAuthentication: true });
+  const runtime = new Runtime({ codex }, paths.dataRoot);
+  t.after(() => runtime.close());
+  const project = runtime.addProject(paths.projectRoot);
+  await runtime.saveProjectDefaults({
+    projectId: project.id,
+    defaults: { harness: 'codex', model: 'codex-model', effort: 'low', executable: '/codex' },
+    expectedRevision: null,
+  });
+  const conversation = runtime.createConversation(project.id);
+  await runtime.setExecutionMode({ conversationId: conversation.id, executionMode: 'code' });
+  codex.installations = async () => [];
+  await assert.rejects(
+    runtime.send({ conversationId: conversation.id, text: 'Change it.' }),
+    /no longer discovered/,
+  );
+  assert.equal(codex.discoveries.length, 2);
+  assert.equal(codex.calls.length, 0);
 });
