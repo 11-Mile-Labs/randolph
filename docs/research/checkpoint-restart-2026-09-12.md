@@ -6,16 +6,16 @@
 
 Recorded on 2026-09-12 UTC with Codex CLI 0.149.0, Node 24.18.0 and macOS arm64. The explicitly selected model was `gpt-5.6-luna` at low effort, using ChatGPT subscription authentication. The final verification used one native model turn. An earlier successful fixture observation also used one turn, for two across both probes; no API billing fallback or model substitution occurred.
 
-| Check | Result |
-| --- | --- |
-| Delete source | Entire original fixture repository, worktree and local bare remote removed before restore |
-| Reopen retained history | Displayed `stopped`; no restored directory, native session or model turn created |
-| Restore Git and files | Original base commit, completed bugfix, binary artifact and executable mode restored; ignored scratch absent |
-| Restore context | Configuration, decisions, completed/pending work and external-action metadata matched the checkpoint |
-| Explicit native Restart | Created a new linked run in the same conversation and a clean native thread |
-| Native verification | Executed `node --test test/filter.test.mjs`; both regression tests passed; saved decision marker recalled |
+| Check                   | Result                                                                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Delete source           | Entire original fixture repository, worktree and local bare remote removed before restore                                      |
+| Reopen retained history | Displayed `stopped`; no restored directory, native session or model turn created                                               |
+| Restore Git and files   | Original base commit, completed bugfix, binary artifact and executable mode restored; ignored scratch absent                   |
+| Restore context         | Configuration, decisions, completed/pending work and external-action metadata matched the checkpoint                           |
+| Explicit native Restart | Created a new linked run in the same conversation and a clean native thread                                                    |
+| Native verification     | Executed `node --test test/filter.test.mjs`; both regression tests passed; saved decision marker recalled                      |
 | History and late events | Original journal unchanged; old-run completion event rejected; reopening an already-used restart journal cannot dispatch again |
-| Cleanup | Owned native process group exited; original and restored fixtures absent; durable checkpoint and evidence retained |
+| Cleanup                 | Owned native process group exited; original and restored fixtures absent; durable checkpoint and evidence retained             |
 
 The source bugfix was seeded by the experiment controller as completed synthetic work. This proves persistence and subsequent native verification, not that the restarted model authored the original change.
 

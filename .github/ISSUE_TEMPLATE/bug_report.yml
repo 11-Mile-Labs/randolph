@@ -1,6 +1,6 @@
 name: Bug report
 description: Tell us what went wrong so we can reproduce it.
-title: "[Bug]: "
+title: '[Bug]: '
 body:
   - type: markdown
     attributes:

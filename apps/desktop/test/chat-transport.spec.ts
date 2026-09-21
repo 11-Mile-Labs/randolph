@@ -18,7 +18,10 @@ test('chat transport keeps concurrent streams isolated, reconnects, stops, and r
   writeFileSync(join(project, 'README.md'), '# Chat transport fixture\n');
   writeFileSync(turns, '');
 
-  writeFileSync(join(bin, 'codex'), `#!${process.execPath}\n` + `
+  writeFileSync(
+    join(bin, 'codex'),
+    `#!${process.execPath}\n` +
+      `
 const { createInterface } = require('node:readline');
 const { appendFileSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
 const turns = ${JSON.stringify(turns)};
@@ -66,32 +69,62 @@ createInterface({ input: process.stdin }).on('line', line => {
     }
   } else send({ id: message.id, result: {} });
 });
-`, { mode: 0o700 });
+`,
+    { mode: 0o700 },
+  );
 
-  const env = { ...process.env, HOME: home, PATH: bin + ':' + process.env.PATH, RANDOLPH_DATA_DIR: join(root, 'data') };
+  const env = {
+    ...process.env,
+    HOME: home,
+    PATH: bin + ':' + process.env.PATH,
+    RANDOLPH_DATA_DIR: join(root, 'data'),
+  };
   delete env.ELECTRON_RUN_AS_NODE;
-  const launch = () => electron.launch({ executablePath: process.env.RANDOLPH_TEST_EXECUTABLE, args: process.env.RANDOLPH_TEST_EXECUTABLE ? [] : [resolve('.')], env });
+  const launch = () =>
+    electron.launch({
+      executablePath: process.env.RANDOLPH_TEST_EXECUTABLE,
+      args: process.env.RANDOLPH_TEST_EXECUTABLE ? [] : [resolve('.')],
+      env,
+    });
   let app = await launch();
   let page;
-  if (process.env.RANDOLPH_TEST_EXECUTABLE) expect(await app.evaluate(({ app: electronApp }) => electronApp.getPath('exe'))).toBe(process.env.RANDOLPH_TEST_EXECUTABLE);
+  if (process.env.RANDOLPH_TEST_EXECUTABLE)
+    expect(await app.evaluate(({ app: electronApp }) => electronApp.getPath('exe'))).toBe(
+      process.env.RANDOLPH_TEST_EXECUTABLE,
+    );
 
   try {
     page = await app.firstWindow();
     const pageErrors: string[] = [];
-    page.on('pageerror', error => pageErrors.push(error.message));
-    await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, project);
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, project);
     await page.getByRole('button', { name: 'Add your first project' }).click();
-    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('fixture-model');
+    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue(
+      'fixture-model',
+    );
 
     await page.getByRole('textbox', { name: 'Message', exact: true }).fill('First question');
     await page.getByRole('button', { name: 'Send message' }).click();
     await expect(page.getByText('First stream:', { exact: true })).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Run activity', exact: true })).toContainText('Codex · Active');
-    await expect(page.locator('article.message.assistant')).not.toContainText('PRIVATE_REASONING_MUST_NOT_BE_ASSISTANT_TEXT');
-    await expect(page.locator('article.message.assistant')).not.toContainText('PRIVATE_TOOL_RESULT_MUST_NOT_BE_ASSISTANT_TEXT');
+    await expect(page.getByRole('region', { name: 'Run activity', exact: true })).toContainText(
+      'Codex · Active',
+    );
+    await expect(page.locator('article.message.assistant')).not.toContainText(
+      'PRIVATE_REASONING_MUST_NOT_BE_ASSISTANT_TEXT',
+    );
+    await expect(page.locator('article.message.assistant')).not.toContainText(
+      'PRIVATE_TOOL_RESULT_MUST_NOT_BE_ASSISTANT_TEXT',
+    );
 
-    const projectNavigation = page.getByRole('navigation', { name: 'Project conversations', exact: true });
-    await projectNavigation.getByRole('button', { name: 'New conversation in sample-project', exact: true }).click();
+    const projectNavigation = page.getByRole('navigation', {
+      name: 'Project conversations',
+      exact: true,
+    });
+    await projectNavigation
+      .getByRole('button', { name: 'New conversation in sample-project', exact: true })
+      .click();
     await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Second question');
     await page.getByRole('button', { name: 'Send message' }).click();
     await expect(page.getByText('Second stream: independent.', { exact: true })).toBeVisible();
@@ -113,14 +146,16 @@ createInterface({ input: process.stdin }).on('line', line => {
     await page.getByRole('button', { name: 'Send message' }).click();
     await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toBeEnabled();
     await page.getByRole('button', { name: 'Stop run', exact: true }).click();
-    await expect(page.locator('.status-row').filter({ hasText: 'Status' })).toContainText('interrupted');
+    await expect(page.locator('.status-row').filter({ hasText: 'Status' })).toContainText(
+      'interrupted',
+    );
     await expect.poll(() => readFileSync(stopSeen, 'utf8')).toBe('seen');
     expect(readFileSync(turns, 'utf8')).toBe('1\n2\n3\n');
 
     await app.close();
     app = await launch();
     page = await app.firstWindow();
-    page.on('pageerror', error => pageErrors.push(error.message));
+    page.on('pageerror', (error) => pageErrors.push(error.message));
     await expect(page.getByRole('heading', { name: 'Your projects, in one place.' })).toBeVisible();
     const retainedConversation = page.getByRole('button', { name: firstQuestionButton });
     await retainedConversation.focus();
@@ -135,8 +170,12 @@ createInterface({ input: process.stdin }).on('line', line => {
     // can choose Stop instead of leaving the Electron close confirmation pending.
     if (!existsSync(releaseFirst)) writeFileSync(releaseFirst, 'release');
     try {
-      await app.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 1 }); });
+      await app.evaluate(({ dialog }) => {
+        dialog.showMessageBox = async () => ({ response: 1 });
+      });
       await app.close();
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });

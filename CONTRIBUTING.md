@@ -27,22 +27,32 @@ For contributions, push to your fork and open a pull request against `main`. Kee
 
 ## Find the code
 
-| Location | Responsibility |
-| --- | --- |
-| `apps/desktop` | Electron main/preload, React interface, desktop acceptance tests |
-| `packages/runtime` | State, project settings, approvals, execution, recovery, and Git delivery |
-| `packages/harness-codex` | Native Codex subscription adapter |
-| `packages/harness-grok` | Grok discovery and experimental protocol work; execution is gated |
-| `docs` | Product direction, decisions, plans, and compatibility evidence |
-| `experiments` | Isolated research; not a production capability guarantee |
+| Location                 | Responsibility                                                            |
+| ------------------------ | ------------------------------------------------------------------------- |
+| `apps/desktop`           | Electron main/preload, React interface, desktop acceptance tests          |
+| `packages/runtime`       | State, project settings, approvals, execution, recovery, and Git delivery |
+| `packages/harness-codex` | Native Codex subscription adapter                                         |
+| `packages/harness-grok`  | Grok discovery and experimental protocol work; execution is gated         |
+| `docs`                   | Product direction, decisions, plans, and compatibility evidence           |
+| `experiments`            | Isolated research; not a production capability guarantee                  |
 
 Use TypeScript/ES modules, two-space indentation, semicolons, and async/await. Prefer small changes with clear names. Keep private integrations and operator-specific settings out of the public core.
+
+Format TypeScript, JavaScript, and JSON with [Oxfmt](https://oxc.rs/docs/guide/usage/formatter) (same Oxc toolchain as `oxlint`). Print width is 100 characters; quotes stay single in JS/TS. The documented commands are:
+
+```sh
+pnpm format
+pnpm format:check
+```
+
+VS Code / Cursor format-on-save uses the Oxc extension (`oxc.oxc-vscode`) via `.vscode/settings.json`. Do not mix formatting commits with behavior changes. `pnpm format:check` is part of the repository checks.
 
 ## Verify a change
 
 For application code, run the repository checks:
 
 ```sh
+pnpm format:check
 pnpm lint
 pnpm typecheck
 pnpm build

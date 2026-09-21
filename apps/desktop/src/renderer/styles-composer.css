@@ -1,0 +1,143 @@
+.composer-area {
+  padding: 12px 28px 17px;
+  background: linear-gradient(to bottom, rgb(251 250 247 / 10%), #fbfaf7 18%);
+}
+
+.composer {
+  max-width: 760px;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid #d6d1c8;
+  border-radius: 12px;
+  background: #fffefa;
+  box-shadow: 0 8px 26px rgb(55 49 40 / 7%);
+}
+
+.composer:focus-within {
+  border-color: #b87a5e;
+  box-shadow:
+    0 0 0 3px rgb(169 87 50 / 10%),
+    0 8px 26px rgb(55 49 40 / 7%);
+}
+
+.composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 65px;
+  max-height: 180px;
+  resize: vertical;
+  padding: 15px 16px 7px;
+  border: 0;
+  outline: 0;
+  color: #303a3f;
+  background: transparent;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.composer textarea::placeholder {
+  color: #a3a29d;
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 8px 8px 11px;
+}
+
+.selector-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.selector-group select {
+  max-width: 160px;
+  padding: 4px 23px 4px 5px;
+  border: 0;
+  color: #666e70;
+  background: transparent;
+  font-size: 10px;
+}
+
+.send-button {
+  display: grid;
+  width: 31px;
+  height: 31px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: #fffaf3;
+  background: #a95732;
+  cursor: pointer;
+}
+
+.composer-caption,
+.harness-warning {
+  max-width: 760px;
+  margin: 7px auto 0;
+  color: #9a9b97;
+  font-size: 9px;
+  text-align: center;
+}
+
+.harness-warning {
+  margin-bottom: 7px;
+  color: #945236;
+}
+
+.composer-error,
+.global-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #e4c3b3;
+  border-radius: 8px;
+  color: #7c3c25;
+  background: #fff3ec;
+  font-size: 11px;
+}
+
+.composer-error {
+  max-width: 760px;
+  margin: 0 auto 8px;
+  padding: 8px 10px;
+}
+
+.composer-error span {
+  min-width: 0;
+  flex: 1;
+}
+
+.composer-error button,
+.global-error button {
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.activity-panel {
+  display: flex;
+  flex-direction: column;
+  padding: 22px 17px 16px;
+  border-left: 1px solid #d9d6cf;
+  background: #f0ede7;
+}
+
+.activity-heading {
+  display: flex;
+  min-height: 47px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.activity-heading h2 {
+  margin: 3px 0 0;
+  color: #2c363a;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 17px;
+  font-weight: 600;
+}

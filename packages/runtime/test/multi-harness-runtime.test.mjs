@@ -10,7 +10,23 @@ import { Checkpoints } from '../dist/checkpoints.js';
 import { prepareWorkspace } from '../dist/workspace.js';
 
 function git(root, args) {
-  return execFileSync('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-C', root, ...args], { encoding: 'utf8' }).trim();
+  return execFileSync(
+    '/usr/bin/git',
+    [
+      '-c',
+      'core.hooksPath=/dev/null',
+      '-c',
+      'commit.gpgsign=false',
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      '-C',
+      root,
+      ...args,
+    ],
+    { encoding: 'utf8' },
+  ).trim();
 }
 
 async function fixture(t) {
@@ -27,18 +43,28 @@ async function fixture(t) {
 }
 
 async function settle(runtime) {
-  for (let i = 0; i < 400 && runtime.hasActiveWork(); i += 1) await new Promise(resolve => setTimeout(resolve, 5));
+  for (let i = 0; i < 400 && runtime.hasActiveWork(); i += 1)
+    await new Promise((resolve) => setTimeout(resolve, 5));
   assert.equal(runtime.hasActiveWork(), false);
 }
 
-function adapter(harness, { code = false, write = false, status = 'completed' } = {}) {
+function adapter(
+  harness,
+  { code = false, write = false, status = 'completed', launchVerifiesAuthentication = false } = {},
+) {
   const calls = [];
   const commands = [];
+  const discoveries = [];
   return {
     calls,
     commands,
-    async installations() { return [{ executable: `/${harness}` }]; },
+    discoveries,
+    launchVerifiesAuthentication,
+    async installations() {
+      return [{ executable: `/${harness}` }];
+    },
     async discover(executable) {
+      discoveries.push(executable);
       return {
         executable: executable ?? `/${harness}`,
         version: `${harness}-1.0.25`,
@@ -51,25 +77,46 @@ function adapter(harness, { code = false, write = false, status = 'completed' } 
     },
     async run(input) {
       calls.push(input);
-      input.onEvent({ type: 'session.turn-started', summary: 'fixture turn established', data: { threadId: `${harness}-thread-${calls.length}`, turnId: `${harness}-turn-${calls.length}` } });
+      input.onEvent({
+        type: 'session.turn-started',
+        summary: 'fixture turn established',
+        data: {
+          threadId: `${harness}-thread-${calls.length}`,
+          turnId: `${harness}-turn-${calls.length}`,
+        },
+      });
       if (write) await writeFile(join(input.workspace, 'README.md'), `${harness} changed\n`);
       return { status };
     },
-    ...(code ? { async runCommand(input) { commands.push(input); return { exitCode: 0, output: 'passed', truncated: false, cleanupVerified: true }; } } : {}),
+    ...(code
+      ? {
+          async runCommand(input) {
+            commands.push(input);
+            return { exitCode: 0, output: 'passed', truncated: false, cleanupVerified: true };
+          },
+        }
+      : {}),
   };
 }
 
-test('routes concurrent conversations through their captured harness identities', async t => {
+test('routes concurrent conversations through their captured harness identities', async (t) => {
   const paths = await fixture(t);
   const codex = adapter('codex');
   const grok = adapter('grok');
   const runtime = new Runtime({ codex, grok }, paths.dataRoot);
   t.after(() => runtime.close());
   const project = runtime.addProject(paths.projectRoot);
-  await runtime.saveProjectDefaults({ projectId: project.id, defaults: { harness: 'grok', model: 'grok-model', effort: 'low', executable: '/grok' }, expectedRevision: null });
+  await runtime.saveProjectDefaults({
+    projectId: project.id,
+    defaults: { harness: 'grok', model: 'grok-model', effort: 'low', executable: '/grok' },
+    expectedRevision: null,
+  });
   const codexConversation = runtime.createConversation(project.id);
   const grokConversation = runtime.createConversation(project.id);
-  await runtime.setConversationSelection({ conversationId: codexConversation.id, selection: { harness: 'codex', model: 'codex-model', effort: 'low' } });
+  await runtime.setConversationSelection({
+    conversationId: codexConversation.id,
+    selection: { harness: 'codex', model: 'codex-model', effort: 'low' },
+  });
 
   const [codexRun, grokRun] = await Promise.all([
     runtime.send({ conversationId: codexConversation.id, text: 'Codex request.' }),
@@ -87,9 +134,12 @@ test('routes concurrent conversations through their captured harness identities'
   assert.equal((await runtime.harnessInstallations('grok'))[0].harness, 'grok');
 });
 
-test('a project default change cannot redirect a frozen run or its checks', async t => {
+test('a project default change cannot redirect a frozen run or its checks', async (t) => {
   const paths = await fixture(t);
-  await writeFile(join(paths.projectRoot, 'package.json'), JSON.stringify({ packageManager: 'pnpm@11.8.0', scripts: { test: 'echo ok' } }));
+  await writeFile(
+    join(paths.projectRoot, 'package.json'),
+    JSON.stringify({ packageManager: 'pnpm@11.8.0', scripts: { test: 'echo ok' } }),
+  );
   git(paths.projectRoot, ['add', 'package.json']);
   git(paths.projectRoot, ['commit', '-m', 'checks']);
   const codex = adapter('codex', { code: true, write: true });
@@ -97,36 +147,55 @@ test('a project default change cannot redirect a frozen run or its checks', asyn
   const runtime = new Runtime({ codex, grok }, paths.dataRoot);
   t.after(() => runtime.close());
   const project = runtime.addProject(paths.projectRoot);
-  const first = await runtime.saveProjectDefaults({ projectId: project.id, defaults: { harness: 'codex', model: 'codex-model', effort: 'low', executable: '/codex' }, expectedRevision: null });
+  const first = await runtime.saveProjectDefaults({
+    projectId: project.id,
+    defaults: { harness: 'codex', model: 'codex-model', effort: 'low', executable: '/codex' },
+    expectedRevision: null,
+  });
   const conversation = runtime.createConversation(project.id);
   await runtime.setExecutionMode({ conversationId: conversation.id, executionMode: 'code' });
   const run = await runtime.send({ conversationId: conversation.id, text: 'Change the project.' });
   await settle(runtime);
-  await runtime.saveProjectDefaults({ projectId: project.id, defaults: { harness: 'grok', model: 'grok-model', effort: 'low', executable: '/grok' }, expectedRevision: first.revision });
+  await runtime.saveProjectDefaults({
+    projectId: project.id,
+    defaults: { harness: 'grok', model: 'grok-model', effort: 'low', executable: '/grok' },
+    expectedRevision: first.revision,
+  });
   const review = runtime.prepareReview(conversation.id);
   await runtime.verifyReview(review.id);
 
   assert.equal(run.harness, 'codex');
   assert.ok(codex.commands.length > 0);
   assert.equal(grok.commands.length, 0);
-  assert.ok(codex.commands.every(command => command.executable === '/codex' && command.executableVersion === 'codex-1.0.25'));
+  assert.ok(
+    codex.commands.every(
+      (command) => command.executable === '/codex' && command.executableVersion === 'codex-1.0.25',
+    ),
+  );
 });
 
-test('an unverified Grok code route rejects before native dispatch', async t => {
+test('an unverified Grok code route rejects before native dispatch', async (t) => {
   const paths = await fixture(t);
   const grok = adapter('grok');
   const runtime = new Runtime({ grok }, paths.dataRoot);
   t.after(() => runtime.close());
   const project = runtime.addProject(paths.projectRoot);
-  await runtime.saveProjectDefaults({ projectId: project.id, defaults: { harness: 'grok', model: 'grok-model', effort: 'low', executable: '/grok' }, expectedRevision: null });
+  await runtime.saveProjectDefaults({
+    projectId: project.id,
+    defaults: { harness: 'grok', model: 'grok-model', effort: 'low', executable: '/grok' },
+    expectedRevision: null,
+  });
   const conversation = runtime.createConversation(project.id);
 
-  await assert.rejects(runtime.setExecutionMode({ conversationId: conversation.id, executionMode: 'code' }), /Code mode is not verified/);
+  await assert.rejects(
+    runtime.setExecutionMode({ conversationId: conversation.id, executionMode: 'code' }),
+    /Code mode is not verified/,
+  );
   assert.equal(grok.calls.length, 0);
   assert.equal(runtime.snapshot().runs.length, 0);
 });
 
-test('legacy Codex checkpoint recovery remains on Codex after project defaults change', async t => {
+test('legacy Codex checkpoint recovery remains on Codex after project defaults change', async (t) => {
   const paths = await fixture(t);
   const codex = adapter('codex');
   const grok = adapter('grok');
@@ -151,10 +220,21 @@ test('legacy Codex checkpoint recovery remains on Codex after project defaults c
     lastActivityAt: createdAt,
   };
   runtime.store.putRun(run);
-  runtime.store.putMessage({ id: randomUUID(), runId: run.id, conversationId: conversation.id, role: 'user', text: 'Resume this legacy run.', createdAt });
+  runtime.store.putMessage({
+    id: randomUUID(),
+    runId: run.id,
+    conversationId: conversation.id,
+    role: 'user',
+    text: 'Resume this legacy run.',
+    createdAt,
+  });
   runtime.store.exportRun(run);
   const checkpoint = new Checkpoints(runtime.store).capture(run, 'before-turn');
-  await runtime.saveProjectDefaults({ projectId: project.id, defaults: { harness: 'grok', model: 'grok-model', effort: 'low', executable: '/grok' }, expectedRevision: null });
+  await runtime.saveProjectDefaults({
+    projectId: project.id,
+    defaults: { harness: 'grok', model: 'grok-model', effort: 'low', executable: '/grok' },
+    expectedRevision: null,
+  });
 
   const resumed = await runtime.restartRun({ runId: run.id, checkpointDigest: checkpoint.digest });
   await settle(runtime);
@@ -166,31 +246,70 @@ test('legacy Codex checkpoint recovery remains on Codex after project defaults c
   assert.equal(codex.calls[0].executableVersion, 'codex-1.0.25');
 });
 
-test('withdrawing all execution capabilities blocks sends and retained checkpoint recovery', async t => {
+test('withdrawing all execution capabilities blocks sends and retained checkpoint recovery', async (t) => {
   const paths = await fixture(t);
   const grok = adapter('grok');
   const discover = grok.discover;
-  grok.discover = async executable => ({ ...await discover(executable), executionModes: [], reason: 'Native boundary failed.' });
+  grok.discover = async (executable) => ({
+    ...(await discover(executable)),
+    executionModes: [],
+    reason: 'Native boundary failed.',
+  });
   const runtime = new Runtime({ grok }, paths.dataRoot);
   t.after(() => runtime.close());
   const project = runtime.addProject(paths.projectRoot);
-  await runtime.saveProjectDefaults({projectId:project.id,defaults:{harness:'grok',model:'grok-model',effort:'low',executable:'/grok'},expectedRevision:null});
+  await runtime.saveProjectDefaults({
+    projectId: project.id,
+    defaults: { harness: 'grok', model: 'grok-model', effort: 'low', executable: '/grok' },
+    expectedRevision: null,
+  });
   const conversation = runtime.createConversation(project.id);
-  await assert.rejects(runtime.send({conversationId:conversation.id,text:'Do not dispatch'}), /Native boundary failed/);
-  assert.equal(runtime.snapshot().runs.length,0);
+  await assert.rejects(
+    runtime.send({ conversationId: conversation.id, text: 'Do not dispatch' }),
+    /Native boundary failed/,
+  );
+  assert.equal(runtime.snapshot().runs.length, 0);
   const createdAt = new Date().toISOString();
-  const run = {id:randomUUID(),harness:'grok',projectId:project.id,conversationId:conversation.id,executable:'/grok',executableVersion:'grok-1.0.25',status:'interrupted',model:'grok-model',effort:'low',executionMode:'read-only',workspace:prepareWorkspace(project.root,conversation.id),createdAt,updatedAt:createdAt,lastActivityAt:createdAt};
+  const run = {
+    id: randomUUID(),
+    harness: 'grok',
+    projectId: project.id,
+    conversationId: conversation.id,
+    executable: '/grok',
+    executableVersion: 'grok-1.0.25',
+    status: 'interrupted',
+    model: 'grok-model',
+    effort: 'low',
+    executionMode: 'read-only',
+    workspace: prepareWorkspace(project.root, conversation.id),
+    createdAt,
+    updatedAt: createdAt,
+    lastActivityAt: createdAt,
+  };
   runtime.store.putRun(run);
-  runtime.store.putMessage({id:randomUUID(),runId:run.id,conversationId:conversation.id,role:'user',text:'Retained task',createdAt});
+  runtime.store.putMessage({
+    id: randomUUID(),
+    runId: run.id,
+    conversationId: conversation.id,
+    role: 'user',
+    text: 'Retained task',
+    createdAt,
+  });
   runtime.store.exportRun(run);
-  const checkpoint = new Checkpoints(runtime.store).capture(run,'before-turn');
-  await assert.rejects(runtime.restartRun({runId:run.id,checkpointDigest:checkpoint.digest}), /Native boundary failed/);
-  await assert.rejects(runtime.rerunFromCheckpoint({runId:run.id,checkpointDigest:checkpoint.digest}), /Native boundary failed/);
-  assert.equal(grok.calls.length,0);
-  assert.equal(runtime.snapshot().runs.length,1);
+  const checkpoint = new Checkpoints(runtime.store).capture(run, 'before-turn');
+  await assert.rejects(
+    runtime.restartRun({ runId: run.id, checkpointDigest: checkpoint.digest }),
+    /Native boundary failed/,
+  );
+  await assert.rejects(
+    runtime.rerunFromCheckpoint({ runId: run.id, checkpointDigest: checkpoint.digest }),
+    /Native boundary failed/,
+  );
+  assert.equal(grok.calls.length, 0);
+  assert.equal(runtime.snapshot().runs.length, 1);
 });
 
-test('project route permissions reject disabled CLI admission and freeze authorized routes on runs', async t => {
+test('project route permissions reject disabled CLI admission and freeze authorized routes on runs', async (t) => {
   const paths = await fixture(t);
   const codex = adapter('codex', { code: true });
   const grok = adapter('grok');
@@ -199,45 +318,94 @@ test('project route permissions reject disabled CLI admission and freeze authori
   const project = runtime.addProject(paths.projectRoot);
   const defaults = { harness: 'codex', model: 'codex-model', effort: 'low', executable: '/codex' };
   const permitted = [{ harness: 'codex', executable: '/codex' }];
-  const saved = await runtime.saveProjectDefaults({ projectId: project.id, defaults, enabledRoutes: permitted, expectedRevision: null });
+  const saved = await runtime.saveProjectDefaults({
+    projectId: project.id,
+    defaults,
+    enabledRoutes: permitted,
+    expectedRevision: null,
+  });
   const conversation = runtime.createConversation(project.id);
-  await assert.rejects(runtime.send({ conversationId: conversation.id, text: 'Disabled', harness: 'grok', model: 'grok-model', effort: 'low' }), /not enabled/);
-  await assert.rejects(runtime.setConversationSelection({ conversationId: conversation.id, selection: { harness: 'grok', model: 'grok-model', effort: 'low' } }), /not enabled/);
+  await assert.rejects(
+    runtime.send({
+      conversationId: conversation.id,
+      text: 'Disabled',
+      harness: 'grok',
+      model: 'grok-model',
+      effort: 'low',
+    }),
+    /not enabled/,
+  );
+  await assert.rejects(
+    runtime.setConversationSelection({
+      conversationId: conversation.id,
+      selection: { harness: 'grok', model: 'grok-model', effort: 'low' },
+    }),
+    /not enabled/,
+  );
   assert.equal(grok.calls.length, 0);
   const run = await runtime.send({ conversationId: conversation.id, text: 'Enabled' });
   await settle(runtime);
   assert.deepEqual(run.enabledHarnessRoutes, permitted);
   assert.equal(run.harnessAuthorizationRevision, saved.revision);
-  await runtime.saveProjectDefaults({ projectId: project.id, defaults, enabledRoutes: [], expectedRevision: saved.revision });
+  await runtime.saveProjectDefaults({
+    projectId: project.id,
+    defaults,
+    enabledRoutes: [],
+    expectedRevision: saved.revision,
+  });
   assert.deepEqual(runtime.snapshot().runs[0].enabledHarnessRoutes, permitted);
-  await assert.rejects(runtime.send({ conversationId: conversation.id, text: 'Now disabled' }), /not enabled/);
-  await assert.rejects(runtime.setExecutionMode({ conversationId: conversation.id, executionMode: 'code' }), /not enabled/);
-  await assert.rejects(runtime.rerunFromCheckpoint({ runId: run.id, checkpointDigest: runtime.snapshot().runs[0].checkpoints.at(-1).digest }), /not enabled/);
+  await assert.rejects(
+    runtime.send({ conversationId: conversation.id, text: 'Now disabled' }),
+    /not enabled/,
+  );
+  await assert.rejects(
+    runtime.setExecutionMode({ conversationId: conversation.id, executionMode: 'code' }),
+    /not enabled/,
+  );
+  await assert.rejects(
+    runtime.rerunFromCheckpoint({
+      runId: run.id,
+      checkpointDigest: runtime.snapshot().runs[0].checkpoints.at(-1).digest,
+    }),
+    /not enabled/,
+  );
   assert.equal(codex.calls.length, 1);
 });
 
-test('route changes while discovery is pending cannot authorize dispatch with stale settings', async t => {
+test('route changes while discovery is pending cannot authorize dispatch with stale settings', async (t) => {
   const paths = await fixture(t);
   const codex = adapter('codex');
   const runtime = new Runtime({ codex }, paths.dataRoot);
   t.after(() => runtime.close());
   const project = runtime.addProject(paths.projectRoot);
   const defaults = { harness: 'codex', model: 'codex-model', effort: 'low', executable: '/codex' };
-  const saved = await runtime.saveProjectDefaults({ projectId: project.id, defaults, enabledRoutes: [{ harness: 'codex', executable: '/codex' }], expectedRevision: null });
+  const saved = await runtime.saveProjectDefaults({
+    projectId: project.id,
+    defaults,
+    enabledRoutes: [{ harness: 'codex', executable: '/codex' }],
+    expectedRevision: null,
+  });
   const conversation = runtime.createConversation(project.id);
   const discover = codex.discover;
-  codex.discover = async executable => {
+  codex.discover = async (executable) => {
     codex.discover = discover;
-    await runtime.saveProjectDefaults({ projectId: project.id, defaults, enabledRoutes: [], expectedRevision: saved.revision });
+    await runtime.saveProjectDefaults({
+      projectId: project.id,
+      defaults,
+      enabledRoutes: [],
+      expectedRevision: saved.revision,
+    });
     return discover(executable);
   };
-  await assert.rejects(runtime.send({ conversationId: conversation.id, text: 'Do not launch stale authority' }), /settings changed/);
+  await assert.rejects(
+    runtime.send({ conversationId: conversation.id, text: 'Do not launch stale authority' }),
+    /settings changed/,
+  );
   assert.equal(codex.calls.length, 0);
   assert.equal(runtime.snapshot().runs.length, 0);
 });
 
-
-test('an unreadable config created during discovery cannot preserve implicit authorization', async t => {
+test('an unreadable config created during discovery cannot preserve implicit authorization', async (t) => {
   const paths = await fixture(t);
   const codex = adapter('codex');
   const runtime = new Runtime({ codex }, paths.dataRoot);
@@ -245,11 +413,36 @@ test('an unreadable config created during discovery cannot preserve implicit aut
   const project = runtime.addProject(paths.projectRoot);
   const conversation = runtime.createConversation(project.id);
   const discover = codex.discover;
-  codex.discover = async executable => {
+  codex.discover = async (executable) => {
     await writeFile(join(paths.projectRoot, 'config.harness.yaml'), 'x'.repeat(65_537));
     return discover(executable);
   };
-  await assert.rejects(runtime.send({ conversationId: conversation.id, text: 'Do not launch invalid permissions' }), /64 KB|size limit/);
+  await assert.rejects(
+    runtime.send({ conversationId: conversation.id, text: 'Do not launch invalid permissions' }),
+    /64 KB|size limit/,
+  );
   assert.equal(codex.calls.length, 0);
   assert.equal(runtime.snapshot().runs.length, 0);
+});
+
+test('a CLI that is no longer discovered after switching to code mode is rejected at dispatch', async (t) => {
+  const paths = await fixture(t);
+  const codex = adapter('codex', { code: true, launchVerifiesAuthentication: true });
+  const runtime = new Runtime({ codex }, paths.dataRoot);
+  t.after(() => runtime.close());
+  const project = runtime.addProject(paths.projectRoot);
+  await runtime.saveProjectDefaults({
+    projectId: project.id,
+    defaults: { harness: 'codex', model: 'codex-model', effort: 'low', executable: '/codex' },
+    expectedRevision: null,
+  });
+  const conversation = runtime.createConversation(project.id);
+  await runtime.setExecutionMode({ conversationId: conversation.id, executionMode: 'code' });
+  codex.installations = async () => [];
+  await assert.rejects(
+    runtime.send({ conversationId: conversation.id, text: 'Change it.' }),
+    /no longer discovered/,
+  );
+  assert.equal(codex.discoveries.length, 2);
+  assert.equal(codex.calls.length, 0);
 });

@@ -2,7 +2,6 @@
 
 Status: approved product behavior, consolidated for implementation planning. Technical proposals and unresolved details are labeled separately. This document specifies intended behavior; it does not claim implemented features or an approved release date.
 
-
 Randolph is a new product designed around the requirements below. The entire desktop application and execution engine are intended for open-source release. Personal integrations must remain separate from the public core.
 
 ## Purpose
@@ -82,22 +81,22 @@ Technical evidence: [bounded native harness experiment](research/harness-compati
 
 ### Approved initial catalog: 14 workflows
 
-| Category | Workflow |
-| --- | --- |
-| Product Manager | Product Planning |
-| Product Manager | Backlog Grooming |
-| Product Manager | Discovery & Validation |
-| Product Manager | Feature Prioritization |
-| Product Manager | Release Planning |
+| Category             | Workflow                      |
+| -------------------- | ----------------------------- |
+| Product Manager      | Product Planning              |
+| Product Manager      | Backlog Grooming              |
+| Product Manager      | Discovery & Validation        |
+| Product Manager      | Feature Prioritization        |
+| Product Manager      | Release Planning              |
 | Software Engineering | Architecture & Infrastructure |
-| Software Engineering | Development |
-| Software Engineering | Bug Triage |
-| Software Engineering | Bugfix |
-| Software Engineering | Code Review |
-| Software Engineering | Codebase Assessment |
-| Business Operations | Process Design & SOPs |
-| Business Operations | Research & Decision Brief |
-| Business Operations | Operational Review |
+| Software Engineering | Development                   |
+| Software Engineering | Bug Triage                    |
+| Software Engineering | Bugfix                        |
+| Software Engineering | Code Review                   |
+| Software Engineering | Codebase Assessment           |
+| Business Operations  | Process Design & SOPs         |
+| Business Operations  | Research & Decision Brief     |
+| Business Operations  | Operational Review            |
 
 Each workflow still needs its own inputs, completion criteria, default limits, and behavior specification. The catalog does not authorize branding, marketing, or deeper business-operations workflows for v1.
 
@@ -171,6 +170,7 @@ Each workflow still needs its own inputs, completion criteria, default limits, a
 - Before starting, show the repository's currently checked-out branch as the default parent and allow the user to select another branch. Existing uncommitted changes remain in the original checkout by default; including a copy in the new worktree requires explicit selection and does not move or remove the original changes.
 - When worktree isolation is disabled, allow only one active app-managed writer per shared checkout across the application. Other conversations may continue reading, researching, and planning; editing waits in a visible queue identifying the conversation holding write access. Separate worktrees continue independently. This coordinates app-managed agents only; external edits must still be detected and handled.
 - Worktrees live inside the repository. A single writing agent uses the conversation's worktree; other agents can read and investigate alongside it. When parallel writing is worthwhile, each writer gets a separate worktree inside the repository. The coordinator integrates their changes into the conversation's worktree and verifies the combined result before presenting it for final approval. Worktree opt-out behavior still needs detailed design.
+- Before a Code-mode run's first native dispatch and before project checks, the runtime prepares the conversation worktree's dependencies itself. Preparation uses a bounded, runtime-detected package-manager command for the detected toolchain (initially `pnpm install --frozen-lockfile` with an offline preference for pnpm projects that declare a lockfile), runs outside the native sandbox with a sanitized environment, a time limit, bounded retained output, and a durable receipt tied to the worktree identity and lockfile digest. Project configuration cannot supply arbitrary preparation commands. Failed preparation blocks Code dispatch and checks visibly; preparation never runs on reopen or for read-only conversations. Approved for v1 on 2026-09-15.
 - Retained conversation material lives in a global app folder, organized by project and run: logs, artifacts, configuration snapshots, and review evidence.
 - Durable run history is retained until the user deletes it by default. Automatic retention limits are opt-in. Before deletion, show whether removing the selected material would prevent historical review or rerunning a checkpoint. Temporary scratch files remain eligible for automatic cleanup once no longer in use.
 - OS temporary storage is volatile scratch space. Protect items while in active use, release afterward, and clean regularly. No history, approval, or checkpoint recovery may depend on released temporary files.

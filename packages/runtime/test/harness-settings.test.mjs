@@ -8,30 +8,34 @@ import test from 'node:test';
 import { readHarnessSettings, writeHarnessSettings } from '../dist/harness-settings.js';
 
 const defaults = { harness: 'codex', model: 'native-model', effort: 'low' };
-const content = '# Project defaults\nschemaVersion: 1\nharness: codex\nmodel: native-model # retain this comment\neffort: low\ncustom: keep-me\n';
+const content =
+  '# Project defaults\nschemaVersion: 1\nharness: codex\nmodel: native-model # retain this comment\neffort: low\ncustom: keep-me\n';
 async function fixture(t) {
   const root = realpathSync(await mkdtemp(join(tmpdir(), 'randolph-settings-')));
-  t.after(async () => { await rm(root, { recursive: true, force: true }); });
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
   return { root, path: join(root, 'config.harness.yaml') };
 }
 
-test('missing settings are read without creating a file, while missing projects report errors', async t => {
+test('missing settings are read without creating a file, while missing projects report errors', async (t) => {
   const { root, path } = await fixture(t);
   assert.deepEqual(readHarnessSettings(root), { revision: null, defaults: null });
   await assert.rejects(readFile(path), { code: 'ENOENT' });
   assert.match(readHarnessSettings(join(root, 'absent')).error, /project|directory/i);
 });
 
-test('read returns native defaults with an exact raw-byte revision and does not rewrite YAML', async t => {
+test('read returns native defaults with an exact raw-byte revision and does not rewrite YAML', async (t) => {
   const { root, path } = await fixture(t);
   await writeFile(path, content);
   assert.deepEqual(readHarnessSettings(root), {
-    revision: createHash('sha256').update(content).digest('hex'), defaults,
+    revision: createHash('sha256').update(content).digest('hex'),
+    defaults,
   });
   assert.equal(await readFile(path, 'utf8'), content);
 });
 
-test('save creates versioned settings, preserves comments and unrelated YAML, and returns a new revision', async t => {
+test('save creates versioned settings, preserves comments and unrelated YAML, and returns a new revision', async (t) => {
   const { root, path } = await fixture(t);
   const first = writeHarnessSettings(root, defaults, null);
   assert.deepEqual(first.defaults, defaults);
@@ -48,7 +52,7 @@ test('save creates versioned settings, preserves comments and unrelated YAML, an
   assert.match(text, /custom: keep-me/);
 });
 
-test('an external edit causes a stale revision error without overwriting it', async t => {
+test('an external edit causes a stale revision error without overwriting it', async (t) => {
   const { root, path } = await fixture(t);
   const initial = writeHarnessSettings(root, defaults, null);
   await writeFile(path, content);
@@ -57,10 +61,12 @@ test('an external edit causes a stale revision error without overwriting it', as
   assert.throws(() => writeHarnessSettings(root, defaults, null), /changed|stale/i);
 });
 
-test('malformed or unsupported YAML is visible and cannot be overwritten by Save', async t => {
+test('malformed or unsupported YAML is visible and cannot be overwritten by Save', async (t) => {
   const { root, path } = await fixture(t);
   for (const source of [
-    'bad: [', '[]', 'schemaVersion: 2\nharness: codex\nmodel: x\neffort: low\n',
+    'bad: [',
+    '[]',
+    'schemaVersion: 2\nharness: codex\nmodel: x\neffort: low\n',
     'schemaVersion: 1\nharness: claude\nmodel: x\neffort: low\n',
     'schemaVersion: 1\nharness: codex\nmodel: x\nmodel: y\neffort: low\n',
     'schemaVersion: 1\nharness: codex\nmodel: ""\neffort: low\n',
@@ -76,7 +82,7 @@ test('malformed or unsupported YAML is visible and cannot be overwritten by Save
   }
 });
 
-test('oversized files and invalid save inputs are rejected without writes', async t => {
+test('oversized files and invalid save inputs are rejected without writes', async (t) => {
   const { root, path } = await fixture(t);
   const oversized = `${content}#${'x'.repeat(65_536)}`;
   await writeFile(path, oversized);
@@ -84,13 +90,17 @@ test('oversized files and invalid save inputs are rejected without writes', asyn
   assert.throws(() => writeHarnessSettings(root, defaults, null));
   assert.equal(await readFile(path, 'utf8'), oversized);
   await rm(path);
-  for (const invalid of [{ ...defaults, model: '' }, { ...defaults, effort: 'x\ny' }, { ...defaults, harness: 'claude' }]) {
+  for (const invalid of [
+    { ...defaults, model: '' },
+    { ...defaults, effort: 'x\ny' },
+    { ...defaults, harness: 'claude' },
+  ]) {
     assert.throws(() => writeHarnessSettings(root, invalid, null));
     await assert.rejects(readFile(path), { code: 'ENOENT' });
   }
 });
 
-test('symlinked or hardlinked settings and directories are rejected without changing targets', async t => {
+test('symlinked or hardlinked settings and directories are rejected without changing targets', async (t) => {
   const { root, path } = await fixture(t);
   const target = join(root, 'target.yaml');
   await writeFile(target, content);
@@ -108,7 +118,7 @@ test('symlinked or hardlinked settings and directories are rejected without chan
   assert.throws(() => writeHarnessSettings(root, defaults, null));
 });
 
-test('redirecting a saved project root through a symlink cannot read or write another project', async t => {
+test('redirecting a saved project root through a symlink cannot read or write another project', async (t) => {
   const { root } = await fixture(t);
   const target = join(root, 'actual');
   const redirected = join(root, 'redirected');
@@ -120,26 +130,36 @@ test('redirecting a saved project root through a symlink cannot read or write an
   assert.equal(await readFile(join(target, 'config.harness.yaml'), 'utf8'), content);
 });
 
-
-test('project CLI selection survives persistence and rejects non-absolute executable paths', async t => {
+test('project CLI selection survives persistence and rejects non-absolute executable paths', async (t) => {
   const { root } = await fixture(t);
   const configured = { ...defaults, executable: '/opt/example/bin/codex' };
   const saved = writeHarnessSettings(root, configured, null);
   assert.deepEqual(readHarnessSettings(root).defaults, configured);
-  assert.throws(() => writeHarnessSettings(root, { ...defaults, executable: 'relative/codex' }, saved.revision), /executable|absolute/i);
+  assert.throws(
+    () => writeHarnessSettings(root, { ...defaults, executable: 'relative/codex' }, saved.revision),
+    /executable|absolute/i,
+  );
   assert.deepEqual(readHarnessSettings(root).defaults, configured);
 });
 
-test('Grok defaults round-trip as a complete harness selection', async t => {
+test('Grok defaults round-trip as a complete harness selection', async (t) => {
   const { root } = await fixture(t);
-  const grok = { harness: 'grok', model: 'grok-1.0.25', effort: 'low', executable: '/opt/grok/bin/grok' };
+  const grok = {
+    harness: 'grok',
+    model: 'grok-1.0.25',
+    effort: 'low',
+    executable: '/opt/grok/bin/grok',
+  };
   const saved = writeHarnessSettings(root, grok, null);
   assert.deepEqual(readHarnessSettings(root), { revision: saved.revision, defaults: grok });
 });
 
-test('explicit enabled CLI routes persist separately and survive legacy defaults saves', async t => {
+test('explicit enabled CLI routes persist separately and survive legacy defaults saves', async (t) => {
   const { root, path } = await fixture(t);
-  const routes = [{ harness: 'codex', executable: '/opt/codex' }, { harness: 'grok', executable: '/opt/grok' }];
+  const routes = [
+    { harness: 'codex', executable: '/opt/codex' },
+    { harness: 'grok', executable: '/opt/grok' },
+  ];
   const first = writeHarnessSettings(root, defaults, null, routes);
   assert.deepEqual(first.enabledRoutes, routes);
   assert.deepEqual(readHarnessSettings(root).enabledRoutes, routes);
@@ -151,10 +171,18 @@ test('explicit enabled CLI routes persist separately and survive legacy defaults
   assert.notEqual(disabled.revision, next.revision);
 });
 
-test('enabled routes reject duplicate, relative, malformed and unbounded routes before saving', async t => {
+test('enabled routes reject duplicate, relative, malformed and unbounded routes before saving', async (t) => {
   const { root, path } = await fixture(t);
   const route = { harness: 'codex', executable: '/opt/codex' };
-  for (const routes of [null, {}, [route, route], [{ ...route, executable: 'codex' }], [{ ...route, harness: 'other' }], [{ ...route, executable: '/x\ny' }], Array.from({length: 33}, (_, i) => ({ ...route, executable: `/opt/${i}` }))]) {
+  for (const routes of [
+    null,
+    {},
+    [route, route],
+    [{ ...route, executable: 'codex' }],
+    [{ ...route, harness: 'other' }],
+    [{ ...route, executable: '/x\ny' }],
+    Array.from({ length: 33 }, (_, i) => ({ ...route, executable: `/opt/${i}` })),
+  ]) {
     assert.throws(() => writeHarnessSettings(root, defaults, null, routes));
     await assert.rejects(readFile(path), { code: 'ENOENT' });
   }

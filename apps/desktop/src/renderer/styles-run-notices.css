@@ -1,0 +1,17 @@
+/* .integration-attention is rendered by ConversationScreen.tsx; .run-context by
+   ActivityPanel.tsx. Both are run-scoped notices, not a single panel's chrome. */
+.integration-attention {
+  border: 1px solid #bb9569;
+  background: #fbf2e5;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.integration-attention button {
+  margin-right: 8px;
+}
+.run-context pre {
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: auto;
+}

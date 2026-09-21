@@ -15,7 +15,9 @@ function uuid(value: string): string | undefined {
 }
 
 function platformUuid(output: string): string | undefined {
-  const matches = [...output.matchAll(/^\s*(?:\|\s*)*"IOPlatformUUID"\s*=\s*"([0-9a-f-]+)"\s*$/gim)];
+  const matches = [
+    ...output.matchAll(/^\s*(?:\|\s*)*"IOPlatformUUID"\s*=\s*"([0-9a-f-]+)"\s*$/gim),
+  ];
   if (matches.length !== 1) return undefined;
   return uuid(matches[0][1]);
 }
@@ -24,12 +26,24 @@ function validOrigin(value: unknown): value is ExecutionOrigin {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record);
-  return keys.length === 3 && keys.includes('version') && keys.includes('hostIdHash') && keys.includes('bootSessionId')
-    && record.version === 1 && typeof record.hostIdHash === 'string' && SHA256.test(record.hostIdHash)
-    && typeof record.bootSessionId === 'string' && UUID.test(record.bootSessionId);
+  return (
+    keys.length === 3 &&
+    keys.includes('version') &&
+    keys.includes('hostIdHash') &&
+    keys.includes('bootSessionId') &&
+    record.version === 1 &&
+    typeof record.hostIdHash === 'string' &&
+    SHA256.test(record.hostIdHash) &&
+    typeof record.bootSessionId === 'string' &&
+    UUID.test(record.bootSessionId)
+  );
 }
 
-export function parseExecutionOrigin(platform: string, ioregOutput: string, bootSessionOutput: string): ExecutionOrigin | undefined {
+export function parseExecutionOrigin(
+  platform: string,
+  ioregOutput: string,
+  bootSessionOutput: string,
+): ExecutionOrigin | undefined {
   if (platform !== 'darwin') return undefined;
   const hardwareId = platformUuid(ioregOutput);
   const bootSessionId = uuid(bootSessionOutput);
@@ -44,11 +58,21 @@ export function parseExecutionOrigin(platform: string, ioregOutput: string, boot
 export function readExecutionOrigin(): ExecutionOrigin | undefined {
   if (process.platform !== 'darwin') return undefined;
   try {
-    const ioregOutput = execFileSync('/usr/sbin/ioreg', ['-rd1', '-c', 'IOPlatformExpertDevice', '-k', 'IOPlatformUUID'], {
-      encoding: 'utf8', timeout: SYSTEM_TIMEOUT_MS, maxBuffer: SYSTEM_MAX_BUFFER, stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const ioregOutput = execFileSync(
+      '/usr/sbin/ioreg',
+      ['-rd1', '-c', 'IOPlatformExpertDevice', '-k', 'IOPlatformUUID'],
+      {
+        encoding: 'utf8',
+        timeout: SYSTEM_TIMEOUT_MS,
+        maxBuffer: SYSTEM_MAX_BUFFER,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
     const bootSessionOutput = execFileSync('/usr/sbin/sysctl', ['-n', 'kern.bootsessionuuid'], {
-      encoding: 'utf8', timeout: SYSTEM_TIMEOUT_MS, maxBuffer: SYSTEM_MAX_BUFFER, stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+      timeout: SYSTEM_TIMEOUT_MS,
+      maxBuffer: SYSTEM_MAX_BUFFER,
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     return parseExecutionOrigin(process.platform, ioregOutput, bootSessionOutput);
   } catch {
@@ -57,10 +81,14 @@ export function readExecutionOrigin(): ExecutionOrigin | undefined {
 }
 
 export function cleanupReconciliationReason(recorded: unknown, current: unknown): string | null {
-  if (!validOrigin(recorded)) return 'Cleanup cannot be reconciled because the original Mac execution record is missing or malformed.';
+  if (!validOrigin(recorded))
+    return 'Cleanup cannot be reconciled because the original Mac execution record is missing or malformed.';
   if (current === undefined) return 'Current execution origin is unavailable.';
-  if (!validOrigin(current)) return 'Cleanup cannot be reconciled because the current Mac execution record is malformed.';
-  if (recorded.hostIdHash !== current.hostIdHash) return 'Cleanup requires evidence from the original Mac.';
-  if (recorded.bootSessionId === current.bootSessionId) return 'Restart the original Mac before reconciling cleanup.';
+  if (!validOrigin(current))
+    return 'Cleanup cannot be reconciled because the current Mac execution record is malformed.';
+  if (recorded.hostIdHash !== current.hostIdHash)
+    return 'Cleanup requires evidence from the original Mac.';
+  if (recorded.bootSessionId === current.bootSessionId)
+    return 'Restart the original Mac before reconciling cleanup.';
   return null;
 }

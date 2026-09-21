@@ -1,6 +1,6 @@
 name: Feature request
 description: Share a problem and the behavior that would help solve it.
-title: "[Feature]: "
+title: '[Feature]: '
 body:
   - type: markdown
     attributes:

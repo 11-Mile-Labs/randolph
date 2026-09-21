@@ -6,11 +6,16 @@ import type { DesktopBridge } from '@randolph/runtime/contracts';
 
 test('desktop persists project defaults and overrides, streams a run and reopens without repeating work', async () => {
   const root = mkdtempSync(join(tmpdir(), 'randolph-desktop-'));
-  const home = join(root, 'home'); const project = join(root, 'sample-project'); const bin = join(root, 'bin');
+  const home = join(root, 'home');
+  const project = join(root, 'sample-project');
+  const bin = join(root, 'bin');
   for (const path of [home, project, bin]) mkdirSync(path, { recursive: true });
   writeFileSync(join(project, 'README.md'), '# Sample project\nA test workspace.\n');
   const calls = join(root, 'turns.log');
-  writeFileSync(join(bin, 'codex'), `#!${process.execPath}\n` + `
+  writeFileSync(
+    join(bin, 'codex'),
+    `#!${process.execPath}\n` +
+      `
 const {createInterface}=require('node:readline');
 const {appendFileSync}=require('node:fs');
 if(process.argv.includes('--version')) { console.log('codex-cli fixture'); process.exit(0); }
@@ -28,44 +33,78 @@ createInterface({input:process.stdin}).on('line',line=>{
   setTimeout(()=>send({method:'turn/completed',params:{threadId:'thread-fixture',turn:{id:'turn-fixture',status:'completed'}}}),500);
  }else send({id:m.id,result:{}});
 });
-`, { mode: 0o700 });
-  const env = { ...process.env, HOME: home, PATH: bin + ':' + process.env.PATH, RANDOLPH_DATA_DIR: join(root, 'data') };
+`,
+    { mode: 0o700 },
+  );
+  const env = {
+    ...process.env,
+    HOME: home,
+    PATH: bin + ':' + process.env.PATH,
+    RANDOLPH_DATA_DIR: join(root, 'data'),
+  };
   delete env.ELECTRON_RUN_AS_NODE;
   let app = await electron.launch({ args: [resolve('.')], env });
   const errors: string[] = [];
   try {
     let page = await app.firstWindow();
-    page.on('pageerror', error => errors.push(error.message));
+    page.on('pageerror', (error) => errors.push(error.message));
     await expect(page.getByRole('heading', { name: 'Your projects, in one place.' })).toBeVisible();
-    await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, project);
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, project);
     await page.getByRole('button', { name: 'Add your first project' }).click();
-    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('fixture-model');
-    await page.getByRole('navigation', { name: 'Project conversations', exact: true }).getByRole('button', { name: 'Project settings', exact: true }).click();
-    await page.getByRole('combobox', { name: 'Default model', exact: true }).selectOption('fixture-thorough');
-    await expect(page.getByRole('combobox', { name: 'Default reasoning effort', exact: true })).toHaveValue('high');
+    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue(
+      'fixture-model',
+    );
+    await page
+      .getByRole('navigation', { name: 'Project conversations', exact: true })
+      .getByRole('button', { name: 'Project settings', exact: true })
+      .click();
+    await page
+      .getByRole('combobox', { name: 'Default model', exact: true })
+      .selectOption('fixture-thorough');
+    await expect(
+      page.getByRole('combobox', { name: 'Default reasoning effort', exact: true }),
+    ).toHaveValue('high');
     await page.getByRole('button', { name: 'Save project defaults', exact: true }).click();
-    await expect(page.getByRole('status').filter({ hasText: 'Project defaults saved' })).toBeVisible();
-    expect(readFileSync(join(project, 'config.harness.yaml'), 'utf8')).toContain('model: fixture-thorough');
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Project defaults saved' }),
+    ).toBeVisible();
+    expect(readFileSync(join(project, 'config.harness.yaml'), 'utf8')).toContain(
+      'model: fixture-thorough',
+    );
     await page.screenshot({ path: join(tmpdir(), 'randolph-project-settings.png') });
     await page.getByRole('button', { name: 'Close settings', exact: true }).click();
-    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('fixture-thorough');
+    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue(
+      'fixture-thorough',
+    );
     await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Describe the project');
     await page.getByRole('button', { name: 'Send message' }).click();
     await expect(page.getByText('I can see the fixture project.', { exact: true })).toBeVisible();
-    await expect(page.locator('.status-row').filter({ hasText: 'Status' })).toContainText('completed');
-    const snapshot = await page.evaluate(async () => await (window as unknown as { randolph: DesktopBridge }).randolph.snapshot());
+    await expect(page.locator('.status-row').filter({ hasText: 'Status' })).toContainText(
+      'completed',
+    );
+    const snapshot = await page.evaluate(
+      async () => await (window as unknown as { randolph: DesktopBridge }).randolph.snapshot(),
+    );
     expect(snapshot.runs).toHaveLength(1);
     expect(snapshot.runs[0]!.model).toBe('fixture-thorough');
     expect(snapshot.runs[0]!.effort).toBe('high');
     expect(snapshot.runs[0]!.settingsSource).toBe('project');
     expect(snapshot.messages).toHaveLength(2);
-    expect(readFileSync(join(snapshot.runs[0]!.logsPath!, 'events.jsonl'), 'utf8')).toContain('message.delta');
-    expect(await page.evaluate(() => typeof (window as unknown as { require?: unknown }).require)).toBe('undefined');
+    expect(readFileSync(join(snapshot.runs[0]!.logsPath!, 'events.jsonl'), 'utf8')).toContain(
+      'message.delta',
+    );
+    expect(
+      await page.evaluate(() => typeof (window as unknown as { require?: unknown }).require),
+    ).toBe('undefined');
     expect(errors).toEqual([]);
     await page.getByRole('combobox', { name: 'Model', exact: true }).selectOption('fixture-model');
     await expect(page.getByText('Conversation override', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'New conversation in sample-project' }).click();
-    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('fixture-thorough');
+    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue(
+      'fixture-thorough',
+    );
     await page.getByRole('combobox', { name: 'Reasoning effort', exact: true }).selectOption('low');
     await expect(page.getByText('Conversation override', { exact: true })).toBeVisible();
     await app.close();
@@ -73,32 +112,63 @@ createInterface({input:process.stdin}).on('line',line=>{
     page = await app.firstWindow();
     await page.getByRole('button', { name: 'Describe the project', exact: true }).click();
     await expect(page.getByText('I can see the fixture project.', { exact: true })).toBeVisible();
-    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('fixture-model');
+    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue(
+      'fixture-model',
+    );
     await page.getByRole('button', { name: 'New conversation', exact: true }).click();
-    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('fixture-thorough');
-    await expect(page.getByRole('combobox', { name: 'Reasoning effort', exact: true })).toHaveValue('low');
+    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue(
+      'fixture-thorough',
+    );
+    await expect(page.getByRole('combobox', { name: 'Reasoning effort', exact: true })).toHaveValue(
+      'low',
+    );
     await page.getByRole('button', { name: 'Use project default', exact: true }).click();
-    await expect(page.getByRole('combobox', { name: 'Reasoning effort', exact: true })).toHaveValue('high');
-    await page.getByRole('navigation', { name: 'Project conversations', exact: true }).getByRole('button', { name: 'Project settings', exact: true }).click();
-    const externalSettings = 'schemaVersion: 1\nharness: codex\nmodel: fixture-model\neffort: low\n';
+    await expect(page.getByRole('combobox', { name: 'Reasoning effort', exact: true })).toHaveValue(
+      'high',
+    );
+    await page
+      .getByRole('navigation', { name: 'Project conversations', exact: true })
+      .getByRole('button', { name: 'Project settings', exact: true })
+      .click();
+    const externalSettings =
+      'schemaVersion: 1\nharness: codex\nmodel: fixture-model\neffort: low\n';
     writeFileSync(join(project, 'config.harness.yaml'), externalSettings);
     await page.getByRole('button', { name: 'Save project defaults', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('changed outside');
     expect(readFileSync(join(project, 'config.harness.yaml'), 'utf8')).toBe(externalSettings);
     await page.getByRole('button', { name: 'Reload settings', exact: true }).click();
-    await expect(page.getByRole('combobox', { name: 'Default model', exact: true })).toHaveValue('fixture-model');
+    await expect(page.getByRole('combobox', { name: 'Default model', exact: true })).toHaveValue(
+      'fixture-model',
+    );
     await page.getByRole('button', { name: 'Close settings', exact: true }).click();
-    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('fixture-model');
+    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue(
+      'fixture-model',
+    );
     expect(readFileSync(calls, 'utf8')).toBe('turn\n');
     await page.screenshot({ path: join(tmpdir(), 'randolph-desktop-workspace.png') });
-    writeFileSync(join(project, 'config.harness.yaml'), 'schemaVersion: 1\nharness: codex\nmodel: removed-model\neffort: low\n');
-    await page.getByRole('navigation', { name: 'Project conversations', exact: true }).getByRole('button', { name: 'Project settings', exact: true }).click();
+    writeFileSync(
+      join(project, 'config.harness.yaml'),
+      'schemaVersion: 1\nharness: codex\nmodel: removed-model\neffort: low\n',
+    );
+    await page
+      .getByRole('navigation', { name: 'Project conversations', exact: true })
+      .getByRole('button', { name: 'Project settings', exact: true })
+      .click();
     await page.getByRole('button', { name: 'Reload settings', exact: true }).click();
-    await expect(page.getByRole('combobox', { name: 'Default model', exact: true })).toHaveValue('removed-model');
+    await expect(page.getByRole('combobox', { name: 'Default model', exact: true })).toHaveValue(
+      'removed-model',
+    );
     await page.getByRole('button', { name: 'Close settings', exact: true }).click();
-    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('removed-model');
-    await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Do not substitute another model');
+    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue(
+      'removed-model',
+    );
+    await page
+      .getByRole('textbox', { name: 'Message', exact: true })
+      .fill('Do not substitute another model');
     await expect(page.getByRole('button', { name: 'Send message' })).toBeDisabled();
     expect(readFileSync(calls, 'utf8')).toBe('turn\n');
-  } finally { await app.close(); rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

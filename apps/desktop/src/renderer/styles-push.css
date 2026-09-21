@@ -1,0 +1,15 @@
+.push-controls {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 8px;
+}
+.push-controls code {
+  overflow-wrap: anywhere;
+}
+.push-controls label {
+  display: block;
+  margin: 12px 0;
+}
+.push-controls button {
+  margin: 6px 8px 6px 0;
+}

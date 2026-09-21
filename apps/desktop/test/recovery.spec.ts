@@ -7,17 +7,37 @@ import type { DesktopBridge } from '@randolph/runtime/contracts';
 
 test('explicit checkpoint recovery preserves history, restarts in place, and reruns in a linked conversation', async () => {
   const root = mkdtempSync(join(tmpdir(), 'randolph-code-ui-'));
-  const project = join(root, 'project'); const home = join(root, 'home'); const bin = join(root, 'bin');
+  const project = join(root, 'project');
+  const home = join(root, 'home');
+  const bin = join(root, 'bin');
   for (const dir of [project, home, bin]) mkdirSync(dir);
-  const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-C', project, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-  git('init', '-b', 'main'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.invalid');
+  const git = (...args: string[]) =>
+    execFileSync(
+      '/usr/bin/git',
+      ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-C', project, ...args],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+    ).trim();
+  git('init', '-b', 'main');
+  git('config', 'user.name', 'Fixture');
+  git('config', 'user.email', 'fixture@example.invalid');
   writeFileSync(join(project, '.gitignore'), '.worktrees/\n');
   writeFileSync(join(project, 'value.txt'), 'before\n');
-  writeFileSync(join(project, 'package.json'), JSON.stringify({ name: 'fixture', packageManager: 'pnpm@11.8.0', scripts: { test: 'node --test' } }));
-  git('add', '.'); git('commit', '-m', 'seed');
+  writeFileSync(
+    join(project, 'package.json'),
+    JSON.stringify({
+      name: 'fixture',
+      packageManager: 'pnpm@11.8.0',
+      scripts: { test: 'node --test' },
+    }),
+  );
+  git('add', '.');
+  git('commit', '-m', 'seed');
   const base = git('rev-parse', 'HEAD');
   const turns = join(root, 'turns.log');
-  writeFileSync(join(bin, 'codex'), `#!${process.execPath}\n` + `
+  writeFileSync(
+    join(bin, 'codex'),
+    `#!${process.execPath}\n` +
+      `
 const {createInterface}=require('node:readline');
 const {writeFileSync,appendFileSync,readFileSync}=require('node:fs');
 const {join}=require('node:path');
@@ -43,54 +63,96 @@ createInterface({input:process.stdin}).on('line',line=>{
   setTimeout(()=>send({id:m.id,result:{exitCode:0,stdout:'Fixture checks passed.',stderr:''}}),1000);
  }else send({id:m.id,result:{}});
 });
-`, { mode: 0o700 });
-  const env = { ...process.env, HOME: home, PATH: bin + ':' + process.env.PATH, RANDOLPH_DATA_DIR: join(root, 'data') };
+`,
+    { mode: 0o700 },
+  );
+  const env = {
+    ...process.env,
+    HOME: home,
+    PATH: bin + ':' + process.env.PATH,
+    RANDOLPH_DATA_DIR: join(root, 'data'),
+  };
   delete env.ELECTRON_RUN_AS_NODE;
-  const launch = () => electron.launch({ executablePath: process.env.RANDOLPH_TEST_EXECUTABLE, args: process.env.RANDOLPH_TEST_EXECUTABLE ? [] : [resolve('.')], env });
+  const launch = () =>
+    electron.launch({
+      executablePath: process.env.RANDOLPH_TEST_EXECUTABLE,
+      args: process.env.RANDOLPH_TEST_EXECUTABLE ? [] : [resolve('.')],
+      env,
+    });
   let app = await launch();
-  if (process.env.RANDOLPH_TEST_EXECUTABLE) expect(await app.evaluate(({ app }) => app.getPath('exe'))).toBe(process.env.RANDOLPH_TEST_EXECUTABLE);
+  if (process.env.RANDOLPH_TEST_EXECUTABLE)
+    expect(await app.evaluate(({ app }) => app.getPath('exe'))).toBe(
+      process.env.RANDOLPH_TEST_EXECUTABLE,
+    );
   try {
     let page = await app.firstWindow();
-    await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, project);
+    await app.evaluate(({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    }, project);
     await page.getByRole('button', { name: 'Add your first project' }).click();
     await page.getByRole('combobox', { name: 'Conversation mode' }).selectOption('code');
     await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Recover this change');
     await page.getByRole('button', { name: 'Send message' }).click();
-    await expect(page.locator('.status-row').filter({ hasText: 'Status' })).toContainText('interrupted');
-    const original = await page.evaluate(() => (window as unknown as { randolph: DesktopBridge }).randolph.snapshot());
-    const projectNavigation = page.getByRole('navigation', { name: 'Project conversations', exact: true });
+    await expect(page.locator('.status-row').filter({ hasText: 'Status' })).toContainText(
+      'interrupted',
+    );
+    const original = await page.evaluate(() =>
+      (window as unknown as { randolph: DesktopBridge }).randolph.snapshot(),
+    );
+    const projectNavigation = page.getByRole('navigation', {
+      name: 'Project conversations',
+      exact: true,
+    });
     await projectNavigation.getByRole('button', { name: 'Run history', exact: true }).click();
     let history = page.getByRole('dialog', { name: 'Run history' });
     await history.getByRole('button', { name: 'Restart from checkpoint', exact: true }).click();
-    await expect(history.getByRole('region', { name: 'Confirm checkpoint execution' })).toContainText('same conversation');
+    await expect(
+      history.getByRole('region', { name: 'Confirm checkpoint execution' }),
+    ).toContainText('same conversation');
     expect(readFileSync(turns, 'utf8')).toBe('turn\n');
     await history.getByRole('button', { name: 'Cancel recovery', exact: true }).click();
     expect(readFileSync(turns, 'utf8')).toBe('turn\n');
     await history.getByRole('button', { name: 'Restart from checkpoint', exact: true }).click();
     await history.getByRole('button', { name: 'Start linked run', exact: true }).click();
     await expect(history).not.toBeVisible();
-    await expect(page.locator('.status-row').filter({ hasText: 'Status' })).toContainText('completed');
-    const restarted = await page.evaluate(() => (window as unknown as { randolph: DesktopBridge }).randolph.snapshot());
+    await expect(page.locator('.status-row').filter({ hasText: 'Status' })).toContainText(
+      'completed',
+    );
+    const restarted = await page.evaluate(() =>
+      (window as unknown as { randolph: DesktopBridge }).randolph.snapshot(),
+    );
     expect(restarted.conversations).toHaveLength(1);
     expect(restarted.runs).toHaveLength(2);
-    const restart = restarted.runs.find(run => run.id !== original.runs[0]!.id)!;
+    const restart = restarted.runs.find((run) => run.id !== original.runs[0]!.id)!;
     expect(restart.sourceRunId).toBe(original.runs[0]!.id);
     expect(restart.conversationId).toBe(original.conversations[0]!.id);
     expect(restart.workspace).not.toBe(original.runs[0]!.workspace);
-    expect(restarted.runs.find(run => run.id === original.runs[0]!.id)!.status).toBe('interrupted');
+    expect(restarted.runs.find((run) => run.id === original.runs[0]!.id)!.status).toBe(
+      'interrupted',
+    );
     await projectNavigation.getByRole('button', { name: 'Run history', exact: true }).click();
     history = page.getByRole('dialog', { name: 'Run history' });
     await expect(history.getByText('Restarted from', { exact: false })).toBeVisible();
-    await history.locator('.checkpoint-card').filter({ hasText: 'Completed turn' }).getByRole('button', { name: 'Rerun in new conversation', exact: true }).click();
-    await expect(history.getByRole('region', { name: 'Confirm checkpoint execution' })).toContainText('new linked conversation');
+    await history
+      .locator('.checkpoint-card')
+      .filter({ hasText: 'Completed turn' })
+      .getByRole('button', { name: 'Rerun in new conversation', exact: true })
+      .click();
+    await expect(
+      history.getByRole('region', { name: 'Confirm checkpoint execution' }),
+    ).toContainText('new linked conversation');
     expect(readFileSync(turns, 'utf8')).toBe('turn\nturn\n');
     await history.getByRole('button', { name: 'Start linked run', exact: true }).click();
     await expect(history).not.toBeVisible();
-    await expect(page.locator('.status-row').filter({ hasText: 'Status' })).toContainText('completed');
-    const rerun = await page.evaluate(() => (window as unknown as { randolph: DesktopBridge }).randolph.snapshot());
+    await expect(page.locator('.status-row').filter({ hasText: 'Status' })).toContainText(
+      'completed',
+    );
+    const rerun = await page.evaluate(() =>
+      (window as unknown as { randolph: DesktopBridge }).randolph.snapshot(),
+    );
     expect(rerun.conversations).toHaveLength(2);
     expect(rerun.runs).toHaveLength(3);
-    const linked = rerun.runs.find(run => run.recoveryKind === 'rerun')!;
+    const linked = rerun.runs.find((run) => run.recoveryKind === 'rerun')!;
     expect(linked.sourceRunId).toBe(restart.id);
     expect(linked.conversationId).not.toBe(restart.conversationId);
     expect(rerun.reviews).toHaveLength(0);
@@ -101,5 +163,8 @@ createInterface({input:process.stdin}).on('line',line=>{
     page = await app.firstWindow();
     await expect(page.getByRole('heading', { name: 'Your projects, in one place.' })).toBeVisible();
     expect(readFileSync(turns, 'utf8')).toBe('turn\nturn\nturn\n');
-  } finally { await app.close(); rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    await app.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

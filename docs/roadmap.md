@@ -16,14 +16,14 @@ The coverage map below remains the complete v1 scope. This order groups implemen
 
 ## Milestones
 
-| Milestone | Deliverable | Exit evidence |
-| --- | --- | --- |
-| M0 — Product foundation | Product specification, architecture, journey, compatibility summary, and first experiment plan | Linked, reviewed documents that distinguish approved behavior, proposals, and unknowns |
-| M1 — One controlled run | Headless synthetic project with one native main agent, visible events, protected delivery, stop, checkpoint, and explicit restart | Reproducible native approval and lifecycle tests; restoration after deleting the source worktree; complete pass/fail report |
-| M2 — Desktop workspace | Project/conversation navigation, chat, model/effort controls, live activity, context selectors, review, and background controls | End-to-end UI drives the verified runtime; stale activity and pending approvals remain visible; desktop-host crash tests pass |
-| M3 — Cross-harness coordination | Codex, Claude, and Grok adapters; discovery/setup; scoped shared context; editable delegation plans/presets; concurrency | Same control contract verified for each supported route; cross-harness work observable; no unapproved native workers or API fallback |
-| M4 — Complete project workflows | Workflow engine/catalog, guided creation, local+Linear backlog, built-in memory, configuration UI, attention and history | Approved workflow outcomes and status mappings work; repeatable setup preserves customization; memory/context provenance and project boundaries verified |
-| M5 — macOS release | Installation/package, recovery hardening, accessibility, documentation, license, and OSS release preparation | Full v1 acceptance matrix passes; fresh-machine installation and upgrade/recovery exercised; public artifacts checked |
+| Milestone                       | Deliverable                                                                                                                       | Exit evidence                                                                                                                                            |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M0 — Product foundation         | Product specification, architecture, journey, compatibility summary, and first experiment plan                                    | Linked, reviewed documents that distinguish approved behavior, proposals, and unknowns                                                                   |
+| M1 — One controlled run         | Headless synthetic project with one native main agent, visible events, protected delivery, stop, checkpoint, and explicit restart | Reproducible native approval and lifecycle tests; restoration after deleting the source worktree; complete pass/fail report                              |
+| M2 — Desktop workspace          | Project/conversation navigation, chat, model/effort controls, live activity, context selectors, review, and background controls   | End-to-end UI drives the verified runtime; stale activity and pending approvals remain visible; desktop-host crash tests pass                            |
+| M3 — Cross-harness coordination | Codex, Claude, and Grok adapters; discovery/setup; scoped shared context; editable delegation plans/presets; concurrency          | Same control contract verified for each supported route; cross-harness work observable; no unapproved native workers or API fallback                     |
+| M4 — Complete project workflows | Workflow engine/catalog, guided creation, local+Linear backlog, built-in memory, configuration UI, attention and history          | Approved workflow outcomes and status mappings work; repeatable setup preserves customization; memory/context provenance and project boundaries verified |
+| M5 — macOS release              | Installation/package, recovery hardening, accessibility, documentation, license, and OSS release preparation                      | Full v1 acceptance matrix passes; fresh-machine installation and upgrade/recovery exercised; public artifacts checked                                    |
 
 M1 narrows the experiment, not the product. Passing one adapter does not reduce v1's three-harness target. M2 implementation now proceeds as bounded usable product slices while remaining control gaps stay explicit. This does not waive M1 requirements or imply unverified execution guarantees.
 
@@ -45,38 +45,39 @@ Permission and lifecycle experiments have produced bounded passes and an explici
 
 ## V1 coverage map
 
-| Approved behavior | Primary milestone |
-| --- | --- |
-| First-class projects, multiple conversations and projects concurrently, one active run per conversation | M2, M3 |
-| Main harness/model/effort defaults and overrides; Fast/Balanced/Thorough preferences | M2, M3 |
-| Automatic CLI discovery, reviewed AI-assisted setup, safe repeat setup, no config migration | M3, M4 |
-| Shared agents, hooks, skills, instructions; portable capability reporting | M3 |
-| Preset authorization banners; combined editable proposals; explicit save; version-specific approval; YOLO limits | M1, M2, M3 |
-| Obvious activity, unread indicators, project/shared inbox, notifications | M2, M4 |
-| Stop/Pause/Resume; background setting; menu-bar controls; explicit restart only | M1, M2, M3 |
-| Worktree defaults, parent selection, dirty-change copy choice, shared-checkout writer coordination | M1, M2, M3 |
-| Final reviewed commit/merge, separate push, stale-parent invalidation, cleanup/reconciliation | M1, M2, M5 |
-| Context references with @, skills with / and +; previews/external editor; pinning and budget indicators | M2, M3, M4 |
-| Concise context preparation, provenance, relevant retrieval, no silent loss of pinned requirements | M3, M4 |
-| All 14 workflows, flexible/prescribed steps, guided creation/refusal, repair/retry/time limits | M4 |
-| Share/export/import independent workflow and preset copies; explicit updates | M4 |
-| Local and Linear backlog, list/board, linked conversations, outcome-driven advancement | M4 |
-| Local project/global lessons, separate approval settings, external retrieval and optional write-back | M4 |
-| Focused dot-separated YAML, UI management, external edit validation, run snapshots | M3, M4 |
-| Global durable run files; JSONL/readable logs; volatile scratch cleanup; opt-in retention | M1, M4, M5 |
-| Checkpoint restoration, historical viewing without execution, explicit restart/rerun, external-effect reconciliation | M1, M4, M5 |
-| macOS distribution, no app account/cloud requirement, public-safe core | M5 |
+| Approved behavior                                                                                                    | Primary milestone |
+| -------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| First-class projects, multiple conversations and projects concurrently, one active run per conversation              | M2, M3            |
+| Main harness/model/effort defaults and overrides; Fast/Balanced/Thorough preferences                                 | M2, M3            |
+| Automatic CLI discovery, reviewed AI-assisted setup, safe repeat setup, no config migration                          | M3, M4            |
+| Shared agents, hooks, skills, instructions; portable capability reporting                                            | M3                |
+| Preset authorization banners; combined editable proposals; explicit save; version-specific approval; YOLO limits     | M1, M2, M3        |
+| Obvious activity, unread indicators, project/shared inbox, notifications                                             | M2, M4            |
+| Stop/Pause/Resume; background setting; menu-bar controls; explicit restart only                                      | M1, M2, M3        |
+| Worktree defaults, parent selection, dirty-change copy choice, shared-checkout writer coordination                   | M1, M2, M3        |
+| Runtime-owned worktree dependency preparation before Code runs and checks (approved 2026-09-15)                      | M2, M3            |
+| Final reviewed commit/merge, separate push, stale-parent invalidation, cleanup/reconciliation                        | M1, M2, M5        |
+| Context references with @, skills with / and +; previews/external editor; pinning and budget indicators              | M2, M3, M4        |
+| Concise context preparation, provenance, relevant retrieval, no silent loss of pinned requirements                   | M3, M4            |
+| All 14 workflows, flexible/prescribed steps, guided creation/refusal, repair/retry/time limits                       | M4                |
+| Share/export/import independent workflow and preset copies; explicit updates                                         | M4                |
+| Local and Linear backlog, list/board, linked conversations, outcome-driven advancement                               | M4                |
+| Local project/global lessons, separate approval settings, external retrieval and optional write-back                 | M4                |
+| Focused dot-separated YAML, UI management, external edit validation, run snapshots                                   | M3, M4            |
+| Global durable run files; JSONL/readable logs; volatile scratch cleanup; opt-in retention                            | M1, M4, M5        |
+| Checkpoint restoration, historical viewing without execution, explicit restart/rerun, external-effect reconciliation | M1, M4, M5        |
+| macOS distribution, no app account/cloud requirement, public-safe core                                               | M5                |
 
 ## Decisions needed at the point of use
 
-| Decision | Resolve before |
-| --- | --- |
-| Actual native-tool authorization boundary and owner-loss mechanism | M1 can claim a pass |
-| Electron/React/TypeScript versions and packaging, private IPC shape | M2 implementation |
-| Config directory, global data root, event/schema versions, transactional authority | Durable runtime promotion beyond the experiment |
-| Adapter capability contracts and influence of existing native configuration | M3 writing/delegation support |
-| Workflow contracts/default limits, board/status mappings, write-back reconciliation | Respective M4 feature implementation |
-| License, signing/notarization, update delivery, published privacy behavior | Public distribution |
+| Decision                                                                            | Resolve before                                  |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Actual native-tool authorization boundary and owner-loss mechanism                  | M1 can claim a pass                             |
+| Electron/React/TypeScript versions and packaging, private IPC shape                 | M2 implementation                               |
+| Config directory, global data root, event/schema versions, transactional authority  | Durable runtime promotion beyond the experiment |
+| Adapter capability contracts and influence of existing native configuration         | M3 writing/delegation support                   |
+| Workflow contracts/default limits, board/status mappings, write-back reconciliation | Respective M4 feature implementation            |
+| License, signing/notarization, update delivery, published privacy behavior          | Public distribution                             |
 
 Decisions should record the problem, considered alternatives, chosen behavior, evidence, and consequences in [architecture](architecture.md) or a focused linked decision document. Do not reopen approved user behavior to avoid an implementation difficulty.
 

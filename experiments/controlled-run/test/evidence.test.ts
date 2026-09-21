@@ -11,8 +11,13 @@ test('journal persists the inference limit through reopen', () => {
     const journal = new Journal(dir);
     for (let index = 0; index < 8; index++) journal.reserveTurn();
     assert.throws(() => new Journal(dir).reserveTurn(), /Turn budget exhausted/);
-    assert.equal(new Journal(dir).records.filter(event => event.type === 'turn.reserved').length, 8);
-  } finally { rmSync(dir, { recursive: true }); }
+    assert.equal(
+      new Journal(dir).records.filter((event) => event.type === 'turn.reserved').length,
+      8,
+    );
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
 });
 
 test('partial trailing record requires explicit recovery; interior corruption is fatal', () => {
@@ -24,7 +29,9 @@ test('partial trailing record requires explicit recovery; interior corruption is
     assert.equal(new Journal(dir, true).records.length, 1);
     writeFileSync(join(dir, 'events.jsonl'), 'not-json\n');
     assert.throws(() => new Journal(dir, true), /Corrupt journal/);
-  } finally { rmSync(dir, { recursive: true }); }
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
 });
 
 test('a bounded follow-up ceiling survives reopen and cannot be raised', () => {
@@ -36,5 +43,7 @@ test('a bounded follow-up ceiling survives reopen and cannot be raised', () => {
     const reopened = new Journal(dir);
     reopened.limitTurns(8);
     assert.throws(() => reopened.reserveTurn(), /Turn budget exhausted/);
-  } finally { rmSync(dir, { recursive: true }); }
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
 });
