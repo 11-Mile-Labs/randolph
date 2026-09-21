@@ -14,7 +14,7 @@
     "start": "electron ."
   },
   "dependencies": {
-    "@ai-sdk/react": "4.0.100",
+    "@ai-sdk/react": "4.0.109",
     "@randolph/harness-codex": "workspace:*",
     "@randolph/harness-grok": "workspace:*",
     "@randolph/runtime": "workspace:*",
