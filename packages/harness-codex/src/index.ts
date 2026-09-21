@@ -17,6 +17,8 @@ import { run as runCodexTurn } from './codex-turn.js';
 export type { CodexAdapterOptions } from './codex-shared.js';
 
 export class CodexAdapter implements HarnessAdapter {
+  /** run() re-reads the account before any turn, so a recent verification may be reused. */
+  readonly launchVerifiesAuthentication = true;
   private readonly host: CodexProcessHost;
   constructor(private readonly options: CodexAdapterOptions = {}) {
     this.host = new CodexProcessHost(options);

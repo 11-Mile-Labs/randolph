@@ -63,13 +63,20 @@ function fixture(t, options = {}) {
   git(projectRoot, ['commit', '-m', 'seed']);
   const initialHead = git(projectRoot, ['rev-parse', 'HEAD']);
   const calls = [];
+  const discoveries = [];
+  const state = { authenticated: true, installed: true };
   const adapter = {
-    async discover() {
+    launchVerifiesAuthentication: options.launchVerifiesAuthentication ?? true,
+    async installations() {
+      return state.installed ? [{ executable: '/fixture-codex' }] : [];
+    },
+    async discover(executable) {
+      discoveries.push(executable);
       return {
         executable: '/fixture-codex',
         version: 'fixture-1',
         available: true,
-        authenticated: true,
+        authenticated: state.authenticated,
         cleanupVerified: true,
         models: [
           { id: 'fixture-model', name: 'Fixture model', efforts: ['low'], defaultEffort: 'low' },
@@ -99,11 +106,10 @@ function fixture(t, options = {}) {
     },
   };
   const dataRoot = join(root, 'data');
-  const runtime = new Runtime(
-    adapter,
-    dataRoot,
-    options.localPush ? { push: { allowLocalTransport: true } } : {},
-  );
+  const runtime = new Runtime(adapter, dataRoot, {
+    ...(options.localPush ? { push: { allowLocalTransport: true } } : {}),
+    ...(options.clock ? { clock: options.clock } : {}),
+  });
   const project = runtime.addProject(projectRoot);
   const conversation = runtime.createConversation(project.id);
   let closed = false;
@@ -117,7 +123,18 @@ function fixture(t, options = {}) {
     await close();
     rmSync(root, { recursive: true, force: true });
   });
-  return { runtime, close, adapter, dataRoot, projectRoot, conversation, initialHead, calls };
+  return {
+    runtime,
+    close,
+    adapter,
+    dataRoot,
+    projectRoot,
+    conversation,
+    initialHead,
+    calls,
+    discoveries,
+    state,
+  };
 }
 
 test('Code mode requires native capability and runs only in the managed conversation worktree', async (t) => {
@@ -585,4 +602,95 @@ test('raw unknown push cleanup remains quarantined when the post-result ownershi
       .some((lease) => lease.state === 'cleanup-unconfirmed'),
     true,
   );
+});
+
+test('a send right after switching to code mode reuses that verification instead of discovering again', async (t) => {
+  const f = fixture(t);
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  await f.runtime.send({ conversationId: f.conversation.id, text: 'Update the value.' });
+  await settled(f.runtime);
+  assert.equal(f.discoveries.length, 1);
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].executionMode, 'code');
+});
+
+test('a code-mode verification is reused for a single send', async (t) => {
+  const f = fixture(t);
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  await f.runtime.send({ conversationId: f.conversation.id, text: 'First update.' });
+  await settled(f.runtime);
+  const review = f.runtime.prepareReview(f.conversation.id);
+  await f.runtime.verifyReview(review.id);
+  await f.runtime.approveReview({ reviewId: review.id, message: 'Reviewed first update' });
+  const before = f.discoveries.length;
+  await f.runtime.send({ conversationId: f.conversation.id, text: 'Second update.' });
+  await settled(f.runtime);
+  assert.equal(f.discoveries.length, before + 1);
+  assert.equal(f.calls.at(-1).executionMode, 'code');
+});
+
+test('project defaults saved after switching to code mode force a fresh discovery at dispatch', async (t) => {
+  const f = fixture(t);
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  await f.runtime.saveProjectDefaults({
+    projectId: f.conversation.projectId,
+    defaults: { harness: 'codex', model: 'fixture-model', effort: 'low' },
+    expectedRevision: null,
+  });
+  await f.runtime.send({ conversationId: f.conversation.id, text: 'Update the value.' });
+  await settled(f.runtime);
+  assert.equal(f.discoveries.length, 3);
+  assert.equal(f.calls.length, 1);
+});
+
+test('a code-mode verification older than the reuse window is discovered again at dispatch', async (t) => {
+  let time = 1_700_000_000_000;
+  const f = fixture(t, { clock: () => time });
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  time += 31_000;
+  await f.runtime.send({ conversationId: f.conversation.id, text: 'Update the value.' });
+  await settled(f.runtime);
+  assert.equal(f.discoveries.length, 2);
+  assert.equal(f.calls.length, 1);
+});
+
+test('a harness without launch authentication checks is discovered again at dispatch so a sign-out is caught', async (t) => {
+  const f = fixture(t, { launchVerifiesAuthentication: false });
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  f.state.authenticated = false;
+  await assert.rejects(
+    f.runtime.send({ conversationId: f.conversation.id, text: 'Update the value.' }),
+    /Sign into the installed codex CLI first\./,
+  );
+  assert.equal(f.discoveries.length, 2);
+  assert.equal(f.calls.length, 0);
+});
+
+test('a CLI that disappears after switching to code mode is rejected at dispatch without a pinned executable', async (t) => {
+  const f = fixture(t);
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  f.state.installed = false;
+  await assert.rejects(
+    f.runtime.send({ conversationId: f.conversation.id, text: 'Update the value.' }),
+    /no longer discovered/,
+  );
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.runtime.snapshot().runs.length, 0);
+});
+
+test('project CLI permissions revoked after switching to code mode block the next send', async (t) => {
+  const f = fixture(t);
+  await f.runtime.setExecutionMode({ conversationId: f.conversation.id, executionMode: 'code' });
+  await f.runtime.saveProjectDefaults({
+    projectId: f.conversation.projectId,
+    defaults: { harness: 'codex', model: 'fixture-model', effort: 'low' },
+    expectedRevision: null,
+    enabledRoutes: [],
+  });
+  await assert.rejects(
+    f.runtime.send({ conversationId: f.conversation.id, text: 'Update the value.' }),
+    /not enabled for this project/,
+  );
+  assert.equal(f.discoveries.length, 3);
+  assert.equal(f.calls.length, 0);
 });

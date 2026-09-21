@@ -25,7 +25,13 @@ import type {
   SaveProjectDefaultsInput,
 } from './contracts.js';
 
+/** How long a conversation's code-mode verification may stand in for discovery at dispatch. */
+const CODE_MODE_VERIFICATION_REUSE_MS = 30_000;
+
+type CodeModeVerification = { key: string; info: HarnessInfo; expiresAt: number };
+
 export class RuntimeHarness {
+  private readonly codeModeVerifications = new Map<string, CodeModeVerification>();
   constructor(
     private readonly adapters: Partial<Record<HarnessId, HarnessAdapter>>,
     private readonly nativeAdmission: NativeAdmission,
@@ -37,6 +43,7 @@ export class RuntimeHarness {
     private readonly changed: () => void,
     private readonly project: (id: string) => Project,
     private readonly conversation: (id: string) => Conversation,
+    private readonly clock: () => number = () => Date.now(),
   ) {}
 
   adapterFor(harness: HarnessId): HarnessAdapter {
@@ -81,7 +88,7 @@ export class RuntimeHarness {
     }));
   }
 
-  async inspectExecutable(harness: HarnessId, executable?: string | null): Promise<HarnessInfo> {
+  private async assertInstalled(harness: HarnessId, executable?: string | null): Promise<void> {
     if (
       executable &&
       !(await this.installations(harness)).some((item) => item.executable === executable)
@@ -89,6 +96,10 @@ export class RuntimeHarness {
       throw new Error(
         'The selected CLI is no longer discovered for this harness. Choose an installed CLI in Project settings.',
       );
+  }
+
+  async inspectExecutable(harness: HarnessId, executable?: string | null): Promise<HarnessInfo> {
+    await this.assertInstalled(harness, executable);
     const info = await this.nativeAdmission
       .adapter(harness, this.adapterFor(harness), {
         owner: { kind: 'app-discovery', id: randomUUID() },
@@ -124,6 +135,47 @@ export class RuntimeHarness {
     }
   }
 
+  private verificationKey(
+    projectId: string,
+    harness: HarnessId,
+    executable: string | null | undefined,
+    settingsRevision: string | null | undefined,
+  ): string {
+    return [projectId, harness, executable ?? '', settingsRevision ?? ''].join('\0');
+  }
+
+  /**
+   * Discovery for an ordinary dispatch. A conversation that just switched to code mode was
+   * verified against the same project, harness, executable, and settings revision moments ago;
+   * that verification is consumed once here instead of spawning the CLI again. Everything
+   * consequential is still checked live at dispatch or launch: enabled routes and the settings
+   * revision from a fresh read, the resolved executable's presence among the adapter's
+   * installations here, and its version and (for adapters that promise it) authentication inside
+   * the adapter before any model turn. Adapters that cannot enumerate installations always
+   * discover afresh.
+   */
+  async discoverForDispatch(
+    conversation: Conversation,
+    harness: HarnessId,
+    executable: string | null | undefined,
+    settingsRevision: string | null | undefined,
+  ): Promise<HarnessInfo> {
+    const verified = this.codeModeVerifications.get(conversation.id);
+    this.codeModeVerifications.delete(conversation.id);
+    const key = this.verificationKey(conversation.projectId, harness, executable, settingsRevision);
+    const resolved = verified?.info.executable ?? executable;
+    if (
+      verified?.key === key &&
+      verified.expiresAt > this.clock() &&
+      resolved &&
+      this.adapterFor(harness).installations
+    ) {
+      await this.assertInstalled(harness, resolved);
+      return verified.info;
+    }
+    return this.inspectExecutable(harness, executable);
+  }
+
   async setExecutionMode(input: ConversationModeInput): Promise<Conversation> {
     assertOpen(this.isAccepting());
     if (input.executionMode !== 'read-only' && input.executionMode !== 'code')
@@ -133,6 +185,7 @@ export class RuntimeHarness {
       input.executionMode !== 'read-only'
     )
       throw new Error('Project setup is read-only.');
+    let verified: CodeModeVerification | undefined;
     if (input.executionMode === 'code') {
       const conversation = this.conversation(input.conversationId);
       const project = this.project(conversation.projectId);
@@ -140,14 +193,19 @@ export class RuntimeHarness {
       if (settings.error) throw new Error(settings.error);
       const selection = this.selectionFor(conversation) ?? settings.defaults;
       const harness = selection?.harness ?? 'codex';
-      const info = await this.inspectExecutable(
-        harness,
-        settings.defaults?.harness === harness ? settings.defaults.executable : undefined,
-      );
+      const executable =
+        settings.defaults?.harness === harness ? settings.defaults.executable : undefined;
+      const info = await this.inspectExecutable(harness, executable);
       assertOpen(this.isAccepting());
       assertHarnessRoute(settings, harness, info.executable);
       if (!info.authenticated || !info.executionModes?.includes('code'))
         throw new Error('Code mode is not verified for this installed harness.');
+      if (this.adapterFor(harness).launchVerifiesAuthentication)
+        verified = {
+          key: this.verificationKey(project.id, harness, executable, settings.revision),
+          info,
+          expiresAt: this.clock() + CODE_MODE_VERIFICATION_REUSE_MS,
+        };
     }
     if (this.isBusy(input.conversationId))
       throw new Error('Wait for active work to finish before changing execution mode.');
@@ -157,6 +215,8 @@ export class RuntimeHarness {
       updatedAt: now(),
     };
     this.store.putConversation(conversation);
+    this.codeModeVerifications.delete(conversation.id);
+    if (verified) this.codeModeVerifications.set(conversation.id, verified);
     this.changed();
     return conversation;
   }

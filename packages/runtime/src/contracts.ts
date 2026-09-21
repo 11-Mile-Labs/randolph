@@ -292,6 +292,11 @@ export type AdapterCommandResult = {
   error?: string;
 };
 export interface HarnessAdapter {
+  /**
+   * True when run() re-verifies live authentication before any model turn. Only then may a
+   * conversation's recent code-mode verification stand in for discovery at its next dispatch.
+   */
+  readonly launchVerifiesAuthentication?: boolean;
   discover(executable?: string, signal?: AbortSignal): Promise<HarnessInfo>;
   /** Filesystem-only candidate enumeration. Native probes belong to cancellable discover. */
   installations?(): Promise<HarnessInstallation[]>;
