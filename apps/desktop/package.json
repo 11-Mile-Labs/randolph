@@ -18,7 +18,7 @@
     "@randolph/harness-codex": "workspace:*",
     "@randolph/harness-grok": "workspace:*",
     "@randolph/runtime": "workspace:*",
-    "ai": "7.0.97",
+    "ai": "7.0.106",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
