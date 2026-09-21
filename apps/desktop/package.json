@@ -6,8 +6,8 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "lint": "oxlint --deny-warnings src test",
-    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --deny-warnings src test playwright.config.ts",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.playwright.json",
     "build": "node build.mjs",
     "test": "node --test test/*.test.mjs",
     "test:e2e": "playwright test",
