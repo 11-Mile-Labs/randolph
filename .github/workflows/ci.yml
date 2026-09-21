@@ -65,4 +65,5 @@ jobs:
       - run: pnpm build
       - name: Desktop acceptance tests
         # Run independently of the long runtime suite and stop at the first failure.
-        run: pnpm --filter @randolph/desktop exec playwright test --timeout=90000 --max-failures=1
+        # Test and assertion budgets live in apps/desktop/playwright.config.ts.
+        run: pnpm --filter @randolph/desktop exec playwright test --max-failures=1

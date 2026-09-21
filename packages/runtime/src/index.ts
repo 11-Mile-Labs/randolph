@@ -113,7 +113,11 @@ export class Runtime {
   constructor(
     adapter: HarnessAdapter | Partial<Record<HarnessId, HarnessAdapter>>,
     dataRoot: string,
-    options: { push?: PushOptions; executionOrigin?: () => ExecutionOrigin | undefined } = {},
+    options: {
+      push?: PushOptions;
+      executionOrigin?: () => ExecutionOrigin | undefined;
+      clock?: () => number;
+    } = {},
   ) {
     this.executionOrigin = (options.executionOrigin ?? readExecutionOrigin)();
     this.adapters = 'discover' in adapter ? { codex: adapter } : adapter;
@@ -148,6 +152,7 @@ export class Runtime {
       () => this.changed(),
       (id) => this.project(id),
       (id) => this.conversation(id),
+      options.clock,
     );
     this.delegation = new DelegationCommands(
       this.store,
