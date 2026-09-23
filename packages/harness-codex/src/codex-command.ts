@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AdapterCommand, AdapterCommandResult } from '@randolph/runtime/contracts';
-import { object, VERIFIED_CODE_VERSION } from './codex-shared.js';
+import { object, meetsCodeModeMinVersion } from './codex-shared.js';
 import { RpcClient } from './codex-rpc.js';
 import {
   environment,
@@ -92,10 +92,8 @@ export async function runCommand(
       throw new Error(
         'The selected CLI version changed after this run. Start fresh work before verification.',
       );
-    if (!VERIFIED_CODE_VERSION.test(version))
-      throw new Error(
-        'Native verification requires the verified Codex CLI 0.149.0 or 0.154.0 version.',
-      );
+    if (!meetsCodeModeMinVersion(version))
+      throw new Error('Native verification requires Codex CLI 0.149.0 or newer.');
     assertIdentity();
     child = host.launch(input.workspace, true);
     client = new RpcClient(child, host.timeout, (message) => {

@@ -2,7 +2,11 @@ import { existsSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { HarnessInfo, HarnessInstallation, HarnessModel } from '@randolph/runtime/contracts';
-import { object, VERIFIED_CODE_VERSION } from './codex-shared.js';
+import {
+  object,
+  meetsCodeModeMinVersion,
+  meetsApplicationToolsMinVersion,
+} from './codex-shared.js';
 import { RpcClient } from './codex-rpc.js';
 import {
   environment,
@@ -127,11 +131,11 @@ export async function discover(
       } while (cursor);
       info = {
         ...info,
-        applicationTools: version === 'codex-cli 0.154.0',
-        commandLifecycle: VERIFIED_CODE_VERSION.test(version),
+        applicationTools: meetsApplicationToolsMinVersion(version),
+        commandLifecycle: meetsCodeModeMinVersion(version),
         authenticated: true,
         models,
-        executionModes: VERIFIED_CODE_VERSION.test(version) ? ['read-only', 'code'] : ['read-only'],
+        executionModes: meetsCodeModeMinVersion(version) ? ['read-only', 'code'] : ['read-only'],
       };
     }
   } catch (error) {

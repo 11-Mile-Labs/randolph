@@ -616,20 +616,29 @@ for (const boundary of ['account/read', 'thread/start']) {
   });
 }
 
-test('code capability is advertised only for authenticated verified native version', async () => {
-  for (const [version, accountType, expected] of [
-    ['codex-cli 0.149.0', 'chatgpt', ['read-only', 'code']],
-    ['codex-cli 0.154.0', 'chatgpt', ['read-only', 'code']],
-    ['codex-cli 0.154.0-alpha.6.2', 'chatgpt', ['read-only']],
-    ['codex-cli 0.150.0', 'chatgpt', ['read-only']],
-    ['codex-cli 0.149.0-dev', 'chatgpt', ['read-only']],
-    ['codex-cli 0.149.0', 'apiKey', []],
+test('code and application-tools capability follow a minimum-version comparison, not an exact match', async () => {
+  for (const [version, accountType, expected, applicationTools] of [
+    ['codex-cli 0.148.9', 'chatgpt', ['read-only'], false],
+    ['codex-cli 0.149.0', 'chatgpt', ['read-only', 'code'], false],
+    ['codex-cli 0.150.0', 'chatgpt', ['read-only', 'code'], false],
+    ['codex-cli 0.153.9', 'chatgpt', ['read-only', 'code'], false],
+    ['codex-cli 0.154.0', 'chatgpt', ['read-only', 'code'], true],
+    ['codex-cli 0.155.0', 'chatgpt', ['read-only', 'code'], true],
+    ['codex-cli 0.156.1', 'chatgpt', ['read-only', 'code'], true],
+    ['codex-cli 1.0.0', 'chatgpt', ['read-only', 'code'], true],
+    ['codex-cli 0.154.0-alpha.6.2', 'chatgpt', ['read-only'], false],
+    ['codex-cli 0.148.0', 'chatgpt', ['read-only'], false],
+    ['codex-cli 0.149.0-dev', 'chatgpt', ['read-only'], false],
+    ['codex-cli 0.157.0-alpha.1', 'chatgpt', ['read-only'], false],
+    ['codex-cli fixture', 'chatgpt', ['read-only'], false],
+    ['codex-cli 0.149.0', 'apiKey', [], false],
   ]) {
     const info = await adapterFor([fakeChild({ accountType })], {
       execFile: () => version,
     }).discover();
     assert.deepEqual(info.executionModes ?? [], expected);
     assert.equal(info.commandLifecycle, accountType === 'chatgpt' && expected.includes('code'));
+    assert.equal(info.applicationTools ?? false, accountType === 'chatgpt' && applicationTools);
   }
 });
 
@@ -688,14 +697,39 @@ test('code mode fails before turn dispatch for unverified version, missing or br
   }
   const child = fakeChild({ threadResponse });
   await assert.rejects(
-    adapterFor([child], { execFile: () => 'codex-cli 0.150.0' }).run({
+    adapterFor([child], { execFile: () => 'codex-cli 0.148.0' }).run({
       ...runInput(new AbortController().signal),
       workspace,
       executionMode: 'code',
     }),
-    /version|verified/i,
+    /version|verified|Codex CLI/i,
   );
   assert.equal(child.methods.length, 0);
+});
+
+test('code turn gate accepts any version at or above 0.149.0 and rejects prereleases and garbage', async (t) => {
+  const { workspace, policy, threadResponse } = codeFixture(t);
+  for (const version of ['codex-cli 0.153.9', 'codex-cli 0.156.1', 'codex-cli 1.0.0']) {
+    const child = fakeChild({ threadResponse: { ...threadResponse, sandbox: policy } });
+    const result = await adapterFor([child], { execFile: () => version }).run({
+      ...runInput(new AbortController().signal),
+      workspace,
+      executionMode: 'code',
+    });
+    assert.equal(result.status, 'completed');
+  }
+  for (const version of ['codex-cli 0.157.0-alpha.1', 'codex-cli fixture', 'codex-cli 0.148.9']) {
+    const child = fakeChild({ threadResponse });
+    await assert.rejects(
+      adapterFor([child], { execFile: () => version }).run({
+        ...runInput(new AbortController().signal),
+        workspace,
+        executionMode: 'code',
+      }),
+      /Codex CLI 0\.149\.0 or newer/,
+    );
+    assert.equal(child.methods.length, 0);
+  }
 });
 
 test('code mode declines escalations and captures bounded native verification and change evidence', async (t) => {
@@ -1010,6 +1044,32 @@ test('runCommand rejects incompatible authentication/version and reports bounded
   assert.ok(result.output.length <= 65_536);
 });
 
+test('runCommand native verification gate uses a minimum-version comparison', async (t) => {
+  const { workspace, threadResponse } = codeFixture(t);
+  for (const version of ['codex-cli 0.153.9', 'codex-cli 0.156.1', 'codex-cli 1.0.0']) {
+    const child = fakeChild({ threadResponse });
+    const result = await adapterFor([child], { execFile: () => version }).runCommand({
+      workspace,
+      command: ['/usr/bin/true'],
+      signal: new AbortController().signal,
+      onOutput: () => {},
+    });
+    assert.equal(result.exitCode, 0);
+  }
+  for (const version of ['codex-cli 0.148.9', 'codex-cli 0.157.0-alpha.1', 'codex-cli fixture']) {
+    const child = fakeChild({ threadResponse });
+    const result = await adapterFor([child], { execFile: () => version }).runCommand({
+      workspace,
+      command: ['/usr/bin/true'],
+      signal: new AbortController().signal,
+      onOutput: () => {},
+    });
+    assert.equal(result.exitCode, null);
+    assert.match(result.error, /Codex CLI 0\.149\.0 or newer/);
+    assert.equal(child.methods.includes('command/exec'), false);
+  }
+});
+
 test('runCommand cancellation terminates the native command and never reports success', async (t) => {
   const { workspace, threadResponse } = codeFixture(t);
   const child = fakeChild({ threadResponse, commandDelay: 100 });
@@ -1321,6 +1381,42 @@ test('application tools stay absent by default, require their verified version, 
     /0.154.0|application.tool/i,
   );
   assert.equal(child.requests.length, 0);
+});
+
+test('application tools gate keeps its own higher minimum, independent of the code gate', async () => {
+  for (const version of ['codex-cli 0.153.9', 'codex-cli 0.149.0']) {
+    const child = fakeChild();
+    await assert.rejects(
+      adapterFor([child], { execFile: () => version }).run({
+        ...runInput(new AbortController().signal),
+        applicationTools: {
+          definitions: [appToolDefinition],
+          onRequest() {
+            throw new Error('must not run');
+          },
+        },
+      }),
+      /Application tools require Codex CLI 0\.154\.0 or newer/,
+    );
+    assert.equal(child.requests.length, 0);
+  }
+  for (const version of ['codex-cli 0.156.1', 'codex-cli 1.0.0']) {
+    const child = fakeChild({ notifications: [appCall()] });
+    const result = await adapterFor([child], { execFile: () => version }).run({
+      ...runInput(new AbortController().signal),
+      applicationTools: {
+        definitions: [appToolDefinition],
+        onRequest() {
+          return { success: true, text: 'ok' };
+        },
+      },
+    });
+    assert.equal(result.status, 'completed');
+    assert.deepEqual(
+      child.requests.find((request) => request.method === 'thread/start').params.dynamicTools,
+      [{ type: 'function', ...appToolDefinition }],
+    );
+  }
 });
 
 test('application requests cannot mutate after cancellation or a completed turn', async () => {
