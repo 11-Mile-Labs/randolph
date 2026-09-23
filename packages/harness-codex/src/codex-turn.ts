@@ -7,7 +7,13 @@ import {
 import { setTimeout as delay } from 'node:timers/promises';
 import { AdapterRunFailure } from '@randolph/runtime/contracts';
 import type { AdapterRun } from '@randolph/runtime/contracts';
-import { bounded, object, VERIFIED_CODE_VERSION, type Json } from './codex-shared.js';
+import {
+  bounded,
+  object,
+  meetsApplicationToolsMinVersion,
+  meetsCodeModeMinVersion,
+  type Json,
+} from './codex-shared.js';
 import { RpcClient } from './codex-rpc.js';
 import {
   environment,
@@ -56,11 +62,10 @@ export async function run(
         env: environment(),
       })
       .trim();
-    if (!VERIFIED_CODE_VERSION.test(version))
-      throw new AdapterRunFailure(
-        'Code execution requires the verified Codex CLI 0.149.0 or 0.154.0 version.',
-        { dispatch: 'not-invoked' },
-      );
+    if (!meetsCodeModeMinVersion(version))
+      throw new AdapterRunFailure('Code execution requires Codex CLI 0.149.0 or newer.', {
+        dispatch: 'not-invoked',
+      });
   }
   const dynamicTools = input.applicationTools
     ? prepareApplicationTools(input.applicationTools)
@@ -74,11 +79,10 @@ export async function run(
         env: environment(),
       })
       .trim();
-    if (version !== 'codex-cli 0.154.0')
-      throw new AdapterRunFailure(
-        'Application tools require the verified Codex CLI 0.154.0 interface.',
-        { dispatch: 'not-invoked' },
-      );
+    if (!meetsApplicationToolsMinVersion(version))
+      throw new AdapterRunFailure('Application tools require Codex CLI 0.154.0 or newer.', {
+        dispatch: 'not-invoked',
+      });
   }
   const identity = input.workspaceIdentity ?? workspaceIdentity(input.workspace);
   try {
